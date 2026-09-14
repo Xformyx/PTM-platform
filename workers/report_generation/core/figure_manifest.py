@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ptm_shared.de_novo_representation import conventional_quantitation_eligibility, is_de_novo_representation
+from ptm_shared.evidence_record_contract import typed_record
 from report_generation.core.measured_feature_cards import (
     build_quantitation_comparison_cards,
     reader_feature_id,
@@ -374,6 +375,7 @@ def _select_cluster_figures(state: Mapping[str, Any], *, minimum: int = 3, maxim
             "pattern": pattern,
             "caption": str(figure.get("caption") or ""),
             "representative_members": sorted(set(members))[:3],
+            "n_members": len(members),
         })
     candidates.sort(key=lambda item: (item["pattern"], item["cluster_id"]))
     selected: list[dict] = []
@@ -903,6 +905,20 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
             selected_profile_count=len(selected_clusters),
             selected_cluster_count=len(selected_clusters),
             selected_cluster_ids=[str(item.get("cluster_id")) for item in selected_clusters],
+            quantitative_bindings=[
+                typed_record(
+                    record_type="cluster_profile",
+                    entity_id=f"temporal-profile-{index}",
+                    metric_id="n_members",
+                    value=int(item.get("n_members") or len(item.get("representative_members") or [])),
+                    unit="feature_count",
+                    estimator="temporal_profile_cluster.v1",
+                    support_status="computed",
+                    evidence_id=f"cluster.profile.temporal-profile-{index}",
+                    source={"pattern": item.get("pattern")},
+                )
+                for index, item in enumerate(selected_clusters, 1)
+            ],
             representative_member_labels=representative_members,
             labels_readable=profile_readability["labels_readable"],
             readability_audit=profile_readability,
@@ -930,7 +946,11 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
                 "data_scope": "observed within-cluster pair transitions normalized by evaluable pair-window comparisons in each adjacent sampled interval",
                 "data_unit_scope": "eligible within-cluster feature pairs",
                 "visual_encoding": "separate retained, gain and loss rates with observed integer numerator/denominator; the remainder comprises other or no recorded transitions",
-                "interpretation_boundary": "Concordance Change is descriptive; persistence is distinct from change, and rates do not establish common regulation, causal order, kinase switching, or pathway rewiring",
+                "interpretation_boundary": (
+                    "Concordance Change is descriptive; persistence is distinct from change, and rates do not establish "
+                    "common regulation, causal order, kinase switching, or pathway rewiring. Kinase signed-interval "
+                    "direction concordance is a separate substrate-anchor comparison reported in Results, not these pair-window rates"
+                ),
             },
             selection_rule="all supplied intervals for selected clusters, sorted by elapsed time",
             quantitative_bindings=concordance_bindings(state, selected_ids),

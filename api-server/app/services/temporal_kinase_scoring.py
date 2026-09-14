@@ -1643,6 +1643,10 @@ def compute_weighted_kinase_scores(
     uncertainty_bootstrap_repeats: int = 0,
     uncertainty_loto_enabled: bool = False,
     uncertainty_seed: int = 20260826,
+    enable_trajectory_evidence: bool = True,
+    ptm_identities: dict | None = None,
+    ptm_is_denovo: dict | set | None = None,
+    ptm_representation: dict | None = None,
 ) -> dict[str, dict]:
     """Compute per-kinase per-condition activity scores with TMM-weighted contributions.
 
@@ -1973,6 +1977,18 @@ def compute_weighted_kinase_scores(
                 ),
             },
         }
+
+    if enable_trajectory_evidence:
+        from ptm_shared.kinase_trajectory_evidence import attach_trajectory_evidence
+        attach_trajectory_evidence(
+            results,
+            kinase_modules=kinase_modules,
+            ptm_timeseries=ptm_timeseries,
+            conditions=conditions_sorted,
+            identities=ptm_identities,
+            denovo_keys=ptm_is_denovo,
+            representation=ptm_representation,
+        )
 
     _log.info(
         f"[TMM] Weighted scores computed for {len(results)} kinases "

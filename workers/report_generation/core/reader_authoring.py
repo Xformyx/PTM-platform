@@ -12,6 +12,17 @@ from __future__ import annotations
 import json
 import re
 from ptm_shared.feature_identity import audit_feature_identities
+from ptm_shared.evidence_record_contract import typed_record
+from .companion_evidence import (
+    atlas_cards,
+    cluster_profile_cards,
+    dual_track_cards,
+    module_interval_records,
+    multiform_cards,
+    paired_fraction_cards,
+    prepare_companion_state,
+    typed_concordance_records,
+)
 from .research_questions import build_question_map, audit_question_coverage, unresolved_question_paragraphs
 
 from typing import Any, Iterable, Mapping
@@ -52,7 +63,7 @@ VALID_CLAIM_TIERS = {"O1", "O2", "C1", "L1", "H1", "D1"}
 # the same compact diagnostics.
 SECTION_STORY_CONTRACT = {
     "abstract": {
-        "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "protein_context", "pathway_context", "candidate_discovery"),
         "role": "Summarize the study frame, the most informative observed pattern, its bounded significance, and the discriminating next question.",
         "sequence": "study frame → measured landscape → selected observation → bounded candidate context → next question",
     },
@@ -62,12 +73,12 @@ SECTION_STORY_CONTRACT = {
         "sequence": "study problem → measurement rationale → cited context → unresolved question → present study objective",
     },
     "results": {
-        "categories": ("quantitative_landscape", "quantitative_provenance", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "categories": ("quantitative_landscape", "quantitative_provenance", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "protein_context", "pathway_context", "candidate_discovery"),
         "role": "Report measured scope before selected temporal observations, protein-linked context, and any eligible candidate context.",
         "sequence": "coverage → selected temporal observation → protein-linked quantitative context → candidate context → observation boundary",
     },
     "discussion": {
-        "categories": ("measured_feature_observation", "quantitation_comparison", "quantitative_provenance", "temporal_profile", "kinase_context", "candidate_discovery", "traceable_literature"),
+        "categories": ("measured_feature_observation", "quantitation_comparison", "quantitative_provenance", "temporal_profile", "kinase_context", "protein_context", "pathway_context", "candidate_discovery", "traceable_literature"),
         "role": "Interpret current observations in the selected literature context, state the alternative explanation that remains, and identify the next discriminating experiment.",
         "sequence": "principal observation → cited comparison → bounded interpretation → remaining alternative → discriminating validation",
     },
@@ -77,7 +88,7 @@ SECTION_STORY_CONTRACT = {
         "sequence": "study design → normalization and replicate unit → explicit contrast equations → Welch/BH uncertainty → clustering and interval concordance denominator → missingness/de-novo policy → reporting boundary",
     },
     "conclusion": {
-        "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "candidate_discovery"),
+        "categories": ("study_frame", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "protein_context", "pathway_context", "candidate_discovery"),
         "role": "Close the same study question in no more than two short paragraphs with the observed advance, the bounded interpretation, and one testable next step.",
         "sequence": "study question → observed advance → bounded interpretation → next validation",
     },
@@ -286,6 +297,7 @@ def _record_card(record: Mapping[str, Any], index: int) -> dict | None:
         "allowed_verbs": ["observed", "summarized", "was consistent with"],
         "forbidden_interpretations": ["caused", "activated", "directly regulates"],
         "counterevidence": _clean_text(record.get("counterevidence")),
+        "value_records": module_interval_records(record, evidence_id),
     }
 
 
@@ -455,22 +467,6 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
     ]
     if not scores:
         return []
-    computed = [
-        row for row in scores
-        if str(_as_mapping(row.get("footprint_diagnostics")).get("status") or "not_evaluable") == "computed"
-    ]
-    if not computed:
-        return [{
-            "card_id": "kinase.context_availability",
-            "category": "kinase_context",
-            "reader_summary": "The current data did not support a stable evaluation of kinase footprint candidate context.",
-            "claim_tier": "O1",
-            "evidence_ids": ["kinase.context_availability"],
-            "citation_ids": [],
-            "allowed_verbs": ["did not support", "was not evaluated"],
-            "forbidden_interpretations": ["kinase absence", "kinase inactivity", "kinase rank"],
-            "counterevidence": "A non-evaluable footprint is not evidence that a kinase is absent or inactive.",
-        }]
 
     def sort_key(row: Mapping[str, Any]) -> tuple[float, str]:
         try:
@@ -479,37 +475,285 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
             magnitude = 0.0
         return (-magnitude, str(row.get("canonical") or row.get("kinase") or ""))
 
+    computed = [
+        row for row in scores
+        if str(_as_mapping(row.get("footprint_diagnostics")).get("status") or "not_evaluable") == "computed"
+    ]
+    ranked = sorted(scores, key=sort_key)
+    pool = computed or [
+        row for row in ranked
+        if row.get("peak_score") is not None or _as_mapping(row.get("trajectory_evidence"))
+    ]
     cards: list[dict] = []
+    if not computed:
+        cards.append({
+            "card_id": "kinase.context_availability",
+            "category": "kinase_context",
+            "reader_summary": (
+                "Independent footprint diagnostics were not evaluable on this stored heatmap. "
+                "Stored candidate rankings and any signed interval comparisons remain observational context only."
+            ),
+            "claim_tier": "O1",
+            "evidence_ids": ["kinase.context_availability"],
+            "citation_ids": [],
+            "allowed_verbs": ["did not support", "was not independently evaluated"],
+            "forbidden_interpretations": ["kinase absence", "kinase inactivity", "kinase rank"],
+            "counterevidence": "A non-evaluable footprint is not evidence that a kinase is absent or inactive.",
+        })
+    if not pool:
+        return cards
+
+    grouped: dict[tuple, list[dict]] = {}
+    for row in sorted(pool, key=sort_key):
+        trajectory = _as_mapping(row.get("trajectory_evidence"))
+        try:
+            peak = round(float(row.get("peak_score") or 0.0), 4)
+        except (TypeError, ValueError):
+            peak = 0.0
+        fingerprint = (
+            peak,
+            str(row.get("peak_condition") or ""),
+            trajectory.get("support_status"),
+            trajectory.get("median_direction_concordance_fraction"),
+            trajectory.get("median_signed_profile_correlation"),
+            trajectory.get("n_targets_evaluable"),
+        )
+        grouped.setdefault(fingerprint, []).append(row)
+
     emitted: set[str] = set()
-    for row in sorted(computed, key=sort_key):
+    candidate_index = 0
+    for rows in grouped.values():
+        row = rows[0]
+        names: list[str] = []
+        for item in rows:
+            equivalence = _as_mapping(item.get("footprint_equivalence"))
+            members = [str(member).strip() for member in equivalence.get("members") or [] if str(member).strip()]
+            canonical = str(item.get("canonical") or item.get("kinase") or "").strip()
+            names.extend(members or ([canonical] if canonical else []))
+        names = list(dict.fromkeys(names))
+        candidate = names[0] if names else str(row.get("canonical") or row.get("kinase") or "candidate kinase").strip()
         equivalence = _as_mapping(row.get("footprint_equivalence"))
-        members = [str(member).strip() for member in equivalence.get("members") or [] if str(member).strip()]
-        candidate = str(row.get("canonical") or row.get("kinase") or "candidate kinase").strip()
-        group_id = str(equivalence.get("equivalence_group_id") or candidate).strip()
+        group_id = str(equivalence.get("equivalence_group_id") or " / ".join(names) or candidate).strip()
         if group_id in emitted:
             continue
         emitted.add(group_id)
-        family_label = " / ".join(members) + " family" if len(members) >= 2 else f"{candidate} family"
+        family_label = " / ".join(names) + " family" if len(names) >= 2 else f"{candidate} family"
+        footprint_status = str(_as_mapping(row.get("footprint_diagnostics")).get("status") or "not_evaluable")
+        trajectory = _as_mapping(row.get("trajectory_evidence"))
+        trajectory_status = str(trajectory.get("support_status") or "legacy_unavailable")
+        concordance = trajectory.get("median_direction_concordance_fraction")
+        correlation = trajectory.get("median_signed_profile_correlation")
+        n_targets = trajectory.get("n_targets_evaluable")
+        if trajectory_status == "computed" and concordance is not None:
+            correlation_clause = (
+                f" and signed profile correlation {float(correlation):.2f}"
+                if correlation is not None else ""
+            )
+            target_clause = f" across {int(n_targets)} evaluable substrate targets" if n_targets else ""
+            trajectory_clause = (
+                f"{family_label} had direction concordance fraction {float(concordance):.2f}"
+                f"{correlation_clause}{target_clause}. "
+                "This signed interval comparison is not a catalytic rate."
+            )
+        elif trajectory and trajectory_status != "legacy_unavailable":
+            trajectory_clause = (
+                f" {family_label} signed interval comparison was {trajectory_status.replace('_', ' ')} "
+                f"({trajectory.get('unavailable_reason') or 'insufficient shared observed intervals'})."
+            )
+        else:
+            trajectory_clause = f" {family_label} signed interval comparison was not available on this stored heatmap."
+        if footprint_status == "computed":
+            footprint_clause = f"A contribution-weighted {family_label} footprint provided kinase-family candidate context across the sampled conditions. "
+        else:
+            footprint_clause = (
+                f"A stored {family_label} ranking provided kinase-family candidate context. "
+                "Independent footprint diagnostics were not evaluable on this stored heatmap. "
+            )
+        value_records = [
+            typed_record(
+                record_type="kinase_footprint",
+                entity_id=candidate,
+                metric_id="peak_score",
+                value=row.get("peak_score"),
+                unit="weighted_signed_sum",
+                condition=str(row.get("peak_condition") or ""),
+                estimator="observed_tmm.v1",
+                support_status="computed" if footprint_status == "computed" else "not_evaluable",
+                evidence_id=f"kinase.footprint.{group_id}",
+                source={"schema_version": "observed_tmm.v1", "footprint_status": footprint_status},
+            )
+        ]
+        if concordance is not None:
+            value_records.append(typed_record(
+                record_type="kinase_trajectory",
+                entity_id=candidate,
+                metric_id="direction_concordance_fraction",
+                value=round(float(concordance), 4),
+                unit="fraction",
+                numerator=None,
+                denominator=None,
+                estimator="kinase_trajectory_evidence.v1",
+                support_status=trajectory_status,
+                evidence_id=f"kinase.trajectory.{group_id}",
+                source={"schema_version": "kinase_trajectory_evidence.v1"},
+            ))
+        if correlation is not None:
+            value_records.append(typed_record(
+                record_type="kinase_trajectory",
+                entity_id=candidate,
+                metric_id="signed_profile_correlation",
+                value=round(float(correlation), 4),
+                unit="pearson_r",
+                estimator="kinase_trajectory_evidence.v1",
+                support_status=trajectory_status,
+                evidence_id=f"kinase.trajectory.{group_id}",
+                source={"schema_version": "kinase_trajectory_evidence.v1"},
+            ))
+        if n_targets is not None:
+            value_records.append(typed_record(
+                record_type="kinase_trajectory",
+                entity_id=candidate,
+                metric_id="n_targets_evaluable",
+                value=int(n_targets),
+                unit="target_count",
+                estimator="kinase_trajectory_evidence.v1",
+                support_status=trajectory_status,
+                evidence_id=f"kinase.trajectory.{group_id}",
+                source={"schema_version": "kinase_trajectory_evidence.v1"},
+            ))
+        candidate_index += 1
         cards.append({
-            "card_id": f"kinase.{len(cards) + 1}",
+            "card_id": f"kinase.{candidate_index}",
             "category": "kinase_context",
-            "reader_summary": (
-                f"A contribution-weighted {family_label} footprint provided kinase-family candidate context across "
-                "the sampled conditions."
-            ),
+            "evidence_type": "kinase_candidate",
+            "reader_summary": footprint_clause + trajectory_clause,
             "claim_tier": "C1",
-            "evidence_ids": [f"kinase.footprint.{group_id}"],
+            "evidence_ids": [f"kinase.footprint.{group_id}", f"kinase.trajectory.{group_id}"],
             "citation_ids": [],
+            "value_records": value_records,
+            "trajectory_evidence": {
+                "support_status": trajectory_status,
+                "median_direction_concordance_fraction": concordance,
+                "median_signed_profile_correlation": correlation,
+                "n_targets_evaluable": trajectory.get("n_targets_evaluable"),
+                "unavailable_reason": trajectory.get("unavailable_reason"),
+            },
+            "figure_keys": ["reader_interval_concordance"],
             "allowed_verbs": ["provided candidate context", "was consistent with", "prioritized for testing"],
             "forbidden_interpretations": ["kinase activation", "direct kinase–site attribution", "isoform-specific activity"],
             "counterevidence": (
                 "Shared substrate support and family equivalence are retained as robustness context; direct kinase–site "
-                "attribution and isoform-specific activity are not made from this dataset."
+                "attribution and isoform-specific activity are not made from this dataset. Interval concordance is not "
+                "a catalytic rate."
             ),
         })
-        if len(cards) >= 3:
+        if candidate_index >= 3:
             break
     return cards
+
+
+def _protein_trajectory_cards(state: Mapping[str, Any], *, maximum: int = 3) -> list[dict]:
+    heatmap = _as_mapping(state.get("kinase_activity_heatmap"))
+    propagation = _as_mapping(state.get("signal_propagation_data") or heatmap.get("signal_propagation"))
+    effectors = [
+        _as_mapping(row) for row in propagation.get("effectors") or []
+        if isinstance(row, Mapping) and row.get("gene")
+    ]
+    cards = []
+    for row in effectors[:maximum]:
+        gene = str(row.get("gene"))
+        pattern = str(row.get("pattern") or "observed_protein_trajectory")
+        cards.append({
+            "card_id": f"protein.{gene}",
+            "category": "protein_context",
+            "evidence_type": "protein_trajectory",
+            "reader_summary": (
+                f"{gene} protein-group abundance was tracked as {pattern.replace('_', ' ')}. "
+                "This is a protein-group point estimate, not an enzyme-activity call."
+            ),
+            "claim_tier": "O1",
+            "evidence_ids": [f"protein.trajectory.{gene}"],
+            "citation_ids": [],
+            "value_records": [
+                typed_record(
+                    record_type="protein_group",
+                    entity_id=gene,
+                    metric_id="max_change",
+                    value=row.get("max_change"),
+                    unit="log2_contrast",
+                    estimator="protein_group_point_estimate",
+                    support_status="computed" if row.get("max_change") is not None else "not_computable",
+                    test_status="not_a_significance_test",
+                    evidence_id=f"protein.trajectory.{gene}",
+                )
+            ],
+            "allowed_verbs": ["was tracked", "provided protein context"],
+            "forbidden_interpretations": ["kinase activity", "significant abundance change from amplitude alone"],
+            "counterevidence": "Has_PTM=False means PTM was not quantified for this protein in these data.",
+        })
+    return cards
+
+
+def _pathway_context_cards(state: Mapping[str, Any], *, maximum: int = 3) -> list[dict]:
+    facts = [
+        _as_mapping(row) for row in state.get("pathway_statistical_evidence") or []
+        if isinstance(row, Mapping) and row.get("pathway_name")
+    ]
+    cards = []
+    for row in facts[:maximum]:
+        name = str(row.get("pathway_name"))
+        q_value = row.get("q_value")
+        cards.append({
+            "card_id": f"pathway.{len(cards) + 1}",
+            "category": "pathway_context",
+            "evidence_type": "pathway_context",
+            "reader_summary": (
+                f"{name} had an enrichment q of {q_value} in the supplied statistical artifact. "
+                "Global enrichment is not cluster enrichment and is not pathway activation."
+            ),
+            "claim_tier": "C1",
+            "evidence_ids": [f"pathway.{name}"],
+            "citation_ids": [],
+            "value_records": [
+                typed_record(
+                    record_type="pathway_enrichment",
+                    entity_id=name,
+                    metric_id="q_value",
+                    value=q_value,
+                    unit="q",
+                    estimator=str(row.get("estimator") or "supplied_pathway_test"),
+                    support_status="computed" if q_value is not None else "not_computable",
+                    test_status="supplied_enrichment_test",
+                    evidence_id=f"pathway.{name}",
+                    source={"sha256": row.get("source_artifact_sha256")},
+                )
+            ],
+            "allowed_verbs": ["was enriched", "had a supplied q"],
+            "forbidden_interpretations": ["pathway activation", "cluster enrichment substitute"],
+            "counterevidence": "Enrichment q is bound to the supplied universe and FDR family only.",
+        })
+    return cards
+
+
+def build_evidence_utilization(cards: list[dict], observation_audit: Mapping[str, Any] | None = None) -> dict:
+    """Count source → adapted → selected cards. Absence ≠ adapter failure."""
+    by_type: dict[str, dict[str, int]] = {}
+    for card in cards:
+        evidence_type = str(card.get("evidence_type") or card.get("category") or "unspecified")
+        bucket = by_type.setdefault(evidence_type, {
+            "adapted": 0, "with_value_records": 0, "with_trajectory": 0,
+        })
+        bucket["adapted"] += 1
+        if card.get("value_records"):
+            bucket["with_value_records"] += 1
+        if card.get("trajectory_evidence"):
+            bucket["with_trajectory"] += 1
+    return {
+        "schema_version": "report_evidence_utilization.v1",
+        "by_evidence_type": by_type,
+        "observation_selection_audit": dict(observation_audit or {}),
+        "exclusion_reasons": list((observation_audit or {}).get("exclusions") or []),
+    }
 
 
 def adapt_discovery_candidates(synthesis: Mapping[str, Any], *, maximum: int = 5, state: Mapping[str, Any] | None = None) -> tuple[list[dict], dict]:
@@ -569,6 +813,7 @@ def build_authoring_packet(
     P-layer readiness data, relation snapshots, and raw diagnostic payloads stay
     in the technical audit inputs and are never copied into ``reader_summary``.
     """
+    state = prepare_companion_state(state)
     temporal = _as_mapping(temporal_evidence_packet or state.get("temporal_report_evidence_packet"))
     synthesis = _as_mapping(biological_synthesis_packet or state.get("biological_synthesis_packet"))
     metadata_contract = build_study_metadata_contract(_study_context_with_override(state))
@@ -606,7 +851,23 @@ def build_authoring_packet(
             card = _record_card(record, index)
             if card and card["category"] == "temporal_profile":
                 cards.append(card)
-    cards.extend(_kinase_context_cards(state))
+    kinase_cards = _kinase_context_cards(state)
+    protein_cards = _protein_trajectory_cards(state)
+    pathway_cards = _pathway_context_cards(state)
+    dual_cards = dual_track_cards(state)
+    paired_cards = paired_fraction_cards(state)
+    form_cards = multiform_cards(selected_observations)
+    atlas_context_cards = atlas_cards(state)
+    cluster_cards = cluster_profile_cards(state)
+    companion_cards = dual_cards + paired_cards + form_cards + atlas_context_cards + cluster_cards
+    cards.extend(kinase_cards)
+    cards.extend(protein_cards)
+    cards.extend(pathway_cards)
+    cards.extend(companion_cards)
+    question_map = build_question_map(
+        state.get("original_research_questions") or state.get("research_questions") or [],
+        list(observations) + kinase_cards + protein_cards + pathway_cards + companion_cards,
+    )
 
     candidate_cards, candidate_transfer_audit = adapt_discovery_candidates(synthesis, state=state, maximum=20)
     cards.extend(candidate_cards)
@@ -651,6 +912,19 @@ def build_authoring_packet(
                 ]
             ),
         })
+        if figure.get("figure_key") == "reader_interval_concordance":
+            figure_cards[-1]["quantitative_bindings"] = list(figure.get("quantitative_bindings") or []) + [
+                record for card in kinase_cards for record in card.get("value_records") or []
+                if record.get("record_type") == "kinase_trajectory"
+            ] + typed_concordance_records(figure.get("quantitative_bindings") or []) + [
+                record for card in cards for record in card.get("value_records") or []
+                if record.get("record_type") == "module_interval"
+            ]
+        if figure.get("figure_key") == "reader_temporal_profiles":
+            figure_cards[-1]["quantitative_bindings"] = list(figure.get("quantitative_bindings") or []) + [
+                record for card in cluster_cards for record in card.get("value_records") or []
+                if record.get("record_type") == "cluster_profile"
+            ]
     section_claim_budget = {
         "abstract": ["O1", "O2", "C1", "H1"] + (["L1"] if has_traceable_literature else []),
         "introduction": ["O1", "O2", "L1", "H1"] if has_traceable_literature else ["O1", "O2", "H1"],
@@ -677,6 +951,7 @@ def build_authoring_packet(
         "study_metadata_contract": metadata_contract,
         "observation_selection_audit": observation_selection_audit,
         "candidate_transfer_audit": candidate_transfer_audit,
+        "report_evidence_utilization": build_evidence_utilization(reader_cards, observation_selection_audit),
         "quantitation_estimator_contract": estimator_contract,
         "figure_cards": figure_cards,
         "section_claim_budget": section_claim_budget,
@@ -847,6 +1122,37 @@ def _finding_metadata(card, selected):
                                     "L1": "literature_context", "H1": "mechanistic_hypothesis", "D1": "requires_separate_perturbation_evidence"}}
 
 
+def _supporting_context_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int = 3) -> list[dict]:
+    """Keep kinase/module companions off the named-feature finding budget."""
+    ranked = []
+    for card in cards or []:
+        if not isinstance(card, Mapping):
+            continue
+        if card.get("card_id") == "kinase.context_availability":
+            continue
+        if card.get("evidence_type") == "atlas_observation":
+            continue
+        if card.get("category") == "kinase_context" or card.get("evidence_type") in {
+            "kinase_candidate", "multiform_comparison", "cluster_profile",
+        }:
+            ranked.append(dict(card))
+    ranked.sort(key=lambda card: (
+        0 if card.get("category") == "kinase_context" else 1,
+        str(card.get("card_id") or ""),
+    ))
+    selected = []
+    seen: set[str] = set()
+    for card in ranked:
+        card_id = str(card.get("card_id") or "")
+        if not card_id or card_id in seen:
+            continue
+        seen.add(card_id)
+        selected.append(card)
+        if len(selected) >= maximum:
+            break
+    return selected
+
+
 def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
     """Return a safe plan fallback when the optional LLM planner is unavailable."""
     cards = packet.get("reader_cards") or []
@@ -896,6 +1202,7 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
             "measured_feature_observation": {"reader_joint_trajectories", "reader_quantitative_heatmap", "reader_protein_context"},
             "candidate_discovery": {"reader_joint_trajectories", "reader_quantitative_heatmap", "reader_protein_context"},
             "quantitation_comparison": {"reader_protein_context"},
+            "kinase_context": {"reader_interval_concordance"},
         }.get(category, set())
         feature_id = str(_as_mapping(card.get("feature_identity")).get("reader_feature_id") or "")
         matches: list[str] = []
@@ -937,7 +1244,23 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
             "alternative_explanation": _clean_text(card.get("counterevidence")) or "the observed pattern can reflect multiple biological and measurement processes",
             "next_test": next_test_for(category),
         })
-    central_answer = " ".join(str(finding.get("observation") or "") for finding in key_findings[:3]).strip()
+    for card in _supporting_context_cards(cards):
+        category = str(card.get("category") or "kinase_context")
+        key_findings.append({
+            **_finding_metadata(card, selected_cards),
+            "finding_id": f"F{len(key_findings) + 1}",
+            "category": category,
+            "observation": _clean_text(card.get("reader_summary")),
+            "evidence_ids": [str(item) for item in card.get("evidence_ids") or []],
+            "reader_feature_id": str(_as_mapping(card.get("feature_identity")).get("reader_feature_id") or "") or None,
+            "figure_keys": figure_keys_for(card),
+            "citation_ids": [str(item) for item in card.get("citation_ids") or []],
+            "allowed_interpretation": "retain the card claim tier and reader-facing verbs",
+            "alternative_explanation": _clean_text(card.get("counterevidence")) or "candidate context is not a direct kinase–substrate assignment",
+            "next_test": next_test_for(category),
+        })
+    feature_findings = [finding for finding in key_findings if finding.get("category") == "measured_feature_observation"]
+    central_answer = " ".join(str(finding.get("observation") or "") for finding in (feature_findings or key_findings)[:3]).strip()
     finding_ids = [str(finding.get("finding_id")) for finding in key_findings]
     question_map = {**(packet.get("research_question_evidence_map") or {}), "questions": []}
     for question in (packet.get("research_question_evidence_map") or {}).get("questions") or []:
@@ -1071,8 +1394,17 @@ def refresh_finding_context(plan, packet):
 def focus_authoring_packet(packet, plan):
     """Limit model-visible numeric facts to frozen findings, retaining the full audit packet."""
     selected = {f.get("reader_feature_id") for f in plan.get("key_findings") or []}
+    selected_evidence = {
+        str(evidence_id)
+        for finding in plan.get("key_findings") or []
+        for evidence_id in finding.get("evidence_ids") or []
+        if evidence_id
+    }
     return {**packet, "reader_cards": [c for c in packet.get("reader_cards") or []
-            if not c.get("feature_identity") or c["feature_identity"].get("reader_feature_id") in selected]}
+            if not c.get("feature_identity")
+            or c["feature_identity"].get("reader_feature_id") in selected
+            or selected_evidence.intersection(str(item) for item in c.get("evidence_ids") or [])
+            or c.get("category") in {"kinase_context", "study_frame", "quantitation_provenance", "traceable_literature"}]}
 
 
 def _known_evidence_ids(packet: Mapping[str, Any]) -> set[str]:
@@ -1205,8 +1537,17 @@ def validate_and_repair_sections(
                     sentence = ""
                     actions.append("withhold_unbound_quantitative_sentence")
                     reasons.extend(quantitative_reasons)
+                bound_kinase_interval = bool(
+                    sentence
+                    and re.search(r"direction concordance fraction", sentence, re.I)
+                    and not quantitative_reasons
+                )
                 evidence_scope = sentence_evidence_scope(sentence)
-                protected_context = is_negated_boundary(sentence) or evidence_scope in {"literature_context", "hypothesis"}
+                protected_context = (
+                    is_negated_boundary(sentence)
+                    or evidence_scope in {"literature_context", "hypothesis"}
+                    or bound_kinase_interval
+                )
                 direct_claim = bool(_DIRECT_OR_CAUSAL_RE.search(sentence))
                 if direct_claim and "D1" not in allowed_tiers and not protected_context:
                     immutable = re.search(r"PF-[A-Z0-9]+|\d|\[REF:", _EVIDENCE_MARKER_RE.sub("", sentence), re.I)
@@ -1280,6 +1621,8 @@ def validate_and_repair_sections(
         section_text = "\n\n".join(repaired_paragraphs)
         if section_name == "methods":
             section_text = ensure_quantitation_methods_contract(section_text)
+        if section_name in {"results", "discussion"}:
+            section_text, _ = restore_kinase_interval_sentences(section_name, section_text, packet)
         validated[section_name] = section_text
     audit = {
         "contract_version": "reader_authoring_validator.v2",
@@ -1335,23 +1678,87 @@ def strip_authoring_anchors(text: str) -> str:
     return normalize_reader_prose(text)
 
 
+def _kinase_interval_sentence(card: Mapping[str, Any]) -> str:
+    """Keep family names and computed interval numbers in one bindable sentence."""
+    records = [
+        record for record in card.get("value_records") or []
+        if record.get("record_type") == "kinase_trajectory" and record.get("value") is not None
+    ]
+    if not records:
+        return _clean_text(card.get("reader_summary"))
+    entity = str(records[0].get("entity_id") or "candidate")
+    by_metric = {str(record.get("metric_id")): record for record in records}
+    concordance = by_metric.get("direction_concordance_fraction")
+    correlation = by_metric.get("signed_profile_correlation")
+    n_targets = by_metric.get("n_targets_evaluable")
+    if concordance is None:
+        return _clean_text(card.get("reader_summary"))
+    family = entity if "family" in entity.lower() else f"{entity} family"
+    parts = [f"{family} had direction concordance fraction {float(concordance['value']):.2f}"]
+    if correlation is not None:
+        parts.append(f"and signed profile correlation {float(correlation['value']):.2f}")
+    if n_targets is not None:
+        parts.append(f"across {int(n_targets['value'])} evaluable substrate targets")
+    return " ".join(parts) + ". This signed interval comparison is not a catalytic rate."
+
+
+def _text_has_bound_kinase_intervals(text: str, card: Mapping[str, Any]) -> bool:
+    lowered = str(text or "").lower()
+    for record in card.get("value_records") or []:
+        if record.get("record_type") != "kinase_trajectory" or record.get("value") is None:
+            continue
+        if str(record.get("metric_id")) == "n_targets_evaluable":
+            continue
+        printed = f"{float(record['value']):.2f}"
+        entity = str(record.get("entity_id") or "").lower()
+        if printed not in lowered or (entity and entity.split("/")[0].strip() not in lowered):
+            return False
+    return any(
+        record.get("record_type") == "kinase_trajectory" and record.get("metric_id") == "direction_concordance_fraction"
+        for record in card.get("value_records") or []
+    )
+
+
+def restore_kinase_interval_sentences(section: str, text: str, packet: Mapping[str, Any]) -> tuple[str, list[dict]]:
+    """Reattach computed interval numbers if the writer dropped them after the family name."""
+    if section not in {"results", "discussion"}:
+        return text, []
+    additions = []
+    for card in _supporting_context_cards(packet.get("reader_cards") or []):
+        if not _kinase_interval_sentence(card):
+            continue
+        if _text_has_bound_kinase_intervals(text, card):
+            continue
+        sentence = _kinase_interval_sentence(card)
+        if not sentence or sentence in (text or ""):
+            continue
+        additions.append(sentence)
+    if not additions:
+        return text, []
+    return (text or "") + ("\n\n" if text else "") + "\n\n".join(additions), [{
+        "status": "kinase_interval_numbers_restored",
+        "added_text": "\n\n".join(additions),
+    }]
+
+
 def restore_missing_finding_paragraphs(section, text, packet, plan=None):
     """Supplement only missing roles after validation; retain original prose."""
     if section not in {"results", "discussion"}:
         return text, []
+    text, kinase_audit = restore_kinase_interval_sentences(section, text, packet)
     plan = plan or deterministic_authoring_plan(packet)
     coverage = audit_finding_coverage({section: text}, packet, plan)
     missing = set(coverage["missing_finding_ids"] + coverage["discussion_missing_finding_ids"])
     if not missing:
-        return text, []
-    feature_ids = {f["reader_feature_id"] for f in plan["key_findings"] if f["finding_id"] in missing}
+        return text, kinase_audit
+    feature_ids = {f["reader_feature_id"] for f in plan["key_findings"] if f["finding_id"] in missing and f.get("reader_feature_id")}
     fallback = render_reader_section_fallback(section, packet)
     candidate = "\n\n".join(p for p in re.split(r"\n\s*\n", fallback) if any(fid in p for fid in feature_ids))
     validated, audit = validate_and_repair_sections({section: candidate}, packet)
     addition = validated.get(section, "")
     if not addition:
-        return text, [{"missing_finding_ids": sorted(missing), "status": "recovery_failed", "validator": audit}]
-    return text + ("\n\n" if text else "") + addition, [{"missing_finding_ids": sorted(missing), "status": "deterministic_observation_recovered_review_required", "added_text": addition, "validator": audit}]
+        return text, kinase_audit + [{"missing_finding_ids": sorted(missing), "status": "recovery_failed", "validator": audit}]
+    return text + ("\n\n" if text else "") + addition, kinase_audit + [{"missing_finding_ids": sorted(missing), "status": "deterministic_observation_recovered_review_required", "added_text": addition, "validator": audit}]
 
 
 _MAJOR_HEADING_ALIASES = {
@@ -1744,6 +2151,23 @@ def _render_finding_section(section_type, packet, study):
             paragraphs.append(f"For {gene} ({fid}), {description[0].lower() + description[1:]} {_sampled_trajectory_interpretation(card)} " + " ".join(literature) + ("" if already_discussed else " " + alternative))
         elif section_type == "abstract":
             paragraphs.append(f"For {card['feature_identity']['gene']} ({fid}), {description[0].lower() + description[1:]}")
+    supporting = _supporting_context_cards(packet.get("reader_cards") or [])
+    if supporting and section_type == "results":
+        paragraphs.append(
+            "Supplementary Figure 2 reports within-cluster pair-window counts. "
+            "The kinase signed-interval fractions below are a separate substrate-anchor comparison, "
+            "not a direct kinase–substrate assignment."
+        )
+        for card in supporting:
+            paragraphs.append(_kinase_interval_sentence(card) or card["reader_summary"])
+    elif supporting and section_type == "discussion":
+        for card in supporting:
+            paragraphs.append(
+                (_kinase_interval_sentence(card) or card["reader_summary"])
+                + " This remains observational candidate context."
+            )
+    elif supporting and section_type == "abstract":
+        paragraphs.append(_kinase_interval_sentence(supporting[0]) or supporting[0]["reader_summary"])
     if section_type == "conclusion":
         main = cards[0]
         description = _joint_description(main)
@@ -1836,7 +2260,9 @@ def render_reader_section_fallback(
             "### Named current-order feature observations\n\n" + measured,
             "### Protein-adjustment comparison\n\n" + adjustment,
             "### Temporal-profile observations\n\n" + temporal,
-            "### Candidate context\n\n" + kinase + " " + candidates,
+            "### Candidate context\n\nSupplementary Figure 2 reports within-cluster pair-window counts. "
+            "The kinase signed-interval fractions are a separate substrate-anchor comparison. "
+            + kinase + " " + candidates,
             "### Interpretation boundary\n\nThe reported patterns describe measured phosphorylation features and linked protein-abundance context. They do not on their own establish direct kinase–substrate regulation, catalytic activation, causal propagation, isoform-specific activity, or a perturbation outcome.",
         ])
 

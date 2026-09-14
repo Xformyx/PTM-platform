@@ -26,11 +26,20 @@ _AXIS = re.compile(r"\b(unadjusted(?: PTM)?|protein[- ]adjusted(?: relative)?(?:
 _NUMBER = re.compile(r"(?<![\w.])[+−-]?\d+(?:\.\d+)?(?:e[-+]?\d+)?(?!\w|\.\d)", re.I)
 
 
+_TYPED_RECORD_TYPES = {
+    "kinase_trajectory", "kinase_footprint", "module_interval",
+    "protein_group", "pathway_enrichment",
+    "dual_track", "paired_peptide_fraction", "multiform_comparison",
+    "atlas_observation", "cluster_profile",
+}
+
+
 def quantitative_records(card: Mapping[str, Any]) -> list[dict]:
+    typed = [dict(record) for record in card.get("value_records") or [] if isinstance(record, Mapping)]
     identity = card.get("feature_identity") or {}
     fid = identity.get("reader_feature_id")
     if not fid:
-        return []
+        return typed
     measurement = card.get("measurement_provenance") or {}
     records = []
     for point in card.get("trajectory") or [card]:
@@ -54,8 +63,9 @@ def quantitative_records(card: Mapping[str, Any]) -> list[dict]:
                 "support": axis_support,
                 "time_minutes": point.get("time_minutes"),
                 "support_sets_differ": point.get("support_sets_differ"),
+                "record_type": "feature_axis",
             })
-    return records
+    return typed + records
 
 
 def matching_cards(sentence: str, cards) -> list[Mapping[str, Any]]:
@@ -90,6 +100,9 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
                    and f.get("q_value") is not None and f["q_value"] < f.get("alpha", .05)
                    and f.get("source_artifact_sha256") for f in pathway_facts):
             return ["pathway_significance_not_bound_to_evaluable_test"]
+    typed_errors = validate_typed_aggregate_sentence(sentence, packet)
+    if typed_errors:
+        return typed_errors
     cards = matching_cards(sentence, packet.get("reader_cards") or [])
     if re.search(r"(?:no|without|unavailable|not available|not recorded).{0,70}(?:independent |unadjusted )+PTM|(?:independent |unadjusted )+PTM.{0,70}(?:unavailable|not available|not recorded)", sentence, re.I):
         scope_cards = cards or packet.get("reader_cards") or []
@@ -174,14 +187,92 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
 def value_token_catalog(packet: Mapping[str, Any]) -> dict[str, dict]:
     return {f"V{index}": record for index, record in enumerate(
         (record for card in packet.get("reader_cards") or [] for record in quantitative_records(card)
-         if record["value"] is not None), 1)}
+         if record.get("value") is not None), 1)}
 
 
 def render_value_record(record: Mapping[str, Any]) -> str:
     """An indivisible clause keeps a source value attached to its actual axis."""
+    if record.get("record_type") in _TYPED_RECORD_TYPES:
+        entity = record.get("entity_id") or record.get("feature_id") or "entity"
+        metric = record.get("metric_id") or record.get("axis") or "metric"
+        where = record.get("interval") or record.get("condition") or "the evaluated window"
+        unit = record.get("unit") or ""
+        return f"{entity} had {metric} {record['value']} {unit} at {where}".strip()
     article = "an" if record["axis"] == "unadjusted" else "a"
     return (f"{record['feature_id']} at {record['condition']} had {article} {AXIS_LABELS[record['axis']]} "
             f"of {record['value']:+.3f}")
+
+
+def typed_records(packet: Mapping[str, Any]) -> list[dict]:
+    return [
+        record for card in packet.get("reader_cards") or []
+        for record in quantitative_records(card)
+        if record.get("record_type") in _TYPED_RECORD_TYPES
+    ]
+
+
+def validate_typed_aggregate_sentence(sentence: str, packet: Mapping[str, Any]) -> list[str]:
+    """Bind kinase/module/pathway numbers without a fake PF identity."""
+    if _ID.search(sentence):
+        return []
+    records = typed_records(packet)
+    if not records:
+        return []
+    mentions_typed = bool(re.search(
+        r"\b(?:kinase|concordance|correlation|NES|enrichment|module|pathway|trajectory|paired|logit|multiform|dual[- ]track|cluster)\b",
+        sentence, re.I,
+    ))
+    if not mentions_typed:
+        return []
+    clean = re.sub(r"\[(?:EVID|REF):[^\]]+\]", lambda m: " " * len(m[0]), sentence)
+    numbers = list(_NUMBER.finditer(clean))
+    if not numbers:
+        return []
+    for match in numbers:
+        printed = match[0].replace("−", "-")
+        try:
+            numeric = float(printed)
+        except ValueError:
+            continue
+        if printed in {"0.15", "+0.15", "-0.15"} and re.search(r"descriptive (?:tolerance|band)", sentence, re.I):
+            continue
+        fraction = re.search(r"\b(\d+)\s*/\s*(\d+)\b", sentence)
+        if fraction and match.start() >= fraction.start() and match.end() <= fraction.end():
+            for record in records:
+                if record.get("denominator") is None:
+                    continue
+                entity = str(record.get("entity_id") or "").lower()
+                if entity and entity not in sentence.lower():
+                    continue
+                if int(fraction[2]) != int(record["denominator"]):
+                    return ["typed_record_denominator_mismatch"]
+            continue
+        before = sentence[:match.start()].lower()
+        bound = False
+        for record in records:
+            if record.get("value") is None:
+                continue
+            entity = str(record.get("entity_id") or "").lower()
+            metric = str(record.get("metric_id") or "").lower()
+            interval = str(record.get("interval") or record.get("condition") or "").lower()
+            if entity and entity not in sentence.lower():
+                continue
+            if metric and metric.replace("_", " ") not in before and metric not in before:
+                if not re.search(r"\br\b|concordance|correlation|nes|q\b", before):
+                    continue
+            try:
+                source = float(record["value"])
+            except (TypeError, ValueError):
+                continue
+            tolerance = .5 * 10 ** Decimal(printed).as_tuple().exponent + 1e-12
+            if math.isclose(numeric, source, abs_tol=tolerance, rel_tol=0):
+                if interval and interval not in sentence.lower() and record.get("interval"):
+                    return ["typed_record_interval_unbound"]
+                bound = True
+                break
+        if not bound:
+            return ["typed_record_value_unbound"]
+    return []
 
 
 def structured_authoring_instructions(packet: Mapping[str, Any]) -> str:

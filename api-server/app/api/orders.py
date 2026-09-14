@@ -7618,7 +7618,7 @@ async def kinase_activity_heatmap(
     dynamic_analysis_cache_contract = (
         f"unified_temporal_ptm_protein.v3|temporal_feature_input.v1|observed_tmm.v1|{DYNAMIC_COWAVE_CONTRACT_VERSION}|"
         f"{dynamic_transition_config_sha}|{KINASE_FEATURE_LEDGER_CONTRACT_VERSION}|"
-        f"{KINASE_FOOTPRINT_DIAGNOSTICS_CONTRACT_VERSION}"
+        f"{KINASE_FOOTPRINT_DIAGNOSTICS_CONTRACT_VERSION}|kinase_trajectory_evidence.v1"
     )
     from ptm_shared.vector_plot import vector_tsv_cache_fingerprint
 
@@ -9163,6 +9163,8 @@ async def kinase_activity_heatmap(
             uncertainty_bootstrap_repeats=effective_tmm_config["uncertainty_bootstrap_repeats"],
             uncertainty_loto_enabled=effective_tmm_config["uncertainty_loto_enabled"],
             uncertainty_seed=effective_tmm_config["uncertainty_seed"],
+            ptm_identities=temporal_inputs.get("features"),
+            ptm_is_denovo=ptm_is_denovo,
         )
         if len(occupancy_complete_timeseries) >= 2 and len(conditions_sorted) >= 3:
             from ptm_shared.temporal_wave_engine import analyze_temporal_waves
@@ -9207,6 +9209,7 @@ async def kinase_activity_heatmap(
                 uncertainty_bootstrap_repeats=effective_tmm_config["uncertainty_bootstrap_repeats"],
                 uncertainty_loto_enabled=effective_tmm_config["uncertainty_loto_enabled"],
                 uncertainty_seed=effective_tmm_config["uncertainty_seed"],
+                enable_trajectory_evidence=False,
             )
 
         from ptm_shared.dual_track_evidence import build_dual_track_evidence
@@ -9303,6 +9306,7 @@ async def kinase_activity_heatmap(
                 ks_entry["tmm_iterative_profile_provenance"] = tmm.get("iterative_profile_provenance", {})
                 ks_entry["tmm_kinase_profile_provenance"] = tmm.get("kinase_profile_provenance", {})
                 ks_entry["tmm_input_evidence"] = kinase_module_provenance.get(canon, {})
+                ks_entry["trajectory_evidence"] = tmm.get("trajectory_evidence")
                 ks_entry["footprint_equivalence"] = exact_footprint_equivalence_by_kinase.get(canon)
                 ks_entry["footprint_diagnostics"] = summarize_weighted_footprint(
                     tmm.get("_weighted_site_profiles_for_diagnostics", {}),

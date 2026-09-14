@@ -86,3 +86,16 @@ def test_partial_candidate_profiles_use_common_finite_rows_without_failure_fallb
     result = deconvolve_shared_ptm("G_S1", list(profiles), profiles,
                                    {"G_S1": {"1min": .2, "5min": 99., "15min": 1.}}, CONDITIONS)
     assert result["K2"] == pytest.approx(1)
+
+
+def test_trajectory_evidence_does_not_change_weighted_sums_or_ranking():
+    off = compute_weighted_kinase_scores(*exclusive_inputs(True), CONDITIONS, enable_trajectory_evidence=False)
+    on = compute_weighted_kinase_scores(*exclusive_inputs(True), CONDITIONS, enable_trajectory_evidence=True)
+    assert off["K1"]["weighted_up_sums"] == on["K1"]["weighted_up_sums"]
+    assert off["K1"]["weighted_down_sums"] == on["K1"]["weighted_down_sums"]
+    assert off["K1"]["n_exclusive"] == on["K1"]["n_exclusive"]
+    assert "trajectory_evidence" not in off["K1"]
+    assert on["K1"]["trajectory_evidence"]["contract_version"] == "kinase_trajectory_evidence.v1"
+    assert on["K1"]["trajectory_evidence"]["does_not_modify"] == [
+        "nnls_ratio", "weighted_up_sums", "weighted_down_sums", "ranking",
+    ]

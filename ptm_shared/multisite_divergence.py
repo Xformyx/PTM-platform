@@ -53,6 +53,23 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _as_observed_float(value: Any) -> Optional[float]:
+    """Missing and non-finite values stay missing. 0 is only a measured 0.
+
+    구현 대상: docs/collaboration/integrated_implementation_w0_2026-09-14.md §W1
+    사전등록: 2026-09-14. 결측→0 정정.
+    해석 한계: 관측 마스크이지 유의성 검정이 아니다.
+    주장 금지: 결측 제거를 기전 변화로 해석하지 않는다.
+    """
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if np.isfinite(parsed) else None
+
+
 def _site_short(label: str) -> str:
     parts = str(label).rsplit(" ", 1)
     return parts[-1] if len(parts) == 2 else str(label)
@@ -266,8 +283,13 @@ def compute_divergence_pairs(
         if len(parts) == 2:
             by_gene.setdefault(parts[0], []).append(str(label))
 
-    all_values = [abs(_as_float(values.get(condition))) for values in ptm_time_matrix.values() for condition in ordered_conditions]
-    all_values = [value for value in all_values if value > 0.01]
+    all_values = [
+        abs(value)
+        for values in ptm_time_matrix.values()
+        for condition in ordered_conditions
+        for value in [_as_observed_float(values.get(condition))]
+        if value is not None and abs(value) > 0.01
+    ]
     median = float(np.median(all_values)) if all_values else 0.0
     mad = max(float(np.median([abs(value - median) for value in all_values])) if all_values else 0.0, 0.1)
     pairs: List[TemporalDivergencePair] = []
@@ -277,10 +299,14 @@ def compute_divergence_pairs(
                 site_a, site_b = sites[left_index], sites[right_index]
                 if ptm_activity_class.get(site_a, "minor") == "minor" and ptm_activity_class.get(site_b, "minor") == "minor":
                     continue
-                values_a = {condition: _as_float(ptm_time_matrix[site_a].get(condition)) for condition in ordered_conditions}
-                values_b = {condition: _as_float(ptm_time_matrix[site_b].get(condition)) for condition in ordered_conditions}
-                peak_a_index = int(np.argmax(np.abs([values_a[condition] for condition in ordered_conditions])))
-                peak_b_index = int(np.argmax(np.abs([values_b[condition] for condition in ordered_conditions])))
+                values_a = {condition: _as_observed_float(ptm_time_matrix[site_a].get(condition)) for condition in ordered_conditions}
+                values_b = {condition: _as_observed_float(ptm_time_matrix[site_b].get(condition)) for condition in ordered_conditions}
+                abs_a = [abs(values_a[condition]) if values_a[condition] is not None else -1.0 for condition in ordered_conditions]
+                abs_b = [abs(values_b[condition]) if values_b[condition] is not None else -1.0 for condition in ordered_conditions]
+                if max(abs_a) < 0 or max(abs_b) < 0:
+                    continue
+                peak_a_index = int(np.argmax(abs_a))
+                peak_b_index = int(np.argmax(abs_b))
                 if peak_a_index <= peak_b_index:
                     early_site, late_site, early_values, late_values, early_index, late_index = site_a, site_b, values_a, values_b, peak_a_index, peak_b_index
                 else:
@@ -296,8 +322,22 @@ def compute_divergence_pairs(
                     "chromadb_consistent": bool(set(pathways_a) & set(pathways_b)),
                 }
                 relation = analyze_directed_temporal_relationship(
-                    {"key": early_site, "temporal_values": early_values, "replicates": (site_replicates or {}).get(early_site)},
-                    {"key": late_site, "temporal_values": late_values, "replicates": (site_replicates or {}).get(late_site)},
+                    {
+                        "key": early_site,
+                        "temporal_values": {
+                            condition: (value if value is not None else float("nan"))
+                            for condition, value in early_values.items()
+                        },
+                        "replicates": (site_replicates or {}).get(early_site),
+                    },
+                    {
+                        "key": late_site,
+                        "temporal_values": {
+                            condition: (value if value is not None else float("nan"))
+                            for condition, value in late_values.items()
+                        },
+                        "replicates": (site_replicates or {}).get(late_site),
+                    },
                     ordered_conditions,
                     biological_support=support,
                 )

@@ -64,8 +64,11 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
     for card in cards:
         identity = card.get("feature_identity") or {}
         fid = identity["reader_feature_id"]
-        query = " ".join(str(v) for v in (identity.get("gene"), identity.get("candidate_residue_annotation"),
-                study.get("cell_type"), study.get("species"), study.get("treatment"), "PTM protein time course opposing results") if v)
+        site_query = " ".join(str(v) for v in (identity.get("gene"), identity.get("candidate_residue_annotation"),
+                study.get("cell_type"), study.get("species"), study.get("treatment"), "PTM protein time course") if v)
+        opposing_query = " ".join(str(v) for v in (identity.get("gene"), identity.get("candidate_residue_annotation"),
+                study.get("cell_type"), study.get("species"), "PTM conflicting or opposing results") if v)
+        query = site_query
         record = {"schema_version": VERSION, "reader_feature_id": fid, "feature_id": identity.get("feature_id"),
                   "query": query, "queried_at": datetime.now(timezone.utc).isoformat(),
                   "collections": list(getattr(retriever, "collection_names", []) or []),
@@ -73,9 +76,12 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None):
         records[fid] = record
         if not record["collections"]:
             continue
-        layers = [("literature_background", " ".join(str(study.get(k) or "") for k in ("treatment", "cell_type", "species")) + " signaling time course"),
-                  ("gene_function_context", str(identity.get("gene") or "") + " protein function localization trafficking translation cytoskeleton"),
-                  ("direct_site_evidence", query)]
+        layers = [
+            ("literature_background", " ".join(str(study.get(k) or "") for k in ("treatment", "cell_type", "species")) + " signaling time course"),
+            ("gene_function_context", str(identity.get("gene") or "") + " protein function"),
+            ("direct_site_evidence", site_query),
+            ("counterevidence", opposing_query),
+        ]
         hits, seen = [], set()
         record["searches"] = []
         for layer, layer_query in layers:

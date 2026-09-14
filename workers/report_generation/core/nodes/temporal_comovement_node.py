@@ -222,6 +222,11 @@ def _build_temporal_matrix(
 ) -> Tuple[np.ndarray, List[dict]]:
     """Build PTM × Timepoint matrix of Log2FC values.
 
+    구현 대상: docs/collaboration/integrated_implementation_w0_2026-09-14.md §W1
+    사전등록: 2026-09-14. 결측→0·gene/site 덮어쓰기 정정.
+    해석 한계: feature_id가 없으면 표시용 gene(site)만 남는다.
+    주장 금지: 행렬 정정을 기전 변화로 해석하지 않는다.
+
     Returns:
         matrix: np.ndarray of shape (n_ptms, n_timepoints)
         meta: list of dicts with gene, site, key for each row
@@ -242,13 +247,19 @@ def _build_temporal_matrix(
                 if not gene or gene == "Unknown":
                     continue
                 site = node.get("site", node.get("position", ""))
-                key = f"{gene}({site})" if site else gene
-                fc = node.get("value", node.get("ptm_log2fc",
-                       node.get("ptm_relative_log2fc", node.get("log2fc", 0))))
+                feature_id = node.get("feature_id") or node.get("precursor_id") or node.get("reader_feature_id")
+                key = str(feature_id) if feature_id else (f"{gene}({site})" if site else gene)
+                raw_fc = node.get("value")
+                if raw_fc is None:
+                    raw_fc = node.get("ptm_log2fc", node.get("ptm_relative_log2fc", node.get("log2fc")))
                 try:
-                    fc = float(fc) if fc is not None else 0.0
+                    fc = float(raw_fc) if raw_fc is not None else np.nan
+                    if not np.isfinite(fc):
+                        fc = np.nan
                 except (ValueError, TypeError):
-                    fc = 0.0
+                    fc = np.nan
+                if np.isnan(fc):
+                    continue
 
                 if key not in ptm_data:
                     ptm_data[key] = {}
@@ -257,6 +268,7 @@ def _build_temporal_matrix(
                         "gene": gene,
                         "site": site,
                         "key": key,
+                        "feature_id": str(feature_id) if feature_id else None,
                         "activity_class": node.get("activity_class", "minor"),
                         "q_value": node.get("q_value"),
                         "control_pseudocount_used": node.get("control_pseudocount_used", False),
@@ -278,11 +290,12 @@ def _build_temporal_matrix(
 
     # Build matrix
     keys = sorted(ptm_data.keys())
-    matrix = np.zeros((len(keys), len(timepoints)))
+    matrix = np.full((len(keys), len(timepoints)), np.nan)
     meta = []
     for i, key in enumerate(keys):
         for j, tp in enumerate(timepoints):
-            matrix[i, j] = ptm_data[key].get(tp, 0.0)
+            if tp in ptm_data[key]:
+                matrix[i, j] = ptm_data[key][tp]
         meta.append(ptm_meta_map[key])
 
     return matrix, meta
@@ -296,9 +309,11 @@ def _filter_significant_ptms(
     matrix: np.ndarray, meta: list
 ) -> Tuple[np.ndarray, list]:
     """Remove PTMs with low variance or low amplitude (flat lines)."""
-    variances = np.var(matrix, axis=1)
-    amplitudes = np.max(np.abs(matrix), axis=1)
-    mask = (variances >= MIN_VARIANCE) | (amplitudes >= MIN_AMPLITUDE)
+    variances = np.nanvar(matrix, axis=1)
+    amplitudes = np.nanmax(np.abs(matrix), axis=1)
+    mask = np.isfinite(variances) & np.isfinite(amplitudes) & (
+        (variances >= MIN_VARIANCE) | (amplitudes >= MIN_AMPLITUDE)
+    )
 
     filtered_matrix = matrix[mask]
     filtered_meta = [m for m, keep in zip(meta, mask) if keep]
@@ -341,6 +356,7 @@ def _cluster_comoving_ptms(
             item["key"]: {
                 timepoint: float(matrix[index, time_index])
                 for time_index, timepoint in enumerate(timepoints)
+                if np.isfinite(matrix[index, time_index])
             }
             for index, item in enumerate(meta)
         }
@@ -2215,11 +2231,13 @@ def _compute_multisite_divergence_for_report(
             site = str(meta.get("site") or "").strip()
             if not gene or not site or index >= len(sig_matrix):
                 continue
-            key = f"{gene} {site}"
+            feature_id = str(meta.get("feature_id") or meta.get("key") or "").strip()
+            site_token = f"{site}|{feature_id}" if feature_id else site
+            key = f"{gene} {site_token}"
             matrix[key] = {
                 str(timepoint): float(sig_matrix[index][time_index])
                 for time_index, timepoint in enumerate(timepoints)
-                if time_index < len(sig_matrix[index])
+                if time_index < len(sig_matrix[index]) and np.isfinite(sig_matrix[index][time_index])
             }
             activity[key] = str(meta.get("activity_class") or "minor")
             if meta.get("control_pseudocount_used"):

@@ -2648,3 +2648,114 @@
   인용 ≥ 20. JSON 복원 = 첫 `{{`부터 마지막 `}}`. TMM 캐시 =
   `precursor_identity.v2` + TSV SHA256.
 
+### [2026-09-14] Codex 통합 계획 W0–W7 (보조 궤적·결측 정정)
+
+- **분류:** 구현
+- **대상:** `ptm_shared/kinase_trajectory_evidence.py`,
+  `ptm_shared/evidence_record_contract.py`,
+  `ptm_shared/multisite_divergence.py`,
+  `api-server/app/services/temporal_kinase_scoring.py`,
+  `api-server/app/api/orders.py`,
+  `workers/report_generation/core/nodes/temporal_comovement_node.py`,
+  `workers/report_generation/core/temporal_analysis.py`,
+  `workers/report_generation/core/quantitative_claims.py`,
+  `workers/report_generation/core/reader_authoring.py`,
+  `workers/report_generation/core/research_questions.py`,
+  `workers/report_generation/core/finding_literature.py`,
+  `workers/report_generation/core/rag_retriever.py`
+- **구현 대상 설계:** `docs/collaboration/integrated_implementation_w0_2026-09-14.md`
+  (2026-09-14 선언). 측정 공식·C1 임계 변경 아님.
+- **사전등록 상태:** 결과 열람 전 표시·보조 관측 계약. primary 승격 금지.
+- **내용:** 결측을 0으로 채우지 않고 precursor identity를 유지한다.
+  signed 인접 구간 진단(`kinase_trajectory_evidence.v1`)을 TMM
+  가중합과 분리해 저장·카드·V-token에 전달한다. 문헌 검색은 중립
+  질의와 반대 근거 질의를 분리하고 Chroma 문서를 검색 단계에서
+  자르지 않는다. 실제 주문 재생성·성능 향상은 완료로 기록하지 않는다.
+- **논문에서의 용도:** methods (보조 관측·결측 계약) / 사용 안 함
+  (kinase 성능)
+- **해석 한계:** 구간 Δ는 촉매속도가 아니다. off/on 점수 불변이
+  보고서 과학적 수용이나 성능 향상을 뜻하지 않는다.
+- **결정성:** `delta_tolerance=0`, 최소 공통 시점/구간=3, cache
+  contract에 `kinase_trajectory_evidence.v1` 포함. solver 경로 불변.
+
+### [2026-09-14] Codex P2 표시 연결 및 옛 heatmap 궤적 부착
+
+- **분류:** 구현
+- **대상:** `workers/report_generation/core/companion_evidence.py`,
+  `workers/report_generation/core/reader_authoring.py`,
+  `workers/report_generation/core/quantitative_claims.py`,
+  `workers/report_generation/core/research_questions.py`,
+  `workers/report_generation/core/report_artifact_manifest.py`,
+  `workers/report_generation/core/figure_manifest.py`,
+  `ptm_shared/evidence_record_contract.py`,
+  `docs/collaboration/integrated_implementation_w0_2026-09-14.md`
+- **구현 대상 설계:** `docs/collaboration/integrated_implementation_w0_2026-09-14.md`
+  P2 표시 연결 (2026-09-14 추가 선언). 측정 공식·C1 임계 변경 아님.
+- **사전등록 상태:** 결과 열람 전 표시·전달 계약. primary 승격 금지.
+- **내용:** 저장된 heatmap에 점수를 바꾸지 않고 `trajectory_evidence`를
+  가산 부착한다. footprint diagnostics가 computed가 아니어도 상위
+  candidate 카드를 남긴다. dual-track, apparent paired-peptide fraction
+  (O1/O2만), same-parent multiform, Atlas site claim, cluster member
+  count, pair-window 정수 count를 typed record로 연결하고 utilization
+  JSON을 persist한다.
+- **논문에서의 용도:** methods (표시·전달 계약) / 사용 안 함 (kinase 성능)
+- **해석 한계:** 카드 존재는 직접 효소관계, 절대 occupancy, 성능 향상,
+  실주문 과학 수용이 아니다. 구간 Δ는 촉매속도가 아니다.
+- **결정성:** 가산 부착은 weighted sums/NNLS/ranking을 쓰지 않는다.
+  pair-window는 저장된 정수 numerator/denominator만 묶는다. pair
+  quality는 O1/O2만 카드화. calibration=none은 apparent fraction.
+
+### [2026-09-14] 궤적 키 별칭과 fallback kinase 본문 전달
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/companion_evidence.py`,
+  `workers/report_generation/core/reader_authoring.py`,
+  `workers/report_generation/core/research_questions.py`
+- **구현 대상 설계:** `docs/collaboration/integrated_implementation_w0_2026-09-14.md`
+  P1 전달 (2026-09-14). 측정 공식 변경 아님.
+- **사전등록 상태:** 결과 열람 전 표시·전달 계약. primary 승격 금지.
+- **내용:** 저장된 `not_evaluable` 궤적은 vector 별칭(FEATURE-id / PF /
+  GENE_SITE)으로 다시 계산한다. computed 궤적과 weighted sum은 불변.
+  deterministic fallback Results/Discussion은 주 finding 예산 밖에서
+  kinase 카드를 본문에 넣는다. `TW-05` 클러스터 토큰은 질문 entity가
+  아니다.
+- **논문에서의 용도:** methods (표시·전달) / 사용 안 함 (kinase 성능)
+- **해석 한계:** 본문에 후보 카드가 나와도 직접 효소관계나 과학 수용이
+  아니다. 키 별칭은 동일 관측의 다른 식별자이지 새 측정이 아니다.
+- **결정성:** computed `trajectory_evidence`는 재계산하지 않는다.
+  fallback 주 finding은 계속 최대 4개 named feature.
+
+### [2026-09-14] kinase 구간 수치 본문 고정과 가족 병합
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/reader_authoring.py`,
+  `workers/report_generation/core/research_questions.py`,
+  `workers/report_generation/core/figure_manifest.py`
+- **구현 대상 설계:** `docs/collaboration/integrated_implementation_w0_2026-09-14.md`
+  P1 전달 (2026-09-14). 측정 공식 변경 아님.
+- **사전등록 상태:** 결과 열람 전 표시·전달 계약. primary 승격 금지.
+- **내용:** 계산된 direction concordance·signed correlation·evaluable
+  target 수를 가족 이름과 같은 문장에 둔다. 동일 peak/궤적 fingerprint
+  가족은 한 카드로 합친다. writer가 숫자를 빼면 restore가 다시 붙인다.
+  cluster 질문의 SSB/TW 잔여 unresolved 문장은 내지 않는다.
+  Supplementary Fig 2 캡션은 pair-window와 kinase 구간 비교를 구분한다.
+- **논문에서의 용도:** methods (표시·전달) / 사용 안 함 (kinase 성능)
+- **해석 한계:** 본문의 0.80은 직접 효소관계나 성능 향상이 아니다.
+- **결정성:** 표시 값은 stored `median_*`와 `n_targets_evaluable`의
+  반올림이며 새 추정량이 아니다.
+
+### [2026-09-14] 실주문 잘림 재생 테스트와 validator 보호
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/reader_authoring.py`,
+  `workers/tests/test_companion_evidence.py`
+- **구현 대상 설계:** 2026-09-14 11:33 Order 74 전달 실패(숫자는 packet,
+  본문은 가족 이름만). 측정 공식 변경 아님.
+- **사전등록 상태:** 결과 열람 전 표시 계약. primary 승격 금지.
+- **내용:** bound kinase interval 문장은 directness rewrite 대상이 아니다.
+  validate 후에도 구간 수치가 없으면 restore가 붙는다. 11:33 잘린
+  Results 문구를 회귀로 고정했다. live Report는 개발 루프가 아니다.
+- **논문에서의 용도:** methods (표시 전달) / 사용 안 함 (kinase 성능)
+- **해석 한계:** 합성 재생이 다음 live Gemini 성공을 보장하지 않는다.
+- **결정성:** 회귀 입력은 저장된 11:33 잘림 문장과 동일 heatmap fixture.
+

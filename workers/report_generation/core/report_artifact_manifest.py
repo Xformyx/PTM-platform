@@ -37,10 +37,15 @@ def persist_report_packets(state, output_dir):
     """Snapshot only current-state derived evidence, without discovering old files."""
     keys = ("authoring_packet", "reader_authoring_plan", "biological_synthesis_packet",
             "finding_literature_retrieval", "figure_manifest", "pathway_expansion",
-            "ptm_representation_benchmark", "temporal_report_evidence_packet")
+            "ptm_representation_benchmark", "temporal_report_evidence_packet",
+            "report_evidence_utilization")
     paths = {}
     for key in keys:
         value = state.get(key)
+        if value is None and key == "report_evidence_utilization":
+            packet = state.get("authoring_packet")
+            if isinstance(packet, Mapping):
+                value = packet.get("report_evidence_utilization")
         if value is None:
             continue
         path = Path(output_dir) / ("report_" + key + ".json")

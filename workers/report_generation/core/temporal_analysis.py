@@ -17,6 +17,26 @@ from ptm_shared.directed_temporal_relationship import analyze_directed_temporal_
 logger = logging.getLogger(__name__)
 
 OBSERVED_PATTERN_VERSION = "observed_joint_pattern.v1"
+PROTEIN_CHANGE_THRESHOLD = 0.3
+"""Descriptive abundance amplitude, not a significance test.
+
+docs/collaboration/integrated_implementation_w0_2026-09-14.md §W1
+에서 2026-09-14 선언. 결측을 0으로 채우거나 크기만으로 유의/안정을
+단정하지 않는다.
+"""
+
+
+def _optional_numeric(*candidates):
+    for value in candidates:
+        if value is None:
+            continue
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(parsed):
+            return parsed
+    return None
 
 
 def observed_time_minutes(point):
@@ -140,7 +160,12 @@ def build_nonptm_temporal_analysis(
             if not gene or gene == "Unknown":
                 continue
             role = node.get("node_role", "interactor")
-            protein_log2fc = node.get("protein_log2fc", node.get("log2fc", 0))
+            if "protein_log2fc" in node:
+                protein_log2fc = _optional_numeric(node.get("protein_log2fc"))
+            else:
+                protein_log2fc = _optional_numeric(node.get("log2fc"))
+            if protein_log2fc is None:
+                continue
 
             if gene not in nonptm_temporal:
                 nonptm_temporal[gene] = {}
@@ -207,7 +232,8 @@ def build_nonptm_temporal_analysis(
             "delayed_effector_response": "Delayed abundance responders (>15min)",
             "sustained_response": "Sustained abundance responders",
             "biphasic_switch": "Biphasic abundance responders (direction switch)",
-            "stable_baseline": "Stable (no significant abundance change)",
+            "stable_baseline": "No abundance change above the descriptive 0.3 threshold (not a significance test)",
+            "insufficient_observations": "Insufficient observed protein-abundance points",
         }.get(pattern, pattern)
         parts.append(f"  {label}: {count}")
     parts.append("")
@@ -232,7 +258,10 @@ def build_nonptm_temporal_analysis(
                 "sustained_response": "Sustained",
                 "biphasic_switch": "Biphasic",
             }.get(pattern, pattern)
-            vals = [f"{tp_data.get(tp, 0):.2f}" for tp in timepoints]
+            vals = [
+                f"{tp_data[tp]:.2f}" if tp in tp_data and tp_data[tp] is not None else "NA"
+                for tp in timepoints
+            ]
             parts.append(
                 f"| **{gene}** | {role} | {kinetics_label} | "
                 + " | ".join(vals)
@@ -309,8 +338,10 @@ def build_ptm_protein_timelag_analysis(
                 gene = node.get("gene", node.get("id", "Unknown"))
                 site = node.get("site", "")
                 key = f"{gene}({site})" if site else gene
-                ptm_log2fc = node.get("value", node.get("ptm_log2fc", node.get("log2fc", 0)))
-                protein_log2fc = node.get("protein_log2fc", 0)
+                ptm_log2fc = _optional_numeric(node.get("value"), node.get("ptm_log2fc"), node.get("log2fc"))
+                protein_log2fc = _optional_numeric(node.get("protein_log2fc"))
+                if ptm_log2fc is None:
+                    continue
 
                 if key not in ptm_temporal:
                     ptm_temporal[key] = {}
@@ -330,16 +361,18 @@ def build_ptm_protein_timelag_analysis(
         ptm_first_tp = None
         ptm_first_val = 0
         for tp in sorted_tps:
-            if abs(tp_data[tp]["ptm_log2fc"]) >= PTM_THRESHOLD:
+            ptm_value = tp_data[tp].get("ptm_log2fc")
+            if ptm_value is not None and abs(ptm_value) >= PTM_THRESHOLD:
                 ptm_first_tp = tp
-                ptm_first_val = tp_data[tp]["ptm_log2fc"]
+                ptm_first_val = ptm_value
                 break
 
         # Find first significant protein abundance change
         prot_first_tp = None
         prot_first_val = 0
         for tp in sorted_tps:
-            if abs(tp_data[tp]["protein_log2fc"]) >= PROTEIN_THRESHOLD:
+            protein_value = tp_data[tp].get("protein_log2fc")
+            if protein_value is not None and abs(protein_value) >= PROTEIN_THRESHOLD:
                 prot_first_tp = tp
                 prot_first_val = tp_data[tp]["protein_log2fc"]
                 break
@@ -388,11 +421,12 @@ def build_ptm_protein_timelag_analysis(
     for ptm_key, tp_data in ptm_temporal.items():
         gene = tp_data[list(tp_data.keys())[0]]["gene"]
         for tp in sorted(tp_data.keys(), key=tp_to_minutes):
-            if abs(tp_data[tp]["ptm_log2fc"]) >= PTM_THRESHOLD:
+            ptm_value = tp_data[tp].get("ptm_log2fc")
+            if ptm_value is not None and abs(ptm_value) >= PTM_THRESHOLD:
                 if gene not in ptm_first_change or tp_to_minutes(tp) < tp_to_minutes(
                     ptm_first_change[gene][0]
                 ):
-                    ptm_first_change[gene] = (tp, tp_data[tp]["ptm_log2fc"])
+                    ptm_first_change[gene] = (tp, ptm_value)
                 break
 
     # Build non-PTM protein first-change map
@@ -406,7 +440,12 @@ def build_ptm_protein_timelag_analysis(
             if not isinstance(node, dict):
                 continue
             gene = node.get("gene", node.get("id", "Unknown"))
-            protein_log2fc = node.get("protein_log2fc", node.get("log2fc", 0))
+            if "protein_log2fc" in node:
+                protein_log2fc = _optional_numeric(node.get("protein_log2fc"))
+            else:
+                protein_log2fc = _optional_numeric(node.get("log2fc"))
+            if protein_log2fc is None:
+                continue
             if gene not in nonptm_temporal_all:
                 nonptm_temporal_all[gene] = {}
             nonptm_temporal_all[gene][tp] = protein_log2fc
@@ -590,7 +629,12 @@ def build_signal_propagation_json(
             if not gene or gene == "Unknown":
                 continue
             role = node.get("node_role", "interactor")
-            protein_log2fc = node.get("protein_log2fc", node.get("log2fc", 0))
+            if "protein_log2fc" in node:
+                protein_log2fc = _optional_numeric(node.get("protein_log2fc"))
+            else:
+                protein_log2fc = _optional_numeric(node.get("log2fc"))
+            if protein_log2fc is None:
+                continue
             if gene not in nonptm_temporal:
                 nonptm_temporal[gene] = {}
                 nonptm_roles[gene] = role
@@ -629,7 +673,10 @@ def build_signal_propagation_json(
                 "gene": gene,
                 "role": nonptm_roles.get(gene, "interactor"),
                 "pattern": pattern,
-                "temporal_data": {tp: round(tp_data.get(tp, 0), 3) for tp in timepoints},
+                "temporal_data": {
+                    tp: (round(tp_data[tp], 3) if tp in tp_data and tp_data[tp] is not None else None)
+                    for tp in timepoints
+                },
                 "max_change": round(max_abs, 3),
             }
         )
@@ -649,8 +696,10 @@ def build_signal_propagation_json(
                 gene = node.get("gene", node.get("id", "Unknown"))
                 site = node.get("site", "")
                 key = f"{gene}({site})" if site else gene
-                ptm_log2fc = node.get("value", node.get("ptm_log2fc", node.get("log2fc", 0)))
-                protein_log2fc = node.get("protein_log2fc", 0)
+                ptm_log2fc = _optional_numeric(node.get("value"), node.get("ptm_log2fc"), node.get("log2fc"))
+                protein_log2fc = _optional_numeric(node.get("protein_log2fc"))
+                if ptm_log2fc is None:
+                    continue
                 if key not in ptm_temporal:
                     ptm_temporal[key] = {}
                 ptm_temporal[key][tp] = {
@@ -676,12 +725,14 @@ def build_signal_propagation_json(
         sorted_tps = sorted(tp_data.keys(), key=tp_to_minutes)
         ptm_first_tp = None
         for tp in sorted_tps:
-            if abs(tp_data[tp]["ptm_log2fc"]) >= PTM_THRESHOLD:
+            ptm_value = tp_data[tp].get("ptm_log2fc")
+            if ptm_value is not None and abs(ptm_value) >= PTM_THRESHOLD:
                 ptm_first_tp = tp
                 break
         prot_first_tp = None
         for tp in sorted_tps:
-            if abs(tp_data[tp]["protein_log2fc"]) >= PROTEIN_THRESHOLD:
+            protein_value = tp_data[tp].get("protein_log2fc")
+            if protein_value is not None and abs(protein_value) >= PROTEIN_THRESHOLD:
                 prot_first_tp = tp
                 break
         if ptm_first_tp and prot_first_tp:
@@ -727,11 +778,12 @@ def build_signal_propagation_json(
     for ptm_key, tp_data in ptm_temporal.items():
         gene = tp_data[list(tp_data.keys())[0]]["gene"]
         for tp in sorted(tp_data.keys(), key=tp_to_minutes):
-            if abs(tp_data[tp]["ptm_log2fc"]) >= PTM_THRESHOLD:
+            ptm_value = tp_data[tp].get("ptm_log2fc")
+            if ptm_value is not None and abs(ptm_value) >= PTM_THRESHOLD:
                 if gene not in ptm_first_change or tp_to_minutes(tp) < tp_to_minutes(
                     ptm_first_change[gene][0]
                 ):
-                    ptm_first_change[gene] = (tp, tp_data[tp]["ptm_log2fc"])
+                    ptm_first_change[gene] = (tp, ptm_value)
                 break
 
     nonptm_first_change: Dict[str, tuple] = {}

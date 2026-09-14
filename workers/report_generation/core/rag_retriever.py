@@ -330,7 +330,7 @@ class RAGRetriever:
                             if key in {"authors", "year", "journal", "pmid", "doi"} and value
                         }}
                         all_results.append({
-                            "document": doc[:500],
+                            "document": str(doc or ""),
                             "source_id": source_ids[result_index] if result_index < len(source_ids) else None,
                             "collection_version": (getattr(coll, "metadata", None) or {}).get("version"),
                             "metadata": enriched_meta,

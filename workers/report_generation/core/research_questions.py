@@ -2,8 +2,33 @@
 import hashlib
 import re
 
-VERSION = "research_question_evidence_map.v1"
-STOP = {"PTM", "PTMS", "RNA", "DNA", "NA", "MS", "FC", "FDR", "CI", "RQ", "ERK", "AKT", "TEY"}
+VERSION = "research_question_evidence_map.v2"
+STOP = {"PTM", "PTMS", "RNA", "DNA", "NA", "MS", "FC", "FDR", "CI", "RQ", "ERK", "AKT", "TEY", "TW"}
+
+
+def classify_question_intent(text: str) -> str:
+    """Route a question. Does not rewrite it or mark it answered."""
+    if re.search(r"caus|intervention|inhibit|knock(?:down|out)|perturb", text, re.I):
+        return "causal_intervention"
+    if re.search(r"kinase|substrate|기질", text, re.I):
+        return "kinase_context"
+    if re.search(r"pathway|KEGG|Reactome", text, re.I):
+        return "pathway_context"
+    if re.search(r"occupancy|paired.?peptide|stoichiometr|peptide fraction", text, re.I):
+        return "paired_peptide"
+    if re.search(r"atlas|sampled[- ]shape|sampled pattern", text, re.I):
+        return "atlas_observation"
+    if re.search(r"cluster|co-?wave|concordance|module", text, re.I):
+        return "cluster_concordance"
+    if re.search(r"isoform|multiform|same protein.*site|another site", text, re.I):
+        return "multiform"
+    if re.search(r"adjust|보정|protein.*PTM|PTM.*protein", text, re.I):
+        return "joint_ptm_protein"
+    if re.search(r"late protein|abundance|non-?PTM", text, re.I):
+        return "late_protein"
+    if re.search(r"time|temporal|when|peak|onset|recover", text, re.I):
+        return "feature_trajectory"
+    return "unspecified"
 
 
 def build_question_map(questions, cards):
@@ -14,7 +39,8 @@ def build_question_map(questions, cards):
         if not original:
             continue
         normalized = re.sub(r"^(?:Q\d+[.:]?\s*)", "", original, flags=re.I)
-        entities = sorted(set(re.findall(r"\b[A-Z][A-Z0-9]{1,11}\b", normalized)) - STOP)
+        entity_source = re.sub(r"\bTW-\d+\b", " ", normalized)
+        entities = sorted(set(re.findall(r"\b[A-Z][A-Z0-9]{1,11}\b", entity_source)) - STOP)
         aliases = {"ERK": ["MAPK1", "MAPK3"], "AKT": ["AKT1", "AKT2", "AKT3"]}
         for name, genes in aliases.items():
             if re.search(r"\b" + name + r"\b", normalized):
@@ -26,30 +52,69 @@ def build_question_map(questions, cards):
             automatic[key]["merged_original_texts"].append(original)
             continue
         adjustment = bool(re.search(r"adjust|보정|protein.*PTM|PTM.*protein", normalized, re.I))
+        intent = classify_question_intent(normalized)
         requested_times = sorted(set(re.findall(r"\b\d+(?:\.\d+)?\s*min\b", normalized, re.I)))
         matches = []
         for card in cards:
             identity = card.get("feature_identity") or {}
             gene = str(identity.get("gene") or "")
-            if entities and gene not in entities:
+            category = str(card.get("category") or "")
+            if intent == "kinase_context" and category == "kinase_context":
+                matches.append(card)
                 continue
-            if not entities and not adjustment:
+            if intent == "pathway_context" and category == "pathway_context":
+                matches.append(card)
+                continue
+            if intent == "late_protein" and category == "protein_context":
+                matches.append(card)
+                continue
+            if intent == "multiform" and card.get("evidence_type") == "multiform_comparison":
+                matches.append(card)
+                continue
+            if intent == "paired_peptide" and card.get("evidence_type") == "paired_peptide_fraction":
+                matches.append(card)
+                continue
+            if intent == "cluster_concordance" and category == "temporal_profile":
+                matches.append(card)
+                continue
+            if intent == "atlas_observation" and card.get("evidence_type") == "atlas_observation":
+                matches.append(card)
+                continue
+            if entities and gene and gene not in entities:
+                continue
+            if not entities and not adjustment and intent not in {"feature_trajectory", "joint_ptm_protein"}:
                 continue
             if card.get("trajectory"):
                 if requested_times and not any(str(p.get("condition", "")).replace(" ", "").lower() in {t.replace(" ", "").lower() for t in requested_times} for p in card["trajectory"]):
                     continue
                 matches.append(card)
-        feature_ids = sorted({c["feature_identity"]["reader_feature_id"] for c in matches})
-        matched_genes = {c["feature_identity"]["gene"] for c in matches}
-        joint_available = any(all((p.get("axes") or {}).get(a, {}).get("available") for a in ("unadjusted", "protein", "adjusted")) for c in matches for p in c["trajectory"])
-        descriptive_answerable = (adjustment and joint_available and set(entities).issubset(matched_genes)
-                                   and not re.search(r"activat|caus|direct|kinase|기전|활성", normalized, re.I))
+        feature_ids = sorted({
+            c["feature_identity"]["reader_feature_id"]
+            for c in matches if (c.get("feature_identity") or {}).get("reader_feature_id")
+        })
+        matched_genes = {
+            c["feature_identity"]["gene"]
+            for c in matches if (c.get("feature_identity") or {}).get("gene")
+        }
+        joint_available = any(
+            all((p.get("axes") or {}).get(a, {}).get("available") for a in ("unadjusted", "protein", "adjusted"))
+            for c in matches for p in (c.get("trajectory") or [])
+        )
+        observational_match = bool(feature_ids) or any(c.get("category") in {"kinase_context", "pathway_context", "protein_context", "temporal_profile", "quantitation_comparison"} for c in matches)
+        descriptive_answerable = (
+            adjustment and joint_available and (not entities or set(entities).issubset(matched_genes))
+            and intent == "joint_ptm_protein"
+        )
+        causal = intent == "causal_intervention"
         entry = {"question_id": qid, "original_text": original, "normalized_question": normalized,
                  "origin": record.get("origin", "user"), "related_question_ids": [], "merged_original_texts": [],
+                 "intent": intent,
                  "entities": sorted(set(entities)), "requested_times": requested_times, "feature_ids": feature_ids, "finding_ids": [],
                  "evidence_ids": sorted({eid for c in matches for eid in c.get("evidence_ids") or []}),
                  "literature_evidence_ids": [],
-                 "answer_status": "partially_answerable" if matches else "unanswered",
+                 "answer_status": "partially_answerable" if observational_match and not causal else "unanswered",
+                 "answerability": "observational_only" if observational_match and not causal else "not_answerable_from_current_observations",
+                 "coverage": "unanswered",
                  "descriptive_answerable": descriptive_answerable,
                  "results_paragraph_ids": [], "discussion_paragraph_ids": [],
                  "unresolved_reason": "Measured precursor context is available; direct functional or causal interpretation requires matched mapping and intervention evidence." if matches
@@ -79,6 +144,7 @@ def audit_question_coverage(sections, question_map):
                     matched.append(section + ":" + hashlib.sha256(p.encode()).hexdigest()[:12])
             row[section + "_paragraph_ids"] = matched
         row["coverage_status"] = "integrated" if row["discussion_paragraph_ids"] and (row["results_paragraph_ids"] or row["answer_status"] == "unanswered") else "missing"
+        row["coverage"] = row["coverage_status"]
         if row["coverage_status"] == "integrated" and row.get("descriptive_answerable"):
             row["answer_status"] = "answered"
             row["unresolved_reason"] = None
@@ -90,9 +156,13 @@ def audit_question_coverage(sections, question_map):
 def unresolved_question_paragraphs(question_map):
     paragraphs = []
     for q in (question_map or {}).get("questions") or []:
-        if q["feature_ids"]:
+        if q.get("feature_ids") or q.get("evidence_ids"):
+            continue
+        if q.get("intent") in {"cluster_concordance", "kinase_context"} and q.get("answerability") == "observational_only":
             continue
         subject = ", ".join(q["entities"]) if q["entities"] else "the requested temporal or pathway relationship"
+        if subject in {"SSB", "TW"} or len(str(subject)) <= 3:
+            continue
         paragraphs.append(f"For {subject}, matching observations or a question-specific analysis were not supplied. "
                           "Resolving this question requires the corresponding precursor trajectories and mapping or pathway membership evidence; unrelated protein contrasts cannot answer it.")
     return paragraphs
