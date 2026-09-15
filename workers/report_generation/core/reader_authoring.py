@@ -77,19 +77,19 @@ SECTION_STORY_CONTRACT = {
         "sequence": "study problem → measurement rationale → cited context → unresolved question → present study objective",
     },
     "results": {
-        "categories": ("quantitative_landscape", "quantitative_provenance", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "protein_context", "pathway_context", "candidate_discovery"),
-        "role": "Report measured scope before selected temporal observations, protein-linked context, and any eligible candidate context.",
-        "sequence": "coverage → selected temporal observation → protein-linked quantitative context → candidate context → observation boundary",
+        "categories": ("quantitative_landscape", "quantitative_provenance", "measured_feature_observation", "quantitation_comparison", "temporal_profile", "kinase_context", "pathway_context", "candidate_discovery"),
+        "role": "Report measured PTM scope before selected temporal observations, quantitation-validity context, and any eligible candidate-family context.",
+        "sequence": "coverage → selected PTM temporal observation → quantitation-validity context → temporal/candidate context → observation boundary",
         "paragraph_roles": (
             "measurement_scope_and_quantitative_landscape",
             "principal_observed_temporal_pattern",
-            "protein_linked_quantitative_context",
+            "quantitation_validity_and_alternative_explanation",
             "temporal_profile_and_interval_concordance",
             "candidate_family_context",
         ),
     },
     "discussion": {
-        "categories": ("measured_feature_observation", "quantitation_comparison", "quantitative_provenance", "temporal_profile", "kinase_context", "protein_context", "pathway_context", "candidate_discovery", "traceable_literature"),
+        "categories": ("measured_feature_observation", "quantitation_comparison", "quantitative_provenance", "temporal_profile", "kinase_context", "pathway_context", "candidate_discovery", "traceable_literature"),
         "role": "Interpret current observations in the selected literature context, state the alternative explanation that remains, and identify the next discriminating experiment.",
         "sequence": "principal observation → cited comparison → bounded interpretation → remaining alternative → discriminating validation",
         "paragraph_roles": (
@@ -2278,10 +2278,10 @@ def _default_summary(values: list[str], default: str) -> str:
 def _joint_description(card):
     patterns = {p.get("joint_pattern") for p in card.get("trajectory") or [] if not p.get("detection_context_only")}
     descriptions = {
-        "ptm_maintained_protein_decreased_adjusted_increased": "The independent PTM contrast remained near the reference level while linked protein was lower and the protein-adjusted contrast was higher; the modified precursor itself did not show a corresponding increase. This comparison makes the protein-denominator contribution relevant to interpretation of the relative PTM increase.",
-        "ptm_protein_co_movement": "Independent PTM and linked protein changed together, while the protein-adjusted contrast remained near the reference level. This comparison interprets the protein-abundance contribution before treating the PTM contrast as precursor-specific.",
-        "ptm_increased_with_stable_protein": "Independent and protein-adjusted PTM contrasts were higher while linked protein remained near the reference level.",
-        "near_reference_all_axes": "The three relative contrasts remained near their reference levels within the descriptive tolerance.",
+        "ptm_maintained_protein_decreased_adjusted_increased": "The independent PTM contrast remained near the reference level while the protein-adjusted relative PTM contrast was higher. The denominator check is therefore relevant before interpreting this as a precursor-specific response.",
+        "ptm_protein_co_movement": "Independent and protein-adjusted relative PTM contrasts differed after denominator adjustment. This comparison is retained as a quantitation-validity check rather than a separate protein-response finding.",
+        "ptm_increased_with_stable_protein": "Both independent and protein-adjusted relative PTM contrasts were higher in the available observations.",
+        "near_reference_all_axes": "The independent and protein-adjusted relative PTM contrasts remained near their reference levels within the descriptive tolerance.",
         "incomplete_axes_observation": "Available PTM observations were retained, with unavailable axes excluded from joint interpretation.",
     }
     exact = descriptions.get(next(iter(patterns)) if len(patterns) == 1 else "")
@@ -2291,13 +2291,13 @@ def _joint_description(card):
     paired = [(p.get("ptm_unadjusted_log2fc"), p.get("protein_log2fc"), p.get("ptm_protein_adjusted_log2fc")) for p in points]
     paired = [(u, p, a) for u, p, a in paired if all(v is not None for v in (u, p, a))]
     if paired and all(u * p > 0 and abs(a) < abs(u) for u, p, a in paired):
-        return "The independent PTM and protein contrasts changed in the same direction, and protein adjustment reduced the PTM contrast magnitude. This supports examining the protein-abundance contribution before interpreting a PTM-specific response."
+        return "The independent and protein-adjusted relative PTM contrasts differed in magnitude. This supports checking denominator contribution before interpreting a PTM-specific response."
     if paired and all(abs(p) < .15 and abs(a) >= .15 for u, p, a in paired):
-        return "The adjusted PTM response remained while linked protein contrasts stayed near the reference level. The observed precursor response is therefore not explained by a parallel increase in measured protein abundance alone."
+        return "The protein-adjusted relative PTM response remained after denominator adjustment. The available observations are retained as a PTM response, subject to denominator and sampling checks."
     values = [a for u, p, a in paired]
     if values and min(values) < 0 < max(values):
-        return "The adjusted contrast changed direction within the sampled window. The reversal motivates comparing early and late precursor responses while preserving differences in their protein denominators."
-    return "The relation between independent PTM, protein and adjusted contrasts varied across the sampled observations. Their distinct directions and magnitudes identify which part of the response requires a denominator or precursor-specific explanation."
+        return "The protein-adjusted relative PTM contrast changed direction within the sampled window. The reversal motivates comparison of early and late precursor responses while retaining denominator checks."
+    return "Independent and protein-adjusted relative PTM contrasts varied across the sampled observations. Their differences identify where denominator quality should be checked before a precursor-specific interpretation."
 
 
 def finding_observation_conditions(card):
@@ -2337,7 +2337,10 @@ def _sampled_trajectory_interpretation(card):
 
 
 def _named_finding_clause(card, finding=None, *, maximum_conditions=3):
-    records = [r for r in quantitative_records(card) if r.get("value") is not None]
+    records = [
+        record for record in quantitative_records(card)
+        if record.get("value") is not None and record.get("axis") in {"unadjusted", "adjusted"}
+    ]
     conditions = finding_observation_conditions(card)[:maximum_conditions]
     compact: list[str] = []
     for condition in conditions:
@@ -2363,7 +2366,7 @@ def _evidence_bound_bridge(kind: str) -> str:
     return {
         "quantitation": (
             "These selected measurements are next compared with the independently calculated "
-            "unadjusted, protein-adjusted, and linked protein contrasts."
+            "unadjusted and protein-adjusted relative PTM contrasts, with linked protein retained as denominator context."
         ),
         "time": (
             "The same sampled intervals also support a descriptive temporal-profile and "
@@ -2377,6 +2380,42 @@ def _evidence_bound_bridge(kind: str) -> str:
             "The selected source-anchored comparisons remain limited to their recorded experimental scope."
         ),
     }.get(kind, "")
+
+
+def restore_narrative_bridges(section: str, text: str, packet: Mapping[str, Any]) -> tuple[str, list[dict]]:
+    """Restore only a missing manuscript bridge, never a section-level fallback.
+
+    This repair is deliberately qualitative and evidence-bounded.  It prevents a
+    locally withheld numeric or directness clause from leaving a Results or
+    Discussion paragraph as an abrupt list, without reintroducing technical
+    diagnostics or fabricating a biological mechanism.
+    """
+    if section not in {"results", "discussion"} or not str(text or "").strip():
+        return text, []
+    lowered = str(text).lower()
+    additions: list[dict] = []
+    if section == "results":
+        if not re.search(r"\b(?:temporal profile|interval-wise concordance|sampled interval)\b", lowered):
+            additions.append({"role": "temporal_profile_and_interval_concordance", "text": _evidence_bound_bridge("time")})
+        supporting = _supporting_context_cards(packet.get("reader_cards") or [])
+        if supporting and not re.search(r"\b(?:candidate[- ]family|candidate context|substrate-anchor)\b", lowered):
+            additions.append({"role": "candidate_family_context", "text": _evidence_bound_bridge("scope")})
+    else:
+        if not re.search(r"\b(?:alternative|denominator|mapping|sampling)\b", lowered):
+            additions.append({
+                "role": "competing_explanation_and_current_limitation",
+                "text": "Denominator quality, mapping, and sampling remain alternative explanations for the observed relative PTM contrast."
+            })
+        if not re.search(r"\b(?:next experiment|next validation|discriminating|matched validation)\b", lowered):
+            additions.append({
+                "role": "discriminating_next_experiment",
+                "text": "A matched measurement of the same modified precursor in independent samples is the next discriminating validation."
+            })
+    valid = [item for item in additions if str(item.get("text") or "").strip()]
+    if not valid:
+        return text, []
+    suffix = "\n\n".join(str(item["text"]).strip() for item in valid)
+    return str(text).rstrip() + "\n\n" + suffix, [{"status": "bridge_micro_recovery", **item} for item in valid]
 
 
 def _literature_status_card(packet) -> str:
@@ -2435,16 +2474,16 @@ def _render_role_based_results(packet, study, cards, plan, figures):
         observation += " " + "; ".join(figure_bits) + " display the corresponding measured evidence."
     comparison_cards = [c for c in packet.get("reader_cards") or [] if c.get("category") == "quantitation_comparison"][:2]
     if comparison_cards:
-        protein_context = (
-            "Independently calculated unadjusted PTM contrasts, protein-adjusted relative PTM log2 contrasts, "
-            "and linked protein contrasts were compared for the selected features. "
-            "The descriptive comparison classes record how protein adjustment changed the reported contrast; "
-            "they do not prove that the adjusted value is biologically truer."
+        quantitation_context = (
+            "Linked total-protein measurements were used as the denominator for protein-adjusted relative PTM contrasts "
+            "and as a quantitation-validity check for the selected modified precursors. Their condition-level changes are "
+            "not interpreted here as an independent biological response storyline. The descriptive comparison classes show "
+            "how denominator adjustment changed the reported PTM contrast; they do not prove that either contrast is biologically truer."
         )
     else:
-        protein_context = (
+        quantitation_context = (
             "An independent unadjusted-versus-protein-adjusted comparison was not available "
-            "for the selected findings; the three quantitative tracks remain distinct."
+            "for the selected findings; denominator validity remains unresolved rather than becoming a separate protein-response finding."
         )
     temporal = _default_summary(
         _summaries_by_category(packet, "temporal_profile", limit=2),
@@ -2464,7 +2503,7 @@ def _render_role_based_results(packet, study, cards, plan, figures):
         landscape,
         _evidence_bound_bridge("quantitation"),
         observation,
-        protein_context,
+        quantitation_context,
         _evidence_bound_bridge("time"),
         temporal,
         _evidence_bound_bridge("scope"),

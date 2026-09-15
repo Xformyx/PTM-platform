@@ -17,6 +17,7 @@ from common.model_json import parse_model_json
 from .quantitative_fields import axis_number
 
 CLAIM_SCHEMA_VERSION = "reader_quantitative_claim.v2"
+NARRATIVE_CLAIM_SCHEMA_VERSION = "reader_narrative_claim.v1"
 AXIS_LABELS = {"unadjusted": "unadjusted PTM contrast",
                "adjusted": "protein-adjusted relative PTM log2 contrast",
                "protein": "linked protein contrast"}
@@ -364,6 +365,50 @@ def structured_authoring_instructions(
             + json.dumps(unavailable, ensure_ascii=False, separators=(",", ":")))
 
 
+def narrative_authoring_instructions(
+    packet: Mapping[str, Any],
+    *,
+    token_catalog: Mapping[str, Any] | None = None,
+    unavailable_records: list[Mapping[str, Any]] | None = None,
+) -> str:
+    """Request cohesive paragraphs before applying local evidence binding.
+
+    The immutable token catalogue is retained for any exact current-study value,
+    but the provider is no longer asked to turn every sentence into a separate
+    evidence record.  This keeps the manuscript bridge sentences and paragraph
+    roles legible while the decoder remains free to withhold a single unsupported
+    numerical sentence rather than discarding a whole section.
+    """
+    catalog = dict(token_catalog) if token_catalog is not None else value_token_catalog(packet)
+    unavailable = (
+        [dict(record) for record in unavailable_records]
+        if unavailable_records is not None
+        else [
+            record
+            for card in packet.get("reader_cards") or []
+            for record in quantitative_records(card)
+            if record["value"] is None
+        ]
+    )
+    return (
+        "\nNarrative response contract: reader_narrative_section. Return a JSON object with cohesive manuscript paragraphs matching this schema: "
+        + json.dumps(NARRATIVE_RESPONSE_FORMAT["json_schema"]["schema"])
+        + "\nWrite 2–4 sentences per paragraph and use the requested paragraph role once. "
+        "Use a bridge sentence between observed PTM patterns, descriptive temporal context, "
+        "candidate-family context, and the next discriminating experiment. "
+        "Current-study numbers must appear only as {{V1}} style value tokens; each token expands to "
+        "a source-bound reader-safe feature, condition, axis, and value clause. Do not invent or alter "
+        "numbers, evidence IDs, figures, citations, direct kinase–substrate assignments, catalytic activity, "
+        "or causal propagation. Keep linked-protein values as denominator/quantitation-validity context rather "
+        "than a co-equal biological response storyline. Preserve [REF:*] citations in text. "
+        "A paragraph may use no value tokens when a qualitative, source-bound bridge is clearer. "
+        "\nImmutable value tokens: "
+        + json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
+        + "\nUnavailable observations (not value tokens; use only their stated limitation when relevant): "
+        + json.dumps(unavailable, ensure_ascii=False, separators=(",", ":"))
+    )
+
+
 SENTENCE_RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {
     "name": "reader_section", "strict": True, "schema": {
         "type": "object", "additionalProperties": False, "required": ["sentences"],
@@ -375,6 +420,130 @@ SENTENCE_RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {
                 "evidence_ids": {"type": "array", "items": {"type": "string"}},
                 "value_tokens": {"type": "array", "items": {"type": "string"}},
                 "figure_keys": {"type": "array", "items": {"type": "string"}}}}}}}}}
+
+
+NARRATIVE_RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {
+    "name": "reader_narrative_section", "strict": True, "schema": {
+        "type": "object", "additionalProperties": False, "required": ["paragraphs"],
+        "properties": {"paragraphs": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["role", "text", "scope", "evidence_ids", "value_tokens", "figure_keys"],
+            "properties": {
+                "role": {"type": "string"},
+                "text": {"type": "string"},
+                "scope": {"type": "string", "enum": ["observation", "literature_context", "hypothesis", "study_rationale", "biological_interpretation", "testable_hypothesis"]},
+                "evidence_ids": {"type": "array", "items": {"type": "string"}},
+                "value_tokens": {"type": "array", "items": {"type": "string"}},
+                "figure_keys": {"type": "array", "items": {"type": "string"}}
+            }
+        }}}}}}
+
+
+def decode_narrative_draft(content: str, packet: Mapping[str, Any]) -> tuple[str, list[dict]]:
+    """Bind a paragraph-first provider draft without flattening its narrative arc.
+
+    A malformed paragraph or a numerical sentence with no source binding is
+    withheld locally.  Valid bridge, comparison, and next-experiment sentences
+    in the same paragraph remain available to the downstream semantic repair.
+    """
+    catalog = value_token_catalog(packet)
+    try:
+        parsed = parse_model_json(content)
+        paragraphs = parsed["paragraphs"] if isinstance(parsed, dict) else None
+        if not isinstance(paragraphs, list):
+            raise ValueError("paragraphs must be an array")
+    except (ValueError, TypeError, KeyError):
+        return "", [{"reason_code": "invalid_narrative_json", "retained": False}]
+
+    evidence = {eid for card in packet.get("reader_cards") or [] for eid in card.get("evidence_ids") or []}
+    figures = {str(figure.get("figure_key")): figure for figure in packet.get("figure_cards") or []}
+    rendered: list[str] = []
+    audit: list[dict] = []
+    valid_scopes = {"observation", "literature_context", "hypothesis", "study_rationale", "biological_interpretation", "testable_hypothesis"}
+    for index, item in enumerate(paragraphs, 1):
+        reasons: list[str] = []
+        if (
+            not isinstance(item, Mapping)
+            or not isinstance(item.get("text"), str)
+            or not isinstance(item.get("role"), str)
+            or not str(item.get("role") or "").strip()
+            or item.get("scope") not in valid_scopes
+            or any(
+                not isinstance(item.get(key), list) or any(not isinstance(value, str) for value in item[key])
+                for key in ("evidence_ids", "value_tokens", "figure_keys")
+            )
+        ):
+            audit.append({"paragraph_index": index, "reason_code": "invalid_narrative_paragraph_record", "retained": False})
+            continue
+        text = str(item["text"]).strip()
+        tokens = list(item["value_tokens"])
+        references = [catalog[token] for token in tokens if token in catalog]
+        if set(re.findall(r"\{\{(V\d+)\}\}", text)) != set(tokens) or any(token not in catalog for token in tokens):
+            reasons.append("unknown_or_unbound_value_token")
+        if references and item["scope"] != "observation":
+            reasons.append("quantitative_reference_scope_mismatch")
+        if not set(item["evidence_ids"]).issubset(evidence) or any(record["evidence_id"] not in item["evidence_ids"] for record in references):
+            reasons.append("unbound_paragraph_evidence")
+        for key in item["figure_keys"]:
+            figure = figures.get(str(key))
+            if figure is None or any(record.get("feature_id") not in figure.get("selected_reader_feature_ids", []) for record in references):
+                reasons.append("quantitative_figure_membership_mismatch")
+        if reasons:
+            audit.append({"paragraph_index": index, "role": item.get("role"), "reason_codes": reasons, "retained": False})
+            continue
+        for token in tokens:
+            text = text.replace("{{" + token + "}}", render_value_record(catalog[token]))
+
+        retained_sentences: list[str] = []
+        sentence_audit: list[dict] = []
+        for sentence in _split_draft_sentences(text):
+            local_reasons = validate_quantitative_sentence(sentence, packet)
+            sentence_audit.append({
+                "source_sentence": sentence,
+                "validated_sentence": "" if local_reasons else sentence,
+                "reason_codes": local_reasons or ["within_contract"],
+                "retained": not local_reasons,
+            })
+            if not local_reasons:
+                retained_sentences.append(sentence)
+        paragraph_text = " ".join(retained_sentences)
+        if paragraph_text:
+            anchors = " ".join(f"[EVID:{eid}]" for eid in item["evidence_ids"])
+            rendered.append((paragraph_text + " " + anchors).strip())
+        audit.append({
+            "paragraph_index": index,
+            "role": item["role"],
+            "scope": item["scope"],
+            "evidence_ids": list(item["evidence_ids"]),
+            "value_tokens": tokens,
+            "sentence_audit": sentence_audit,
+            "resolved_text": paragraph_text,
+            "retained": bool(paragraph_text),
+        })
+    return "\n\n".join(rendered), audit
+
+
+def merge_valid_narrative_drafts(drafts, packet: Mapping[str, Any]) -> tuple[str, list[dict]]:
+    """Merge retries by paragraph role, retaining the most complete valid draft."""
+    by_role: dict[str, tuple[str, int]] = {}
+    audit: list[dict] = []
+    for attempt, draft in enumerate(drafts, 1):
+        if not draft or str(draft).startswith("[LLM Error"):
+            continue
+        prose, records = decode_narrative_draft(str(draft), packet)
+        for record in records:
+            audit.append({**record, "attempt": attempt})
+            if not record.get("retained") or not record.get("role"):
+                continue
+            role = str(record["role"])
+            candidate = str(record.get("resolved_text") or "").strip()
+            if not candidate:
+                continue
+            score = len(candidate.split())
+            prior = by_role.get(role)
+            if prior is None or score > prior[1]:
+                by_role[role] = (candidate, score)
+    return "\n\n".join(value[0] for value in by_role.values()), audit
 
 
 def decode_sentence_draft(content: str, packet: Mapping[str, Any]) -> tuple[str, list[dict]]:

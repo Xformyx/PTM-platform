@@ -1,7 +1,13 @@
+import json
 import re
 
 from report_generation.core.measured_feature_cards import build_feature_observation_cards
-from report_generation.core.quantitative_claims import decode_sentence_draft, render_value_record, value_token_catalog
+from report_generation.core.quantitative_claims import (
+    decode_narrative_draft,
+    decode_sentence_draft,
+    render_value_record,
+    value_token_catalog,
+)
 from report_generation.core.reader_authoring import (
     audit_named_feature_ceiling,
     audit_report_output_correctness,
@@ -9,10 +15,12 @@ from report_generation.core.reader_authoring import (
     deterministic_authoring_plan,
     focus_authoring_packet,
     render_reader_section_fallback,
+    restore_narrative_bridges,
 )
 from report_generation.core.report_release import resolve_report_release
 from report_generation.core.section_model_packet import (
     build_section_model_packet,
+    compose_compacted_narrative_prompt,
     compose_compacted_section_prompt,
     format_section_model_prompt,
 )
@@ -126,6 +134,53 @@ def test_section_prompt_does_not_reintroduce_unavailable_records_from_omitted_ca
             assert marker not in prompt
 
 
+def test_narrative_decoder_keeps_valid_bridge_when_one_paragraph_is_malformed():
+    packet = build_authoring_packet(_vector_state(3))
+    catalog = value_token_catalog(packet)
+    token, record = next(iter(catalog.items()))
+    draft = {
+        "paragraphs": [
+            {
+                "role": "principal_observed_temporal_pattern",
+                "text": (
+                    "The selected modified-precursor observation provides a measured PTM reference point. "
+                    f"The current observation was {{{{{token}}}}}. "
+                    "This measured pattern motivates comparison with the next sampled interval."
+                ),
+                "scope": "observation",
+                "evidence_ids": [record["evidence_id"]],
+                "value_tokens": [token],
+                "figure_keys": [],
+            },
+            {
+                "role": "bad_record",
+                "text": "This malformed paragraph must not remove the preceding bridge.",
+                "scope": "unsupported_scope",
+                "evidence_ids": [],
+                "value_tokens": [],
+                "figure_keys": [],
+            },
+        ]
+    }
+    prose, audit = decode_narrative_draft(json.dumps(draft), packet)
+
+    assert "motivates comparison with the next sampled interval" in prose
+    assert "PF-" not in prose
+    assert any(not item["retained"] for item in audit)
+    assert any(item.get("role") == "principal_observed_temporal_pattern" and item["retained"] for item in audit)
+
+
+def test_compacted_narrative_prompt_uses_public_paragraph_schema_only():
+    packet = build_authoring_packet(_vector_state(16))
+    plan = deterministic_authoring_plan(packet)
+    prompt, trace = compose_compacted_narrative_prompt(packet, "results", plan, max_chars=20_000)
+
+    assert "reader_narrative_section" in prompt
+    assert "JSON object with cohesive manuscript paragraphs" in prompt
+    assert not re.search(r"\bPF-\d", prompt)
+    assert trace["authoring_style"] == "narrative_first"
+
+
 def test_malformed_sibling_sentence_is_dropped_without_section_blanking():
     packet = build_authoring_packet(_vector_state(3))
     draft = (
@@ -152,6 +207,18 @@ def test_role_based_fallback_avoids_not_evaluable_loops_and_pf_ids():
     assert "not evaluable" not in results.lower()
     assert "next" in discussion.lower()
     assert audit_named_feature_ceiling(results, packet["reader_cards"]) == []
+
+
+def test_bridge_micro_recovery_repairs_only_missing_reader_roles():
+    packet = build_authoring_packet(_vector_state(4))
+    source = "Selected modified-precursor observations were retained as descriptive measurements."
+    repaired, audit = restore_narrative_bridges("results", source, packet)
+
+    assert repaired.startswith(source)
+    assert audit
+    assert all(item["status"] == "bridge_micro_recovery" for item in audit)
+    assert "PF-" not in repaired
+    assert "P0" not in repaired
 
 
 def test_generation_degraded_blocks_final_but_keeps_review_artifacts():

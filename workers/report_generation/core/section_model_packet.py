@@ -12,6 +12,7 @@ from typing import Any, Mapping
 
 from common.report_display_policy import PROMPT_CHAR_BUDGET, effective_display_policy
 from report_generation.core.quantitative_claims import (
+    narrative_authoring_instructions,
     quantitative_records,
     structured_authoring_instructions,
     value_token_catalog,
@@ -404,6 +405,28 @@ def format_section_model_prompt(
     return prompt + instructions
 
 
+def format_narrative_model_prompt(
+    model_packet: Mapping[str, Any],
+    section_type: str,
+    plan: Mapping[str, Any] | None,
+    audit_packet: Mapping[str, Any],
+) -> str:
+    """Format a paragraph-first model prompt from the same compact evidence set."""
+    prompt = format_authoring_packet_for_llm(
+        model_packet,
+        section_type,
+        plan,
+        include_quantitative_records=False,
+    )
+    catalog = _catalog_for_model(audit_packet, model_packet)
+    instructions = narrative_authoring_instructions(
+        audit_packet,
+        token_catalog=catalog,
+        unavailable_records=_unavailable_records_for_model(audit_packet, model_packet),
+    )
+    return prompt + instructions
+
+
 def compose_compacted_section_prompt(
     audit_packet: Mapping[str, Any],
     section_type: str,
@@ -435,6 +458,45 @@ def compose_compacted_section_prompt(
         "omitted_evidence_ids_and_reason": list(last_packet.get("omitted_evidence_ids_and_reason") or []),
         "within_budget": len(last_prompt) <= max_chars,
         "section_model_packet": last_packet,
+        "generation_degraded": True,
+        "fallback_reason": None,
+    }
+
+
+def compose_compacted_narrative_prompt(
+    audit_packet: Mapping[str, Any],
+    section_type: str,
+    plan: Mapping[str, Any] | None,
+    *,
+    extra_suffix: str = "",
+    max_chars: int = PROMPT_CHAR_BUDGET,
+    start_compaction_stage: int = 0,
+) -> tuple[str, dict]:
+    """Apply the established compaction ladder to paragraph-first generation."""
+    last_prompt = ""
+    last_packet: dict = {}
+    for stage in range(max(0, min(int(start_compaction_stage), 5)), 6):
+        model_packet = build_section_model_packet(audit_packet, plan, section_type, compaction_stage=stage)
+        prompt = format_narrative_model_prompt(model_packet, section_type, plan, audit_packet) + extra_suffix
+        last_prompt, last_packet = prompt, model_packet
+        if len(prompt) <= max_chars:
+            return prompt, {
+                "prompt_compaction_stage": stage,
+                "prompt_character_count": len(prompt),
+                "retained_evidence_ids": list(model_packet.get("retained_evidence_ids") or []),
+                "omitted_evidence_ids_and_reason": list(model_packet.get("omitted_evidence_ids_and_reason") or []),
+                "within_budget": True,
+                "section_model_packet": model_packet,
+                "authoring_style": "narrative_first",
+            }
+    return last_prompt, {
+        "prompt_compaction_stage": 5,
+        "prompt_character_count": len(last_prompt),
+        "retained_evidence_ids": list(last_packet.get("retained_evidence_ids") or []),
+        "omitted_evidence_ids_and_reason": list(last_packet.get("omitted_evidence_ids_and_reason") or []),
+        "within_budget": len(last_prompt) <= max_chars,
+        "section_model_packet": last_packet,
+        "authoring_style": "narrative_first",
         "generation_degraded": True,
         "fallback_reason": None,
     }

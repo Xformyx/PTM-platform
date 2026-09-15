@@ -8,7 +8,13 @@ Each section uses LLM with published literature context for integration.
 
 import json
 from common.section_budgets import SECTION_BUDGETS, section_content_issues
-from ..quantitative_claims import (CLAIM_SCHEMA_VERSION, SENTENCE_RESPONSE_FORMAT, decode_sentence_draft, structured_authoring_instructions)
+from ..quantitative_claims import (
+    CLAIM_SCHEMA_VERSION,
+    NARRATIVE_RESPONSE_FORMAT,
+    decode_narrative_draft,
+    merge_valid_narrative_drafts,
+    structured_authoring_instructions,
+)
 import logging
 import os
 import re
@@ -60,10 +66,11 @@ from report_generation.core.reader_authoring import (
     references_are_citation_complete,
     render_reader_section_fallback,
     required_section_roles,
+    restore_narrative_bridges,
     strip_authoring_anchors,
     validate_and_repair_sections,
 )
-from report_generation.core.section_model_packet import compose_compacted_section_prompt
+from report_generation.core.section_model_packet import compose_compacted_narrative_prompt
 from report_generation.core.figure_manifest import prepare_reader_figure_manifest
 
 logger = logging.getLogger(__name__)
@@ -951,7 +958,7 @@ def run_section_writing(state: dict) -> dict:
                 "cited external context. Do not add a technical audit, implementation status, raw feature list, "
                 "or figure not supplied by the packet. Follow the required paragraph roles and do not emit PF- or FEATURE- identifiers."
             )
-            prompt, compaction_trace = compose_compacted_section_prompt(
+            prompt, compaction_trace = compose_compacted_narrative_prompt(
                 section_authoring_packet,
                 section_type,
                 authoring_plan,
@@ -1184,13 +1191,16 @@ def run_section_writing(state: dict) -> dict:
         generation_kwargs = {}
         if section_authoring_packet is not None:
             def validate_draft(draft):
-                prose, records = decode_sentence_draft(draft, section_authoring_packet)
+                prose, records = decode_narrative_draft(draft, section_authoring_packet)
                 coverage = audit_finding_coverage({section_type: prose}, section_authoring_packet, authoring_plan)
                 missing = coverage["missing_finding_ids"] + coverage["discussion_missing_finding_ids"]
-                rejected = ["repair_rejected_sentence:" + json.dumps({"sentence": r.get("sentence"), "reasons": r.get("reason_codes") or [r.get("reason_code")]}, ensure_ascii=False)
+                rejected = ["repair_rejected_paragraph:" + json.dumps({"role": r.get("role"), "reasons": r.get("reason_codes") or [r.get("reason_code")]}, ensure_ascii=False)
                             for r in records if not r["retained"]]
-                return rejected + section_content_issues(prose, section_type) + [f"missing_finding:{fid}" for fid in missing]
-            generation_kwargs = {"response_format": SENTENCE_RESPONSE_FORMAT, "content_validator": validate_draft}
+                required_roles = set(required_section_roles(section_type))
+                present_roles = {str(record.get("role")) for record in records if record.get("retained")}
+                role_issues = [f"missing_paragraph_role:{role}" for role in required_roles - present_roles]
+                return rejected + role_issues + section_content_issues(prose, section_type) + [f"missing_finding:{fid}" for fid in missing]
+            generation_kwargs = {"response_format": NARRATIVE_RESPONSE_FORMAT, "content_validator": validate_draft}
         content = llm.generate_with_retry(
             prompt,
             system_prompt=ptm_system_prompt,
@@ -1202,15 +1212,52 @@ def run_section_writing(state: dict) -> dict:
             trace_sink=generation_attempts,
             **generation_kwargs,
         )
+        # A failed first request should not immediately replace a researcher
+        # manuscript with deterministic prose. Retry once with a smaller,
+        # independently traceable retained-evidence packet before fallback.
+        if (
+            section_authoring_packet is not None
+            and (not content or str(content).startswith("[LLM Error"))
+            and section_compaction_trace.get("prompt_compaction_stage", 5) < 5
+        ):
+            failed_trace = dict(section_compaction_trace)
+            retry_prompt, retry_trace = compose_compacted_narrative_prompt(
+                section_authoring_packet,
+                section_type,
+                authoring_plan,
+                extra_suffix=extra_suffix,
+                max_chars=MAX_PROMPT_CHARS,
+                start_compaction_stage=min(int(failed_trace["prompt_compaction_stage"]) + 2, 5),
+            )
+            generation_attempts.append({
+                "attempt": "narrative_compaction_retry",
+                "provider_raw_text": content,
+                "prompt_compaction_trace": failed_trace,
+            })
+            content = llm.generate_with_retry(
+                retry_prompt,
+                system_prompt=ptm_system_prompt,
+                temperature=llm_temperature,
+                max_tokens=max_tok,
+                min_words=min_words,
+                section_name=f"{section_type.capitalize()} compact retry",
+                max_retries=1,
+                trace_sink=generation_attempts,
+                **generation_kwargs,
+            )
+            prompt = retry_prompt
+            section_compaction_trace = {
+                **retry_trace,
+                "retry_of_prompt_compaction_stage": failed_trace.get("prompt_compaction_stage"),
+            }
         provider_result = content
         if section_authoring_packet is not None and content and not content.startswith("[LLM Error"):
             structured_raw_content = content
-            content, structured_audit = decode_sentence_draft(content, section_authoring_packet)
+            content, structured_audit = decode_narrative_draft(content, section_authoring_packet)
             if not content:
                 content = None
         if section_authoring_packet is not None and generation_attempts:
-            from ..quantitative_claims import merge_valid_sentence_drafts
-            recovered, structured_audit = merge_valid_sentence_drafts(
+            recovered, structured_audit = merge_valid_narrative_drafts(
                 [a.get("provider_raw_text") for a in generation_attempts], section_authoring_packet)
             if recovered:
                 content = recovered
@@ -1222,12 +1269,12 @@ def run_section_writing(state: dict) -> dict:
             and not str(content).startswith("[LLM Error")
         ):
             roles = required_section_roles(section_type)
-            paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content) if part.strip()]
-            if roles and len(paragraphs) < len(roles):
-                missing_roles = list(roles[len(paragraphs):])
+            present_roles = {str(record.get("role")) for record in structured_audit if record.get("retained")}
+            if roles and not set(roles).issubset(present_roles):
+                missing_roles = [role for role in roles if role not in present_roles]
                 role_prompt = (
                     prompt
-                    + "\n\nRegenerate only these missing paragraph roles as JSON sentences. "
+                    + "\n\nRegenerate only these missing paragraph roles as JSON narrative paragraphs. "
                     + "Do not rewrite retained paragraphs. Roles: "
                     + ", ".join(missing_roles)
                 )
@@ -1243,7 +1290,7 @@ def run_section_writing(state: dict) -> dict:
                     **generation_kwargs,
                 )
                 if role_draft and not str(role_draft).startswith("[LLM Error"):
-                    role_prose, role_audit = decode_sentence_draft(role_draft, section_authoring_packet)
+                    role_prose, role_audit = decode_narrative_draft(role_draft, section_authoring_packet)
                     structured_audit.extend(role_audit)
                     if role_prose:
                         content = content.rstrip() + "\n\n" + role_prose
@@ -1256,6 +1303,7 @@ def run_section_writing(state: dict) -> dict:
                         section_authoring_packet,
                         questions=active_questions,
                     )
+                    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content) if part.strip()]
                     extra = [part.strip() for part in re.split(r"\n\s*\n", fallback_roles) if part.strip()]
                     if extra:
                         content = content.rstrip() + "\n\n" + "\n\n".join(extra[len(paragraphs):] or extra[-len(missing_roles):])
@@ -1356,7 +1404,10 @@ def run_section_writing(state: dict) -> dict:
             from ..reader_authoring import restore_missing_finding_paragraphs
             repaired_sections[section_type], recovery_audit = restore_missing_finding_paragraphs(
                 section_type, repaired_sections.get(section_type, ""), section_authoring_packet, authoring_plan)
-            clause_audit["missing_role_recovery"] = recovery_audit
+            repaired_sections[section_type], bridge_audit = restore_narrative_bridges(
+                section_type, repaired_sections.get(section_type, ""), section_authoring_packet)
+            clause_audit["missing_finding_recovery"] = recovery_audit
+            clause_audit["narrative_bridge_micro_recovery"] = bridge_audit
             if recovery_audit:
                 with _reader_authoring_lock:
                     if section_type not in reader_authoring_fallback_sections:

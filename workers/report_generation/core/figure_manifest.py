@@ -174,10 +174,8 @@ class FigureEligibilityPolicy:
         if kind == "reader_protein_context":
             matched_count = int(figure.get("matched_feature_count") or 0)
             binding_valid = bool(_mapping(figure.get("feature_binding_audit")).get("binding_valid"))
-            if matched_count >= 2 and bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")) and binding_valid:
-                return "main", None
-            if matched_count == 1 and bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")) and binding_valid:
-                return "supplementary", "single_complete_comparison_retained_as_supplementary_context"
+            if matched_count >= 1 and bool(figure.get("matched_protein_context")) and bool(figure.get("labels_readable")) and binding_valid:
+                return "supplementary", "quantitation_validity_context_not_independent_biological_result"
             return "suppressed", "matched_protein_context_readable_labels_or_feature_binding_unavailable"
         if kind == "literature_comparison":
             return ("main", None) if citation_complete else ("suppressed", "traceable_citations_unavailable")
@@ -986,7 +984,7 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
         comparison_binding = _feature_binding_audit(comparison_cards)
         comparison_entry = _entry(
             "reader_protein_context", "reader_protein_context", comparison_path,
-            question="For matched current-order features, how did protein adjustment change the independently measured PTM contrast?",
+            question="For matched current-order features, how did denominator adjustment change the independently measured PTM contrast?",
             evidence_tier="O1",
             source_evidence_ids=[
                 str(card.get("evidence_ids", [""])[0])
@@ -994,10 +992,10 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
                 if card.get("evidence_ids")
             ],
             caption_facts={
-                "data_scope": "matched conventional current-order feature-condition records with independent unadjusted PTM, protein-adjusted PTM, and linked protein contrasts",
+                "data_scope": "matched conventional current-order feature-condition records with independent unadjusted PTM and protein-adjusted PTM contrasts; linked protein is retained as denominator-validity context",
                 "data_unit_scope": "modified-precursor feature-condition comparison",
-                "visual_encoding": "paired unadjusted and protein-adjusted PTM points connected within each record; linked protein contrast shown as a separate square",
-                "interpretation_boundary": "axis-specific point tests do not test the adjustment effect; de-novo and reconstructed values are excluded",
+                "visual_encoding": "paired unadjusted and protein-adjusted PTM points connected within each record; linked protein contrast is shown only as a denominator-validity reference",
+                "interpretation_boundary": "axis-specific point tests do not test the adjustment effect or define an independent protein-response storyline; de-novo and reconstructed values are excluded",
             },
             selection_rule="selected finding features at first response, sampled extremum and final observed time; independent matched axes",
             matched_feature_count=len(comparison_cards),
@@ -1014,7 +1012,7 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
             }),
             reconstructed_metric_excluded=True,
             de_novo_excluded=True,
-            title="Independent PTM and Protein-Adjustment Comparison",
+            title="PTM Relative Quantitation Denominator Check",
         )
         placement, reason = FigureEligibilityPolicy().classify(
             comparison_entry,

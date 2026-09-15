@@ -724,18 +724,18 @@ def build_quantitation_comparison_cards(
             "reader_summary": (
                 f"For {label} at {row['condition']}, the independently calculated unadjusted PTM contrast was "
                 f"{_format_signed(row['unadjusted'])}, the protein-adjusted PTM contrast was "
-                f"{_format_signed(row['adjusted'])}, and the linked protein contrast was "
-                f"{_format_signed(row['protein'])}; this was classified descriptively as "
+                f"{_format_signed(row['adjusted'])}; this was classified descriptively as "
                 f"{comparison_labels[row['comparison_class']]}. "
-                f"The linked protein contrast was shared by {shared_protein_counts[(row['protein_group'], row['condition'], round(row['protein'], 9))]} matched modified-precursor record(s) represented in the comparison input."
+                "The linked total-protein measurement is retained as denominator and quantitation-validity context, "
+                "not as a separate biological-response finding."
             ),
             "claim_tier": "O1",
             "evidence_ids": [evidence_id],
             "citation_ids": [],
             "allowed_verbs": allowed_verbs[row["comparison_class"]],
-            "forbidden_interpretations": ["proved correction", "improved truth", "absolute occupancy", "kinase activity"],
+            "forbidden_interpretations": ["proved correction", "improved truth", "absolute occupancy", "kinase activity", "independent protein-response storyline"],
             "counterevidence": (
-                "This arithmetic comparison describes how protein adjustment changed the reported contrast. "
+                "This arithmetic comparison describes how denominator adjustment changed the reported PTM contrast. "
                 "It does not prove that the adjusted value is biologically truer. The legacy reconstructed value is excluded."
             ),
             "feature_label": label,

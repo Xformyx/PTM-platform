@@ -57,6 +57,9 @@ def test_phase2_authoring_packet_contains_named_feature_and_independent_adjustme
     assert "quantitation_comparison" in categories
     assert any("GENEA" in card["reader_summary"] for card in packet["reader_cards"])
     assert any("independently calculated unadjusted PTM contrast" in card["reader_summary"] for card in packet["reader_cards"])
+    comparison = next(card for card in packet["reader_cards"] if card["category"] == "quantitation_comparison")
+    assert "linked protein contrast was" not in comparison["reader_summary"]
+    assert "denominator and quantitation-validity context" in comparison["reader_summary"]
 
 
 def test_phase2_manuscript_spine_prioritizes_named_measurements_over_count_inventory():
@@ -71,12 +74,13 @@ def test_phase2_manuscript_spine_prioritizes_named_measurements_over_count_inven
     assert "quantitative landscape comprised" not in plan["central_answer"].lower()
 
 
-def test_phase2_results_fallback_reports_named_features_and_adjustment_before_temporal_status():
+def test_phase2_results_fallback_reports_ptm_findings_and_denominator_validity_before_temporal_status():
     results = render_reader_section_fallback("results", _packet())
 
     assert "unadjusted PTM contrast" in results
     assert "protein-adjusted relative PTM log2 contrast" in results
-    assert "linked protein contrast" in results
+    assert "denominator for protein-adjusted relative PTM contrasts" in results
+    assert "independent biological response storyline" in results
     assert "GENEA" in results
     # One display label introduces the observation and one begins the
     # sentence-local numerical binding; internal PF IDs remain absent.
@@ -89,7 +93,7 @@ def test_phase2_llm_context_exposes_bounded_cards_without_raw_provenance_fields(
     context = format_authoring_packet_for_llm(packet, "results", deterministic_authoring_plan(packet))
 
     assert "GENEA" in context
-    assert "protein adjustment" in context.lower()
+    assert "denominator" in context.lower()
     assert "measurement_provenance" not in context
     assert "ptm_reconstructed_log2fc" not in context.lower()
     assert "does not prove that the adjusted value is biologically truer" in context
@@ -125,9 +129,9 @@ def test_phase2_prepared_manifest_adds_verified_protein_adjustment_figure(tmp_pa
     figure = next(item for item in manifest["figures"] if item.get("figure_key") == "reader_protein_context")
 
     assert manifest["contract_version"] == "report_figure_manifest.v5"
-    assert figure["placement"] == "main"
+    assert figure["placement"] == "supplementary"
     assert figure["insertion_verified"] is True
-    assert figure["display_label"].startswith("Figure ")
+    assert figure["display_label"].startswith("Supplementary Figure ")
     assert figure["matched_feature_count"] == 2
     assert figure["quantitative_bindings"]
     joint = next(f for f in manifest["figures"] if f["figure_key"] == "reader_joint_trajectories")
@@ -142,14 +146,12 @@ def test_phase2_prepared_manifest_adds_verified_protein_adjustment_figure(tmp_pa
         biological_synthesis_packet={"study_frame": {}, "quantitative_landscape": {}},
         references=[],
     )
-    assert any(card["figure_key"] == "reader_protein_context" for card in packet["figure_cards"])
-    comparison_figure = next(card for card in packet["figure_cards"] if card["figure_key"] == "reader_protein_context")
+    assert all(card["figure_key"] != "reader_protein_context" for card in packet["figure_cards"])
     comparison_finding = next(
         finding for finding in deterministic_authoring_plan(packet)["key_findings"]
         if finding["category"] == "measured_feature_observation"
     )
-    assert comparison_finding["reader_feature_id"] in comparison_figure["selected_reader_feature_ids"]
-    assert set(comparison_finding["figure_keys"]) == {"reader_protein_context", "reader_joint_trajectories"}
+    assert set(comparison_finding["figure_keys"]) == {"reader_joint_trajectories"}
 
 
 def test_phase2_manifest_suppresses_adjustment_figure_when_independent_axis_is_missing(tmp_path):
@@ -196,7 +198,7 @@ def test_phase2_final_renderer_inserts_verified_adjustment_figure_once(tmp_path)
     result = format_citations(state)
     report = result["final_report"]
 
-    assert report.count("Independent PTM and Protein-Adjustment Comparison") == 2
+    assert report.count("PTM Relative Quantitation Denominator Check") == 2
     assert report.count("reader_protein_adjustment_comparison.png") == 1
     assert "PTM_Absolute_Log2FC" not in report
     assert result["report_output_correctness"]["phantom_figure_mentions"] == []

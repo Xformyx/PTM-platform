@@ -166,7 +166,8 @@ def test_small_sign_change_remains_descriptive_and_reports_shared_protein_adjust
     assert cards
     assert all(card["biological_direction_inference_allowed"] is False for card in cards)
     assert all(card["shared_linked_protein_record_count"] == 2 for card in cards)
-    assert all("shared by 2" in card["reader_summary"] for card in cards)
+    assert all("denominator and quantitation-validity context" in card["reader_summary"] for card in cards)
+    assert all("shared by 2" not in card["reader_summary"] for card in cards)
 
 
 def test_same_gene_residue_different_precursors_are_never_stitched_into_one_trajectory():
