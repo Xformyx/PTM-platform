@@ -9,6 +9,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useOrderProgress } from "@/hooks/useSSE";
 import type { Order } from "@/lib/types";
+import { groupReportRevisions } from "@/lib/reportRevisions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -171,8 +172,9 @@ export default function AnalysisReport() {
                   const rf = order.result_files as any;
                   const reports: string[] = rf?.report_files || [];
                   const allFiles: string[] = rf?.all_files || [];
-                  // Prefer report files, fallback to all files
-                  const toDownload = reports.length > 0 ? reports : allFiles;
+                  const revisions = groupReportRevisions(reports);
+                  const latest = revisions.find((rev) => rev.latest)?.files || reports;
+                  const toDownload = latest.length > 0 ? latest : allFiles;
                   if (toDownload.length === 0) {
                     alert("No report files available yet.");
                     return;

@@ -805,6 +805,7 @@ async def get_order(
     share_access = await _check_order_access_async(order, user, db)
     order_output = Path(os.getenv("OUTPUT_DIR", "/app/data/outputs")) / order.order_code
     temporal_evidence_readiness = _temporal_evidence_readiness(order, order_output)
+    from app.core.report_output_files import merge_result_files_with_disk
 
     return {
         "id": order.id,
@@ -822,7 +823,7 @@ async def get_order(
         "current_stage": order.current_stage,
         "progress_pct": 100.0 if order.status == "completed" else float(order.progress_pct),
         "stage_detail": order.stage_detail,
-        "result_files": order.result_files,
+        "result_files": merge_result_files_with_disk(order.result_files, order_output),
         "error_message": order.error_message,
         "cross_talk_data": order.cross_talk_data,
         "signal_propagation_data": order.signal_propagation_data,
@@ -4115,7 +4116,8 @@ async def get_file_details(
     if not output_dir.exists():
         return {"files": [], "output_dir": str(output_dir)}
 
-    rf = order.result_files or {}
+    from app.core.report_output_files import merge_result_files_with_disk
+    rf = merge_result_files_with_disk(order.result_files, output_dir)
     all_files = rf.get("all_files", [])
 
     details = []

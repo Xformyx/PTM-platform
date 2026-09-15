@@ -1217,12 +1217,15 @@ def run_report_generation(self, order_id: int, config: dict):
             metadata=progress_metadata,
         )
 
-        all_output_files = sorted(set(output_file_names) | {
+        from common.report_output_files import list_report_output_files
+        report_file_names = sorted(set(output_file_names) | set(list_report_output_files(order_output)))
+        all_output_files = sorted(set(report_file_names) | {
             f.name for f in order_output.iterdir() if f.is_file()
             and f.suffix in (".json", ".tsv", ".txt", ".png")
         })
         result_data = {
-            "report_files": output_file_names,
+            "report_files": report_file_names,
+            "current_report_files": output_file_names,
             "all_files": all_output_files,
             "output_dir": str(order_output),
         }

@@ -40,6 +40,7 @@ import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import FilePreviewModal from "@/components/FilePreviewModal";
+import { bundledReportNames, groupReportRevisions } from "@/lib/reportRevisions";
 import RerunOptionsModal from "@/components/RerunOptionsModal";
 import CrossTalkVennDiagram from "@/components/CrossTalkVennDiagram";
 import CrossTalkHeatmap from "@/components/CrossTalkHeatmap";
@@ -575,7 +576,9 @@ function ResultFiles({
 }) {
   const reports = resultFiles.report_files || [];
   const allFiles = resultFiles.all_files || [];
-  const dataFiles = allFiles.filter((f) => !reports.includes(f));
+  const reportRevisions = groupReportRevisions(reports);
+  const bundled = bundledReportNames(reportRevisions);
+  const dataFiles = [...new Set([...allFiles, ...reports])].filter((f) => !bundled.has(f));
 
   const [fileDetails, setFileDetails] = useState<Record<string, FileDetail>>({});
   const [hostDir, setHostDir] = useState("");
@@ -584,6 +587,9 @@ function ResultFiles({
   const [reportSort, setReportSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "name", dir: "asc" });
   const [dataSort, setDataSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "name", dir: "asc" });
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [openRevisions, setOpenRevisions] = useState<string[]>(() =>
+    reportRevisions.filter((rev) => rev.latest).map((rev) => rev.key),
+  );
 
   const handleDeleteReport = async (filename: string) => {
     if (!confirm(`Delete "${filename}"? This cannot be undone.`)) return;
@@ -597,6 +603,13 @@ function ResultFiles({
       setDeleting(null);
     }
   };
+
+  useEffect(() => {
+    const latestKey = reportRevisions.find((rev) => rev.latest)?.key;
+    if (latestKey && openRevisions.length === 0) {
+      setOpenRevisions([latestKey]);
+    }
+  }, [reportRevisions, openRevisions.length]);
 
   useEffect(() => {
     api.get<{ files: FileDetail[]; host_output_dir: string }>(`/orders/${orderId}/file-details`).then((d) => {
@@ -697,14 +710,16 @@ function ResultFiles({
     onSort,
     mono,
     showDelete,
+    preserveOrder,
   }: {
     files: string[];
     sort: { key: SortKey; dir: "asc" | "desc" };
     onSort: (key: SortKey) => void;
     mono?: boolean;
     showDelete?: boolean;
+    preserveOrder?: boolean;
   }) => {
-    const sorted = sortFiles(files, sort);
+    const sorted = preserveOrder ? files : sortFiles(files, sort);
     return (
       <Table>
         <TableHeader>
@@ -802,7 +817,7 @@ function ResultFiles({
 
   return (
     <div className="space-y-4">
-      {reports.length > 0 && (
+      {reportRevisions.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -812,15 +827,47 @@ function ResultFiles({
               <FolderPathBadge />
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="rounded-md border overflow-x-auto">
-              <FileTable
-                files={reports}
-                sort={reportSort}
-                onSort={(k) => setReportSort((s) => (s.key === k && s.dir === "asc" ? { key: k, dir: "desc" } : { key: k, dir: "asc" }))}
-                showDelete
-              />
-            </div>
+          <CardContent className="space-y-2">
+            {reportRevisions.map((rev) => {
+              const open = openRevisions.includes(rev.key);
+              return (
+                <div key={rev.key} className="rounded-md border">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/40"
+                    onClick={() =>
+                      setOpenRevisions((current) =>
+                        current.includes(rev.key)
+                          ? current.filter((key) => key !== rev.key)
+                          : [...current, rev.key],
+                      )
+                    }
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      {open ? <ChevronUp className="h-3.5 w-3.5 shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0" />}
+                      <span className="text-sm font-medium font-mono">{rev.label}</span>
+                      {rev.latest && (
+                        <Badge variant="secondary" className="text-[10px]">Latest</Badge>
+                      )}
+                      <span className="text-[11px] text-muted-foreground">
+                        {rev.files.length} files
+                      </span>
+                    </div>
+                  </button>
+                  {open && (
+                    <div className="border-t overflow-x-auto">
+                      <FileTable
+                        files={rev.files}
+                        sort={reportSort}
+                        onSort={(k) => setReportSort((s) => (s.key === k && s.dir === "asc" ? { key: k, dir: "desc" } : { key: k, dir: "asc" }))}
+                        showDelete
+                        preserveOrder
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}
