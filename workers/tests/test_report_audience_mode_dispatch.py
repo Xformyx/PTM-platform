@@ -91,6 +91,34 @@ def test_researcher_missing_mode_blocks_before_legacy_assembly():
     assert result["graph_effective_mode"] == "blocked"
 
 
+def test_missing_audience_blocks_before_legacy_assembly():
+    contract = resolve_report_mode_contract({})
+    assert contract["valid"] is False
+    assert "missing_report_audience_contract" in contract["reason_codes"]
+    result = format_citations({
+        "report_config": {},
+        "sections": {"results": "P5 candidate capacity=1600"},
+        "network_analysis": {},
+        "collected_references": [],
+    })
+    assert "configuration mismatch" in result["final_report"].lower()
+    assert "P5 candidate capacity" not in result["final_report"]
+    assert result["citation_data"]["completion_status"] == "blocked_report_mode_contract"
+    assert result["graph_effective_mode"] == "blocked"
+
+
+def test_missing_audience_contract_blocks_review_export():
+    release = resolve_report_release(
+        reader_authoring_shadow=False,
+        output_correctness={"status": "release_candidate"},
+        report_mode_contract=resolve_report_mode_contract({}),
+    )
+    assert release["status"] == "blocked_final"
+    assert release["final_artifact_withheld"] is True
+    assert release["review_artifact_available"] is False
+    assert release["report_audience"] == "unresolved"
+
+
 def test_technical_legacy_output_is_labelled_and_not_researcher_final():
     config = {
         "report_audience": "technical_audit",

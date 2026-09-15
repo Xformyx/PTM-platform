@@ -405,16 +405,32 @@ def run_report_generation(self, order_id: int, config: dict):
         effective_report_config, report_mode_contract = apply_report_mode_contract(requested_report_config)
         report_generation_started_at = datetime.now(timezone.utc).isoformat()
         if not report_mode_contract["valid"]:
+            diagnostic_path = order_output / "report_mode_contract_diagnostic.json"
+            diagnostic = {
+                "contract_version": "report_mode_contract_diagnostic.v1",
+                "order_id": order_id,
+                "report_generation_started_at": report_generation_started_at,
+                "requested_report_config": requested_report_config,
+                "effective_report_config": effective_report_config,
+                "report_mode_contract": dict(report_mode_contract),
+                "disposition": "blocked_before_writer_graph_and_export",
+            }
+            try:
+                diagnostic_path.write_text(json.dumps(diagnostic, ensure_ascii=False, indent=2), encoding="utf-8")
+            except OSError as diagnostic_error:
+                logger.warning("[Order %s] Could not persist mode contract diagnostic: %s", order_id, diagnostic_error)
             error_msg = (
                 "Report audience/mode contract is invalid. "
                 f"Reason codes: {', '.join(report_mode_contract['reason_codes'])}. "
-                "A legacy technical manuscript was not created."
+                "No manuscript or technical audit replacement was created. "
+                f"Diagnostic: {diagnostic_path.name}."
             )
             logger.error("[Order %s] %s", order_id, error_msg)
             update_order_status(order_id, "failed", error_message=error_msg)
             notify_order_status(order_id, "failed", error_msg)
             publish_progress(
                 order_id, "report_generation", "mode_contract", "failed", -1, error_msg,
+                metadata={"report_mode_contract": dict(report_mode_contract), "diagnostic_path": str(diagnostic_path)},
             )
             raise RuntimeError(error_msg)
         config = dict(config)
@@ -1217,8 +1233,10 @@ def run_report_generation(self, order_id: int, config: dict):
             metadata=progress_metadata,
         )
 
-        from common.report_output_files import list_report_output_files
-        report_file_names = sorted(set(output_file_names) | set(list_report_output_files(order_output)))
+        # Do not rediscover stale report-like files from prior runs. A generic
+        # directory glob can surface an old technical audit as the current
+        # researcher manuscript after an invalid/retried request.
+        report_file_names = sorted(set(output_file_names))
         all_output_files = sorted(set(report_file_names) | {
             f.name for f in order_output.iterdir() if f.is_file()
             and f.suffix in (".json", ".tsv", ".txt", ".png")

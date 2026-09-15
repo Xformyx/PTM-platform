@@ -44,12 +44,12 @@ def test_technical_legacy_is_valid_and_labelled():
     assert is_reader_mode(contract) is False
 
 
-def test_technical_shadow_is_allowed_but_not_researcher():
+def test_technical_shadow_is_rejected_as_mode_mismatch():
     contract = resolve_report_mode_contract({
         "report_audience": "technical_audit",
         "reader_authoring_mode": "shadow",
     })
-    assert contract["valid"] is True
+    assert contract["valid"] is False
     assert "technical_audience_with_shadow_renderer" in contract["reason_codes"]
     assert contract["report_audience"] == "technical_audit"
 
@@ -71,12 +71,28 @@ def test_historical_shadow_only_migrates_to_researcher():
     assert "historical_shadow_migrated_to_researcher_manuscript" in contract["reason_codes"]
 
 
-def test_historical_empty_does_not_assume_researcher():
+def test_missing_audience_fails_closed_and_never_assumes_technical():
     contract = resolve_report_mode_contract({})
-    assert contract["valid"] is True
-    assert contract["report_audience"] == "technical_audit"
-    assert contract["effective_reader_mode"] == "legacy"
-    assert "historical_legacy_default" in contract["reason_codes"]
+    assert contract["valid"] is False
+    assert contract["report_audience"] == ""
+    assert contract["effective_reader_mode"] == ""
+    assert "missing_report_audience_contract" in contract["reason_codes"]
+
+
+def test_historical_implicit_legacy_contract_is_rejected_on_replay():
+    contract = resolve_report_mode_contract({
+        "contract_version": "report_audience_mode.v1",
+        "report_audience": "technical_audit",
+        "requested_reader_mode": "legacy",
+        "effective_reader_mode": "legacy",
+        "technical_audit_delivery": "embedded_technical_report",
+        "valid": True,
+        "reason_codes": ["historical_legacy_default"],
+        "migration_rule": "historical_legacy_default",
+    })
+    assert contract["valid"] is False
+    assert contract["report_audience"] == ""
+    assert "implicit_legacy_contract_rejected" in contract["reason_codes"]
 
 
 def test_apply_writes_canonical_fields():

@@ -50,6 +50,12 @@ from report_generation.core.figure_manifest import (
     select_reader_heatmap_features,
 )
 
+TECHNICAL_AUDIT_CONFIG = {
+    "report_audience": "technical_audit",
+    "reader_authoring_mode": "legacy",
+    "technical_audit_delivery": "embedded_technical_report",
+}
+
 
 def _sidecar() -> dict:
     return {
@@ -107,6 +113,7 @@ def _p5_packet() -> dict:
 
 def test_final_renderer_includes_compact_p0_p3_and_denovo_safe_p5_cards():
     final = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {"title": "Test report", "results": "Observed trajectories were summarized."},
         "network_analysis": {},
         "signal_flow_figures": [],
@@ -127,6 +134,7 @@ def test_citation_complete_observation_only_order_replaces_llm_sections_determin
     packet = build_temporal_evidence_packet(_sidecar())
     assert packet["section_plan"]["observation_only_claim_ceiling"] is True
     final = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "report_title": "Observation-only final artifact",
         "experimental_context": {
             "cell_type": "generic cells",
@@ -960,6 +968,7 @@ def test_p5_report_renderer_exposes_explicit_unavailable_state():
 
 def test_citation_renderer_resolves_stable_markers_and_drops_ambiguous_raw_numbers():
     final = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {
             "title": "Citation test",
             "introduction": "Literature-supported statement [REF:pmid:12345]. Ambiguous local citation [99].",
@@ -979,6 +988,7 @@ def test_citation_renderer_resolves_stable_markers_and_drops_ambiguous_raw_numbe
 
 def test_external_addendum_global_citation_is_retained_as_a_stable_reference():
     final = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {
             "title": "External citation test",
             "co_scientist_addendum": "A re-resolved follow-up note [1].",
@@ -1079,6 +1089,7 @@ def test_methods_always_include_conventional_log2fc_reporting_policy_once():
 
 def test_chromadb_bundle_label_without_bibliographic_metadata_is_not_rendered_as_reference():
     final = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {"title": "Citation provenance", "discussion": "Internal bundle reference [REF:title:allptmarticles]."},
         "network_analysis": {},
         "signal_flow_figures": [],

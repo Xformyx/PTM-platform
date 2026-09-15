@@ -2,9 +2,16 @@
 
 from report_generation.core.graph import format_citations
 
+TECHNICAL_AUDIT_CONFIG = {
+    "report_audience": "technical_audit",
+    "reader_authoring_mode": "legacy",
+    "technical_audit_delivery": "embedded_technical_report",
+}
+
 
 def test_bibliography_blocked_report_is_data_only_and_has_no_external_figure_prose():
     result = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {
             "title": "No identity report",
             "abstract": "Known canonical biology activates a pathway.",
@@ -30,6 +37,7 @@ def test_bibliography_blocked_report_is_data_only_and_has_no_external_figure_pro
 
 def test_bibliography_blocked_report_retains_compact_order_evidence_without_llm_prose():
     result = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {"title": "Blocked with evidence", "results": "Known pathway function."},
         "network_analysis": {},
         "signal_flow_figures": [],
@@ -54,6 +62,7 @@ def test_bibliography_blocked_report_retains_compact_order_evidence_without_llm_
 
 def test_observation_only_title_identity_keeps_narrative():
     result = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {
             "title": "Insulin context",
             "results": "SHOULD BE REPLACED by observation-only composer",

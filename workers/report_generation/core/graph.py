@@ -961,20 +961,23 @@ def format_citations(state: ReportState) -> dict:
     )
     report_mode_contract = dict(contract_from_state(state))
     researcher_manuscript = is_researcher_manuscript(report_mode_contract)
-    reader_authoring_shadow = (
-        uses_reader_renderer(report_mode_contract)
-        if report_mode_contract.get("valid")
-        else researcher_manuscript
-    )
+    reader_authoring_shadow = bool(report_mode_contract.get("valid")) and uses_reader_renderer(report_mode_contract)
     graph_effective_mode = "shadow" if reader_authoring_shadow else "legacy"
-    if not report_mode_contract.get("valid") and researcher_manuscript:
+    # Invalid/missing intent must never fall through to legacy technical
+    # composition. This also protects direct graph callers used by tests and
+    # recovery utilities, which do not pass through the Celery preflight.
+    if not report_mode_contract.get("valid"):
         mismatch = _configuration_mismatch_report(report_mode_contract)
         return {
             "final_report": mismatch,
             "citation_data": {
                 "total_references": 0,
                 "reference_section": "",
-                "completion_status": "blocked_audience_mode_mismatch",
+                "completion_status": (
+                    "blocked_audience_mode_mismatch"
+                    if "audience_mode_mismatch" in (report_mode_contract.get("reason_codes") or [])
+                    else "blocked_report_mode_contract"
+                ),
                 "data_only_review_mode": False,
             },
             "report_output_correctness": {

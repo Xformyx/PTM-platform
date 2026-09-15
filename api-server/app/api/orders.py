@@ -836,7 +836,11 @@ async def get_order(
         "current_stage": order.current_stage,
         "progress_pct": 100.0 if order.status == "completed" else float(order.progress_pct),
         "stage_detail": order.stage_detail,
-        "result_files": merge_result_files_with_disk(order.result_files, order_output),
+        "result_files": merge_result_files_with_disk(
+            order.result_files,
+            order_output,
+            report_options=order.report_options,
+        ),
         "error_message": order.error_message,
         "cross_talk_data": order.cross_talk_data,
         "signal_propagation_data": order.signal_propagation_data,
@@ -4130,7 +4134,11 @@ async def get_file_details(
         return {"files": [], "output_dir": str(output_dir)}
 
     from app.core.report_output_files import merge_result_files_with_disk
-    rf = merge_result_files_with_disk(order.result_files, output_dir)
+    rf = merge_result_files_with_disk(
+        order.result_files,
+        output_dir,
+        report_options=order.report_options,
+    )
     all_files = rf.get("all_files", [])
 
     details = []

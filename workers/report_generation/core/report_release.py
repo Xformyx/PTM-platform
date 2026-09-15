@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
-REPORT_RELEASE_CONTRACT_VERSION = "reader_report_release.v6"
+REPORT_RELEASE_CONTRACT_VERSION = "reader_report_release.v7"
 
 
 def report_artifact_export_allowed(release: Mapping[str, Any] | None) -> bool:
@@ -47,18 +47,23 @@ def resolve_report_release(
     reasons.update(contract.get("reason_codes") or [])
     reasons.difference_update({
         "historical_shadow_migrated_to_researcher_manuscript",
-        "historical_legacy_default",
-        "technical_audience_with_shadow_renderer",
     })
     blocked = audit.get("status") == "blocked_for_review"
     generation_degraded = bool(audit.get("generation_degraded") or manifest.get("generation_degraded"))
     if generation_degraded:
         reasons.add("generation_degraded")
+    invalid_contract_codes = {
+        "audience_mode_mismatch",
+        "schema_validation_error",
+        "technical_audience_with_shadow_renderer",
+        "missing_report_audience_contract",
+        "implicit_legacy_contract_rejected",
+    }
     if contract and contract.get("valid") is False:
-        if "audience_mode_mismatch" in (contract.get("reason_codes") or []):
-            reasons.add("audience_mode_mismatch")
-        if "schema_validation_error" in (contract.get("reason_codes") or []):
-            reasons.add("schema_validation_error")
+        reasons.update(
+            code for code in (contract.get("reason_codes") or [])
+            if code in invalid_contract_codes
+        )
         blocked = True
     writer_mode = str(writer_effective_mode or manifest.get("writer_effective_mode") or "").strip().lower()
     graph_mode = str(graph_effective_mode or manifest.get("graph_effective_mode") or "").strip().lower()
@@ -95,7 +100,7 @@ def resolve_report_release(
             if verification["status"] == "mismatch" or manifest.get("changed_source_artifacts"):
                 blocked = True
         status = "blocked_final" if blocked else "draft_review_required" if reasons else "export_ready" if phase == "pre_export" else "final_ready"
-    elif "audience_mode_mismatch" in reasons or "mode_contract_inconsistent" in reasons:
+    elif invalid_contract_codes.intersection(reasons) or "mode_contract_inconsistent" in reasons:
         status = "blocked_final"
     elif contract.get("report_audience") == "technical_audit":
         status, blocked = "technical_audit_ready", False
@@ -103,14 +108,14 @@ def resolve_report_release(
         status, blocked = "legacy_not_gated", False
     if contract.get("report_audience") == "technical_audit" and status == "final_ready":
         status = "technical_audit_ready"
-    if "audience_mode_mismatch" in reasons or "mode_contract_inconsistent" in reasons:
+    if invalid_contract_codes.intersection(reasons) or "mode_contract_inconsistent" in reasons:
         status = "blocked_final"
         blocked = True
     return {
         "contract_version": REPORT_RELEASE_CONTRACT_VERSION, "phase": phase, "status": status,
         "final_artifact_withheld": blocked, "review_artifact_available": not blocked,
         "publish_as_final": status == "final_ready", "generation_degraded": generation_degraded,
-        "report_audience": contract.get("report_audience") or ("researcher_manuscript" if reader_authoring_shadow else "technical_audit"),
+        "report_audience": contract.get("report_audience") or "unresolved",
         "reason_codes": sorted(reasons),
         "message": {
             "blocked_final": "Report export withheld; structural or artifact integrity repair is required.",

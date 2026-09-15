@@ -6,6 +6,12 @@ from report_generation.core.nodes.kinase_annotation_node import (
     format_kinase_footprint_diagnostics_for_report,
 )
 
+TECHNICAL_AUDIT_CONFIG = {
+    "report_audience": "technical_audit",
+    "reader_authoring_mode": "legacy",
+    "technical_audit_delivery": "embedded_technical_report",
+}
+
 
 def _heatmap_with_p0_p1_diagnostics() -> dict:
     return {
@@ -54,6 +60,7 @@ def _heatmap_with_p0_p1_diagnostics() -> dict:
 
 def test_final_renderer_includes_compact_p0_p1_footprint_diagnostics_without_scalar_confidence():
     final = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {"title": "Footprint test", "results": "Observed trajectories were summarized."},
         "network_analysis": {},
         "signal_flow_figures": [],
@@ -157,6 +164,7 @@ A cited canonical signaling cascade may be described as external background [1].
 
 def test_final_renderer_processes_supplementary_before_appending_references():
     final = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {
             "title": "Supplement order test",
             "results": "Traceable context [REF:pmid:12345].",
@@ -180,6 +188,7 @@ def test_final_renderer_processes_supplementary_before_appending_references():
 
 def test_final_renderer_preserves_traceable_chromadb_pmid_and_doi():
     final = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {
             "title": "Collection metadata",
             "results": "Selected collection comparison [REF:pmid:34567890].",
@@ -204,6 +213,7 @@ def test_final_renderer_preserves_traceable_chromadb_pmid_and_doi():
 
 def test_data_only_report_uses_neutral_title_and_nonempty_scientific_sections():
     result = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {"title": "Delineates a signaling network response", "results": "Unsafe free prose."},
         "network_analysis": {},
         "signal_flow_figures": [],
@@ -228,6 +238,7 @@ def test_data_only_report_uses_neutral_title_and_nonempty_scientific_sections():
 
 def test_observation_only_composer_uses_landscape_temporal_and_traceable_context():
     result = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {"title": "Observation-only test", "results": "Unsafe LLM prose."},
         "network_analysis": {},
         "signal_flow_figures": [],
@@ -257,6 +268,7 @@ def test_observation_only_composer_uses_landscape_temporal_and_traceable_context
 
 def test_observation_only_composer_expands_abstract_and_introduction_without_restoring_claims():
     result = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {"title": "Section parity test", "results": "Unsafe LLM prose."},
         "network_analysis": {},
         "signal_flow_figures": [],
@@ -308,6 +320,7 @@ def test_observation_only_composer_expands_abstract_and_introduction_without_res
 
 def test_observation_only_composer_retains_only_safe_stable_cited_context():
     result = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {
             "title": "Cited context test",
             "introduction": (
@@ -337,6 +350,7 @@ def test_observation_only_composer_retains_only_safe_stable_cited_context():
 
 def test_observation_only_composer_retains_only_safe_stable_cited_context():
     result = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {
             "title": "Cited context test",
             "introduction": (
@@ -366,18 +380,7 @@ def test_observation_only_composer_retains_only_safe_stable_cited_context():
 
 def test_final_renderer_marks_missing_traceable_bibliography_for_review():
     result = format_citations({
-        "sections": {"title": "No literature", "results": "Observed trajectories."},
-        "network_analysis": {},
-        "signal_flow_figures": [],
-        "collected_references": [],
-    })
-    assert "## References" in result["final_report"]
-    assert "Citation completeness status: blocked for review" in result["final_report"]
-    assert result["citation_data"]["completion_status"] == "blocked_for_review_missing_traceable_references"
-
-
-def test_final_renderer_marks_missing_traceable_bibliography_for_review():
-    result = format_citations({
+        "report_config": TECHNICAL_AUDIT_CONFIG,
         "sections": {"title": "No literature", "results": "Observed trajectories."},
         "network_analysis": {},
         "signal_flow_figures": [],

@@ -25,6 +25,37 @@ READER_RENDERER_MODES = frozenset({"shadow", "opt_in_shadow"})
 TECHNICAL_AUDIT_DELIVERIES = frozenset({"separate_sidecar", "embedded_technical_report"})
 
 
+def _implicit_legacy_contract(payload: Mapping[str, Any]) -> bool:
+    """Identify a contract produced by the retired implicit legacy default.
+
+    A technical audit is valid only when its audience was explicitly requested.
+    The historical default marker is therefore never trusted as user intent when
+    a task, state snapshot, or persisted contract is replayed.
+    """
+    reasons = set(payload.get("reason_codes") or [])
+    return (
+        payload.get("migration_rule") == "historical_legacy_default"
+        or "historical_legacy_default" in reasons
+    )
+
+
+def _missing_audience_contract(*, requested_mode: str = "", extra_reasons: list[str] | None = None) -> Mapping[str, Any]:
+    """Return a forensic but non-routable contract for incomplete Report intent."""
+    reasons = {"missing_report_audience_contract", *(extra_reasons or [])}
+    payload = {
+        "report_audience": "",
+        "requested_reader_mode": requested_mode,
+        "effective_reader_mode": "",
+        "technical_audit_delivery": "",
+        "valid": False,
+        "reason_codes": sorted(reasons),
+        "migration_rule": "missing_audience_fail_closed",
+        "contract_version": REPORT_MODE_CONTRACT_VERSION,
+    }
+    payload["report_mode_contract_sha256"] = _contract_sha256(payload)
+    return MappingProxyType(payload)
+
+
 def _as_mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
@@ -76,11 +107,22 @@ def resolve_report_mode_contract(config: Any = None) -> Mapping[str, Any]:
     주장 금지: valid=True를 연구 결론의 과학적 승인으로 쓰지 않는다.
     """
     if isinstance(config, Mapping) and config.get("contract_version") == REPORT_MODE_CONTRACT_VERSION:
-        return MappingProxyType(dict(config))
+        existing = dict(config)
+        if _implicit_legacy_contract(existing):
+            return _missing_audience_contract(
+                requested_mode=_normalize_enum(existing.get("requested_reader_mode")),
+                extra_reasons=["implicit_legacy_contract_rejected"],
+            )
+        return MappingProxyType(existing)
     raw = _extract_report_config(config)
     if isinstance(config, Mapping) and isinstance(config.get("report_mode_contract"), Mapping):
         existing = dict(config["report_mode_contract"])
         if existing.get("contract_version") == REPORT_MODE_CONTRACT_VERSION:
+            if _implicit_legacy_contract(existing):
+                return _missing_audience_contract(
+                    requested_mode=_normalize_enum(existing.get("requested_reader_mode")),
+                    extra_reasons=["implicit_legacy_contract_rejected"],
+                )
             return MappingProxyType(dict(existing))
     audience = _normalize_enum(raw.get("report_audience"))
     requested_mode = _normalize_enum(raw.get("reader_authoring_mode"))
@@ -100,18 +142,25 @@ def resolve_report_mode_contract(config: Any = None) -> Mapping[str, Any]:
         migration_rule = "historical_shadow_migrated_to_researcher_manuscript"
         reasons.append(migration_rule)
     elif not audience:
-        audience = "technical_audit"
-        if not requested_mode:
-            requested_mode = "legacy"
-        migration_rule = "historical_legacy_default"
-        reasons.append(migration_rule)
+        # Never infer a technical audit from omitted/legacy settings.  A
+        # technical document can contain diagnostics that are unsafe as a
+        # substitute for a requested researcher manuscript, so it requires an
+        # explicit report_audience=technical_audit request.
+        return _missing_audience_contract(
+            requested_mode=requested_mode,
+            extra_reasons=reasons,
+        )
 
     if audience == "researcher_manuscript" and requested_mode not in READER_RENDERER_MODES:
         reasons.append("audience_mode_mismatch")
     if audience == "technical_audit" and requested_mode in READER_RENDERER_MODES:
         reasons.append("technical_audience_with_shadow_renderer")
 
-    valid = "schema_validation_error" not in reasons and "audience_mode_mismatch" not in reasons
+    valid = not {
+        "schema_validation_error",
+        "audience_mode_mismatch",
+        "technical_audience_with_shadow_renderer",
+    }.intersection(reasons)
     if audience == "researcher_manuscript":
         effective_mode = requested_mode if requested_mode in READER_RENDERER_MODES else ""
         delivery = delivery or "separate_sidecar"
@@ -160,6 +209,11 @@ def contract_from_state(state: Any) -> Mapping[str, Any]:
     payload = _as_mapping(state)
     stored = payload.get("report_mode_contract")
     if isinstance(stored, Mapping) and stored.get("contract_version") == REPORT_MODE_CONTRACT_VERSION:
+        if _implicit_legacy_contract(stored):
+            return _missing_audience_contract(
+                requested_mode=_normalize_enum(stored.get("requested_reader_mode")),
+                extra_reasons=["implicit_legacy_contract_rejected"],
+            )
         return MappingProxyType(dict(stored))
     return resolve_report_mode_contract(state)
 
