@@ -160,6 +160,78 @@ _READER_TECHNICAL_RECORD_RE = re.compile(
     r"non-evaluable pair windows=|p=None|n_eff|LOTO)\b",
     flags=re.IGNORECASE,
 )
+READER_SAFE_LIMITATIONS = {
+    "candidate_family_unavailable": (
+        "No candidate-family interpretation meeting the prespecified evidence criteria was retained for this dataset."
+    ),
+    "footprint_not_supported": (
+        "The available measurements did not support a family-specific footprint interpretation under the prespecified criteria."
+    ),
+    "direct_relationship_not_assigned": (
+        "The present measurements were not used to assign direct kinase–site relationships."
+    ),
+    "temporal_global_order_not_established": (
+        "Temporal summaries describe observed sampled-interval patterns; they do not establish a globally ordered causal sequence."
+    ),
+}
+_TECHNICAL_APPENDIX_SPLIT_RE = re.compile(
+    r"(?im)^##\s+(?:Technical Appendix|Technical Audit)\b.*$",
+)
+_FORBIDDEN_TECHNICAL_PATTERNS = (
+    ("gate_layer", re.compile(r"\b(?:P[0-5]|M[0-4]|R[0-4])\b")),
+    ("temporal_window_id", re.compile(r"\bTW-\d+\b", re.I)),
+    ("legacy_wave_id", re.compile(r"\b(?:Co-)?Wave[- ]?\d+\b", re.I)),
+    ("loto", re.compile(r"\bLOTO\b")),
+    ("n_eff", re.compile(r"\bn_eff\b", re.I)),
+    ("status_assignment", re.compile(r"\bstatus=")),
+    ("candidate_capacity", re.compile(r"\bcandidate capacity\b", re.I)),
+    ("selected_candidate_cards", re.compile(r"\bselected candidate cards\b", re.I)),
+    ("not_recorded", re.compile(r"\bnot recorded\b", re.I)),
+    ("not_evaluable", re.compile(r"\bnot evaluable\b", re.I)),
+    ("pair_window_denominator", re.compile(r"\bpair-window denominator\b", re.I)),
+    ("global_adjacency_order", re.compile(r"\bglobal adjacency-order\b", re.I)),
+    ("compact_packet", re.compile(r"\bcompact packet\b", re.I)),
+    ("implementation_surface", re.compile(
+        r"\b(?:renderer|sidecar|raw ledger|feature-level status records)\b", re.I
+    )),
+    ("kinase_footprint_diagnostics", re.compile(r"\bKinase Footprint Diagnostics\b", re.I)),
+)
+
+
+def audit_reader_technical_leakage(
+    text: str,
+    *,
+    audience: str = "researcher_manuscript",
+) -> dict:
+    """Scan researcher main body for forbidden technical diagnostics.
+
+    구현 대상: docs/report_audience_mode_contract_v1.md §5
+    사전등록: 2026-09-15. 본문 누수 검사이지 분석 성능 검사가 아니다.
+    해석 한계: 토큰 부재가 과학적 타당성을 증명하지 않는다.
+    주장 금지: 누수 0건을 kinase 예측 향상으로 해석하지 않는다.
+    """
+    body = str(text or "")
+    main_body = _TECHNICAL_APPENDIX_SPLIT_RE.split(body, maxsplit=1)[0]
+    from .scientific_semantics import prose_without_reference_section
+    narrative = prose_without_reference_section(main_body)
+    findings: list[dict] = []
+    if str(audience or "").strip().lower() != "researcher_manuscript":
+        return {
+            "status": "not_applicable",
+            "reason_codes": [],
+            "findings": [],
+            "audience": audience,
+        }
+    for code, pattern in _FORBIDDEN_TECHNICAL_PATTERNS:
+        matches = pattern.findall(narrative)
+        if matches:
+            findings.append({"reason_code": code, "match_count": len(matches), "examples": [str(item) for item in matches[:5]]})
+    return {
+        "status": "leak_detected" if findings else "clean",
+        "reason_codes": ["researcher_technical_leakage"] if findings else [],
+        "findings": findings,
+        "audience": audience,
+    }
 
 
 def _as_mapping(value: Any) -> dict:
@@ -506,8 +578,8 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
             "card_id": "kinase.context_availability",
             "category": "kinase_context",
             "reader_summary": (
-                "Independent footprint diagnostics were not evaluable on this stored heatmap. "
-                "The stored heatmap did not support a stable evaluation of kinase footprint candidate context. "
+                f"{READER_SAFE_LIMITATIONS['footprint_not_supported']} "
+                f"{READER_SAFE_LIMITATIONS['direct_relationship_not_assigned']} "
                 "Stored candidate rankings and any signed interval comparisons remain observational context only."
             ),
             "claim_tier": "O1",
@@ -589,7 +661,7 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
         else:
             footprint_clause = (
                 "A stored candidate ranking provided kinase-family candidate context. "
-                "Independent footprint diagnostics were not evaluable on this stored heatmap. "
+                f"{READER_SAFE_LIMITATIONS['footprint_not_supported']} "
             )
         value_records = [
             typed_record(
@@ -893,6 +965,33 @@ def build_authoring_packet(
 
     candidate_cards, candidate_transfer_audit = adapt_discovery_candidates(synthesis, state=state, maximum=20)
     cards.extend(candidate_cards)
+    if not candidate_cards:
+        cards.append({
+            "card_id": "candidate.family_unavailable",
+            "category": "candidate_discovery",
+            "reader_summary": READER_SAFE_LIMITATIONS["candidate_family_unavailable"],
+            "claim_tier": "C1",
+            "evidence_ids": ["candidate.family_unavailable"],
+            "citation_ids": [],
+            "allowed_verbs": ["was not retained", "did not meet"],
+            "forbidden_interpretations": ["kinase absence", "negative discovery"],
+            "counterevidence": "Absence of a retained candidate family is not evidence that a kinase is inactive.",
+        })
+    section_plan = _as_mapping(temporal.get("section_plan"))
+    if section_plan.get("observation_only_claim_ceiling") or not any(
+        card.get("category") == "temporal_profile" for card in cards
+    ):
+        cards.append({
+            "card_id": "temporal.global_order_boundary",
+            "category": "temporal_profile",
+            "reader_summary": READER_SAFE_LIMITATIONS["temporal_global_order_not_established"],
+            "claim_tier": "O2",
+            "evidence_ids": ["temporal.global_order_boundary"],
+            "citation_ids": [],
+            "allowed_verbs": ["describe", "do not establish"],
+            "forbidden_interpretations": ["global causal sequence", "pathway activation"],
+            "counterevidence": "Local sampled-interval patterns are not a globally ordered cascade.",
+        })
 
     source_references = list(references if references is not None else state.get("collected_references") or [])
     reference_cards = _literature_cards(source_references)
@@ -1217,7 +1316,11 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
     transfer = packet.get("candidate_transfer_audit")
     if isinstance(transfer, dict):
         selected_ids = set(selection_audit["selected_reader_feature_ids"])
-        transferred = [card for card in cards if card.get("category") == "candidate_discovery"]
+        transferred = [
+            card for card in cards
+            if card.get("category") == "candidate_discovery"
+            and _as_mapping(card.get("feature_identity")).get("reader_feature_id")
+        ]
         transfer["body_selected_count"] = sum(card["feature_identity"]["reader_feature_id"] in selected_ids for card in transferred)
         transfer["body_exclusions"] = [{"reader_feature_id": card["feature_identity"]["reader_feature_id"],
                                          "reason": "finding_selection_capacity_or_diversity"}
@@ -1415,7 +1518,11 @@ def refresh_finding_context(plan, packet):
     selected_ids = {f.get("reader_feature_id") for f in result["key_findings"]}
     transfer = packet.get("candidate_transfer_audit")
     if isinstance(transfer, dict):
-        transferred = [c for c in packet.get("reader_cards") or [] if c.get("category") == "candidate_discovery"]
+        transferred = [
+            c for c in packet.get("reader_cards") or []
+            if c.get("category") == "candidate_discovery"
+            and _as_mapping(c.get("feature_identity")).get("reader_feature_id")
+        ]
         transfer["body_selected_count"] = sum(c["feature_identity"]["reader_feature_id"] in selected_ids for c in transferred)
         transfer["body_exclusions"] = [{"reader_feature_id": c["feature_identity"]["reader_feature_id"], "reason": "not_in_frozen_finding_selection"}
                                        for c in transferred if c["feature_identity"]["reader_feature_id"] not in selected_ids]
@@ -1903,6 +2010,7 @@ def audit_report_output_correctness(
     authoring_plan: Mapping[str, Any] | None = None,
     generation_failures: Iterable[str] | None = None,
     generation_degraded: bool = False,
+    report_audience: str | None = None,
 ) -> dict:
     """Audit final reader output without changing scientific content.
 
@@ -2067,6 +2175,9 @@ def audit_report_output_correctness(
         )
     if technical_leaks:
         reason_codes.append("reader_technical_identifier_leak")
+    audience = report_audience or ("researcher_manuscript" if figure_manifest is not None else "technical_audit")
+    technical_leakage = audit_reader_technical_leakage(body, audience=audience)
+    reason_codes.extend(technical_leakage.get("reason_codes") or [])
     if named_feature_violations:
         review_reason_codes.append("named_feature_ceiling_exceeded")
     reason_codes = sorted(set(reason_codes))
@@ -2079,6 +2190,7 @@ def audit_report_output_correctness(
         "review_reason_codes": review_reason_codes,
         "generation_degraded": bool(generation_degraded),
         "reader_technical_identifier_leaks": technical_leaks,
+        "technical_leakage_audit": technical_leakage,
         "named_feature_ceiling_violations": named_feature_violations,
         "major_heading_sequence": major_sequence,
         "major_heading_labels": heading_labels,
@@ -2536,7 +2648,7 @@ def render_reader_section_fallback(
         estimator_paragraph = _clean_text(estimator_contract.get("deterministic_methods_paragraph"))
         axis_methods = sorted({str(r["support"].get("method")) for c in packet.get("reader_cards") or []
                                for r in quantitative_records(c) if r.get("support", {}).get("method")})
-        methods = ("Recorded axis-specific calculation and test methods: " + "; ".join(axis_methods) + ".") if axis_methods else "Axis-specific test metadata were not recorded in the supplied vector; p/q fields remain attached to their original axes and unavailable values remain unspecified."
+        methods = ("Recorded axis-specific calculation and test methods: " + "; ".join(axis_methods) + ".") if axis_methods else "Axis-specific test metadata were not available from the recorded input; p/q fields remain attached to their original axes and unavailable values remain unspecified."
         design = packet.get("study_design") or {}
         design_text = ("Biological units, technical injections, batches and pairing are taken only from the explicit sample manifest. Technical injections and precursor counts are not biological replication.") if design.get("samples") else "The report input did not include an explicit biological-unit and technical-injection manifest; this is a provenance limitation, not evidence that the experiment lacked biological replication."
         return "\n\n".join([

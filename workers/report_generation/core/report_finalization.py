@@ -5,9 +5,15 @@ from .report_artifact_manifest import finalize_rendered_artifacts
 
 
 def finalize_report_revision(*, source_paths, output_dir, correctness, manifest, figure_manifest,
-                             reader_mode, requested_formats=("docx", "html"), references=(), exporters=None):
+                             reader_mode, requested_formats=("docx", "html"), references=(), exporters=None,
+                             report_mode_contract=None, writer_effective_mode=None, graph_effective_mode=None):
+    release_kwargs = dict(
+        report_mode_contract=report_mode_contract,
+        writer_effective_mode=writer_effective_mode,
+        graph_effective_mode=graph_effective_mode,
+    )
     pre = resolve_report_release(reader_authoring_shadow=reader_mode, output_correctness=correctness,
-                                 artifact_manifest=manifest, phase="pre_export")
+                                 artifact_manifest=manifest, phase="pre_export", **release_kwargs)
     rendered, failures = [], []
     requested = sorted(set(requested_formats))
     if exporters is None:
@@ -31,7 +37,7 @@ def finalize_report_revision(*, source_paths, output_dir, correctness, manifest,
                     failures.append({"format": fmt, "source": source, "reason": type(error).__name__})
     sealed = finalize_rendered_artifacts(manifest or {}, rendered, figure_manifest or {},
                                         requested_formats=requested, export_failures=failures)
-    final = resolve_report_release(reader_authoring_shadow=reader_mode, output_correctness=correctness, artifact_manifest=sealed)
+    final = resolve_report_release(reader_authoring_shadow=reader_mode, output_correctness=correctness, artifact_manifest=sealed, **release_kwargs)
     # Only this invocation's returned exports are downloadable. Old exports in
     # the directory or in a previous state's report_files never enter this list.
     files = [str(p) for p in source_paths if p and Path(p).suffix not in {".docx", ".html"} and Path(p).is_file()] + rendered

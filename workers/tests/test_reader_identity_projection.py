@@ -117,7 +117,7 @@ def test_role_based_fallback_avoids_not_evaluable_loops_and_pf_ids():
     discussion = render_reader_section_fallback("discussion", packet)
     assert "PF-" not in results and "FEATURE-" not in results
     assert "PF-" not in discussion
-    assert results.lower().count("not evaluable") <= 1
+    assert "not evaluable" not in results.lower()
     assert "next" in discussion.lower()
     assert audit_named_feature_ceiling(results, packet["reader_cards"]) == []
 

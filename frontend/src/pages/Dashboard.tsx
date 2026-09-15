@@ -232,7 +232,9 @@ export default function Dashboard() {
                     <div key={name} className="flex items-center justify-between rounded-lg border px-4 py-3">
                       <div className="flex items-center gap-3">
                         <Activity className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm font-medium capitalize">{name}</span>
+                        <span className="text-sm font-medium capitalize">
+                          {name === "ptm_agent" ? "PTM Agent (Telegram)" : name}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2">
                         {check.models_count !== undefined && (

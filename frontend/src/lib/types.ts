@@ -241,6 +241,28 @@ export function isReaderAuthoringShadow(mode: unknown): boolean {
   return value === "shadow" || value === "opt_in_shadow";
 }
 
+export function isResearcherManuscriptRequest(config: unknown): boolean {
+  const value = (config && typeof config === "object") ? config as Record<string, unknown> : {};
+  if (String(value.report_audience ?? "").trim().toLowerCase() === "researcher_manuscript") {
+    return true;
+  }
+  return isReaderAuthoringShadow(value.reader_authoring_mode);
+}
+
+export function researcherReportConfigFields(enabled: boolean): Record<string, string> {
+  return enabled
+    ? {
+        report_audience: "researcher_manuscript",
+        reader_authoring_mode: "shadow",
+        technical_audit_delivery: "separate_sidecar",
+      }
+    : {
+        report_audience: "technical_audit",
+        reader_authoring_mode: "legacy",
+        technical_audit_delivery: "embedded_technical_report",
+      };
+}
+
 export interface ProgressEvent {
   order_id: number;
   stage: string;

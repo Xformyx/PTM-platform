@@ -106,6 +106,9 @@ class ReportState(TypedDict, total=False):
     reader_authoring_plan_attempts: list   # provider responses/errors for the shared manuscript plan
     report_prose_trace_path: str           # task-level final document source trace
     reader_authoring_mode: str             # legacy | shadow
+    report_mode_contract: dict             # immutable audience/mode contract from tasks.py
+    writer_effective_mode: str
+    graph_effective_mode: str
     evidence_reproducibility_audit_path: str  # separate technical audit sidecar
     figure_manifest: dict                  # final insertable main figures prepared before writing
     report_output_correctness: dict        # heading/anchor/figure/citation release gate
@@ -474,8 +477,12 @@ def _build_bibliography_blocked_data_only_report(
     temporal_block = "\n".join(f"- {text}" for text in temporal_records) or (
         "- No compact temporal summary was available; temporal quantitative claims are withheld."
     )
+    heading = _neutral_data_only_title(state)
+    from ptm_shared.report_mode import contract_from_state as _contract_from_state
+    if _contract_from_state(state).get("report_audience") == "technical_audit" and "technical audit" not in heading.lower():
+        heading = f"Technical Audit: {heading}"
     parts = [
-        f"# {_neutral_data_only_title(state)}\n",
+        f"# {heading}\n",
         f"*Generated: {generated_at}*\n",
         "## Citation Integrity Gate\n\n"
         "This Report is rendered in **data-only review mode** because no traceable publication-level "
@@ -734,6 +741,24 @@ def _citation_bound_context_sentences(
     return selected
 
 
+def _configuration_mismatch_report(contract: dict) -> str:
+    """User-visible block when researcher audience cannot use the legacy renderer."""
+    reasons = ", ".join(contract.get("reason_codes") or []) or "audience_mode_mismatch"
+    return (
+        "# Report configuration mismatch\n\n"
+        "This order requested a researcher manuscript without a valid reader-authoring mode. "
+        "A legacy technical diagnostic report was not generated.\n\n"
+        f"Reason codes: {reasons}.\n"
+    )
+
+
+def _mode_dispatch_fields(contract: dict, graph_mode: str) -> dict:
+    return {
+        "report_mode_contract": dict(contract),
+        "graph_effective_mode": graph_mode,
+    }
+
+
 def _neutral_data_only_title(state: ReportState) -> str:
     """Prevent an LLM title from implying a mechanism when citations are blocked."""
     cell_context, treatment, sampled_context, ptm_type = _study_frame_for_report(state, {})
@@ -929,8 +954,35 @@ def format_citations(state: ReportState) -> dict:
 
     collected_refs = state.get("collected_references", [])
     source_sections = state.get("sections", {})
-    from ptm_shared.report_mode import is_reader_mode
-    reader_authoring_shadow = is_reader_mode(state)
+    from ptm_shared.report_mode import (
+        contract_from_state,
+        is_researcher_manuscript,
+        uses_reader_renderer,
+    )
+    report_mode_contract = dict(contract_from_state(state))
+    researcher_manuscript = is_researcher_manuscript(report_mode_contract)
+    reader_authoring_shadow = (
+        uses_reader_renderer(report_mode_contract)
+        if report_mode_contract.get("valid")
+        else researcher_manuscript
+    )
+    graph_effective_mode = "shadow" if reader_authoring_shadow else "legacy"
+    if not report_mode_contract.get("valid") and researcher_manuscript:
+        mismatch = _configuration_mismatch_report(report_mode_contract)
+        return {
+            "final_report": mismatch,
+            "citation_data": {
+                "total_references": 0,
+                "reference_section": "",
+                "completion_status": "blocked_audience_mode_mismatch",
+                "data_only_review_mode": False,
+            },
+            "report_output_correctness": {
+                "status": "blocked_for_review",
+                "reason_codes": list(report_mode_contract.get("reason_codes") or ["audience_mode_mismatch"]),
+            },
+            **_mode_dispatch_fields(report_mode_contract, "blocked"),
+        }
     if reader_authoring_shadow:
         # The shadow path has already applied sentence-local validation. Do not
         # replace its researcher-facing narrative with legacy compact diagnostics.
@@ -981,6 +1033,9 @@ def format_citations(state: ReportState) -> dict:
                 ", ".join(final_fallback_sections),
             )
             state["reader_authoring_final_fallback_sections"] = final_fallback_sections
+    elif researcher_manuscript:
+        # Never replace a researcher manuscript with the legacy diagnostic composer.
+        sections, deterministic_observation_only = dict(source_sections), False
     else:
         sections, deterministic_observation_only = _compose_observation_only_report_sections(
             state,
@@ -1023,6 +1078,11 @@ def format_citations(state: ReportState) -> dict:
     report_title = state.get("report_title", "PTM Comprehensive Analysis Report")
     if not title_text:
         title_text = report_title
+    if report_mode_contract.get("report_audience") == "technical_audit":
+        if "technical audit" not in title_text.lower():
+            title_text = f"Technical Audit: {title_text}"
+        if "technical audit" not in str(report_title).lower():
+            report_title = f"Technical Audit: {report_title}"
     logger.info(f"[FORMAT-CIT] Report title: {title_text}")
 
     from datetime import datetime as _dt
@@ -1597,6 +1657,7 @@ def format_citations(state: ReportState) -> dict:
             },
             "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
             "figure_manifest": figure_manifest,
+            **_mode_dispatch_fields(report_mode_contract, graph_effective_mode),
         }
 
     if not resolved_refs and reader_authoring_shadow:
@@ -1619,6 +1680,7 @@ def format_citations(state: ReportState) -> dict:
                 "data_only_review_mode": True,
                 "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
             },
+            **_mode_dispatch_fields(report_mode_contract, graph_effective_mode),
             "evidence_reproducibility_audit_path": str(audit_path) if audit_path else None,
         }
 
@@ -1712,6 +1774,7 @@ def format_citations(state: ReportState) -> dict:
             bool((snapshot or {}).get("generation_degraded"))
             for snapshot in (state.get("reader_prose_snapshots") or {}).values()
         ) if reader_authoring_shadow else False,
+        report_audience=report_mode_contract.get("report_audience"),
     )
     state["report_output_correctness"] = report_output_correctness
     correctness_path = None
@@ -1743,6 +1806,7 @@ def format_citations(state: ReportState) -> dict:
         "report_output_correctness": report_output_correctness,
         "report_output_correctness_audit_path": str(correctness_path) if correctness_path else None,
         "figure_manifest": figure_manifest,
+        **_mode_dispatch_fields(report_mode_contract, graph_effective_mode),
     }
 
 

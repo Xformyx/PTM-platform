@@ -4,6 +4,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -16,10 +17,92 @@ from app.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.git_date import format_git_date_kst
 from app.core.redis import get_redis
+from app.core.runtime_banner import (
+    LAST_DEPLOY_PATH,
+    format_kst,
+    load_last_deploy,
+    parse_docker_ts,
+    pick_applied_at,
+    short_label,
+    summarize_runtime,
+)
 from app.dependencies import get_current_user, require_role, require_sse_role
 
 router = APIRouter(tags=["health"])
 logger = logging.getLogger("ptm-platform.health")
+
+
+def _resolve_ptm_agent_health_url(settings: Settings) -> str:
+    explicit = (settings.PTM_AGENT_HEALTH_URL or "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    webhook = (settings.WEBHOOK_URL or "").strip()
+    if webhook:
+        parsed = urlparse(webhook)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}/health"
+    return "http://host.docker.internal:9100/health"
+
+
+def classify_ptm_agent_payload(data: Any) -> tuple[str, list[str]]:
+    """Map openclaw-home /health JSON to ok|error. Does not probe the network."""
+    if not isinstance(data, dict):
+        return "error", ["invalid health body"]
+    detail_parts: list[str] = []
+    if data.get("uptime_seconds") is not None:
+        detail_parts.append(f"uptime {data['uptime_seconds']}s")
+    if data.get("pid"):
+        detail_parts.append(f"pid {data['pid']}")
+    polling = data.get("telegram_polling")
+    if polling is True:
+        detail_parts.append("polling")
+    status = "ok" if data.get("status") == "ok" else "error"
+    if status == "ok" and polling is False:
+        status = "error"
+        detail_parts.append("telegram polling off")
+    return status, detail_parts
+
+
+async def _check_ptm_agent(settings: Settings) -> dict[str, Any]:
+    url = _resolve_ptm_agent_health_url(settings)
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                return {
+                    "status": "error",
+                    "detail": f"HTTP {resp.status_code}",
+                    "url": url,
+                    "telegram_polling": None,
+                }
+            data = resp.json()
+            status, detail_parts = classify_ptm_agent_payload(data)
+            return {
+                "status": status,
+                "detail": ", ".join(detail_parts) or "Telegram agent",
+                "url": url,
+                "service": data.get("service") if isinstance(data, dict) else None,
+                "started_at": data.get("started_at") if isinstance(data, dict) else None,
+                "uptime_seconds": data.get("uptime_seconds") if isinstance(data, dict) else None,
+                "pid": data.get("pid") if isinstance(data, dict) else None,
+                "telegram_polling": data.get("telegram_polling") if isinstance(data, dict) else None,
+            }
+    except Exception as e:
+        return {
+            "status": "unavailable",
+            "detail": str(e)[:120],
+            "url": url,
+            "telegram_polling": None,
+        }
+
+
+@router.get("/health/ptm-agent")
+async def ptm_agent_health(
+    settings: Settings = Depends(get_settings),
+    _user=Depends(require_role("admin")),
+) -> dict[str, Any]:
+    """Sidebar / System Monitor probe for the host Telegram agent."""
+    return await _check_ptm_agent(settings)
 
 
 @router.get("/health")
@@ -27,9 +110,7 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok", "service": "ptm-api-server"}
 
 
-@router.get("/version")
-async def get_version() -> dict[str, str]:
-    """Return platform SemVer (Major.Minor.Patch), git hash, and commit date."""
+def _read_version_files() -> dict[str, str]:
     v = "0.0.0"
     git_hash = ""
     git_date = ""
@@ -48,7 +129,17 @@ async def get_version() -> dict[str, str]:
             git_date = f.read().strip() or ""
     except FileNotFoundError:
         pass
-    return {"version": v, "git_hash": git_hash, "git_date": format_git_date_kst(git_date)}
+    file_date = format_git_date_kst(git_date)
+    # Sidebar used to show this as "now". Prefer the last deploy event so a
+    # morning restart is not stuck on the overnight commit clock.
+    applied = pick_applied_at(load_last_deploy(LAST_DEPLOY_PATH), None, file_date)
+    return {"version": v, "git_hash": git_hash, "git_date": applied or file_date}
+
+
+@router.get("/version")
+async def get_version() -> dict[str, str]:
+    """Return platform SemVer (Major.Minor.Patch), git hash, and commit date."""
+    return _read_version_files()
 
 
 @router.get("/health/detailed")
@@ -100,8 +191,12 @@ async def detailed_health(
     except Exception as e:
         checks["ollama"] = {"status": "unavailable", "detail": str(e)}
 
+    checks["ptm_agent"] = await _check_ptm_agent(settings)
+
     overall = "ok" if all(
-        c.get("status") == "ok" for name, c in checks.items() if name != "ollama"
+        c.get("status") == "ok"
+        for name, c in checks.items()
+        if name not in ("ollama", "ptm_agent")
     ) else "degraded"
 
     return {"status": overall, "checks": checks}
@@ -387,6 +482,21 @@ async def system_architecture(
             "detail": str(e)[:80],
         }
 
+    agent_check = await _check_ptm_agent(settings)
+    agent_url = agent_check.get("url") or _resolve_ptm_agent_health_url(settings)
+    agent_parsed = urlparse(agent_url)
+    agent_host = agent_parsed.hostname or "host.docker.internal"
+    agent_port = agent_parsed.port or 9100
+    nodes["ptm_agent"] = {
+        "id": "ptm_agent",
+        "label": "PTM Agent (Telegram)",
+        "host": agent_host,
+        "port": agent_port,
+        "status": agent_check.get("status", "unavailable"),
+        "detail": agent_check.get("detail", ""),
+        "telegram_polling": agent_check.get("telegram_polling"),
+    }
+
     # Edges (connections)
     edges = [
         {"from": "client", "to": "gateway", "label": "HTTPS", "status": "ok"},
@@ -397,6 +507,7 @@ async def system_architecture(
         {"from": "api_server", "to": "mcp_server", "label": "8001", "status": nodes.get("mcp_server", {}).get("status", "unknown")},
         {"from": "api_server", "to": "ollama", "label": "11434", "status": nodes.get("ollama", {}).get("status", "unknown")},
         {"from": "api_server", "to": "cytoscape", "label": "1234", "status": nodes.get("cytoscape", {}).get("status", "unknown")},
+        {"from": "api_server", "to": "ptm_agent", "label": "webhook", "status": nodes.get("ptm_agent", {}).get("status", "unknown")},
     ]
 
     # Client node (frontend)
@@ -459,6 +570,7 @@ CONTAINER_OPTIONS = [
     {"id": "ptm-api-server", "label": "API Server", "category": "app"},
     {"id": "ptm-mcp-server", "label": "MCP Server", "category": "app"},
     {"id": "ptm-gateway", "label": "Gateway (nginx)", "category": "app"},
+    {"id": "ptm-frontend", "label": "Frontend (UI)", "category": "app"},
     {"id": "ptm-mysql", "label": "MySQL", "category": "infra"},
     {"id": "ptm-redis", "label": "Redis", "category": "infra"},
     {"id": "ptm-chromadb", "label": "ChromaDB", "category": "infra"},
@@ -485,63 +597,118 @@ def _find_container(client, expected_id: str):
     return None
 
 
-@router.get("/health/container-status")
-async def container_status(_user=Depends(require_role("admin"))) -> dict:
-    """Return status of all PTM containers (running, exited, etc.)."""
+def _unavailable_container(opt: dict, detail: str) -> dict:
+    return {
+        "id": opt["id"],
+        "label": opt["label"],
+        "short": short_label(opt["id"]),
+        "category": opt["category"],
+        "status": "unavailable",
+        "detail": detail[:80],
+        "image": "",
+        "image_id": "",
+        "image_created": "",
+        "image_created_kst": "",
+        "started_at": "",
+        "started_at_kst": "",
+    }
+
+
+def _inspect_container(container, opt: dict) -> dict:
+    status = container.status
+    attrs = container.attrs or {}
+    image_name = ""
+    image_id = ""
+    image_created = ""
+    try:
+        image_obj = getattr(container, "image", None)
+        if image_obj is not None:
+            tags = getattr(image_obj, "tags", None) or []
+            if tags:
+                image_name = tags[0]
+            raw_id = getattr(image_obj, "id", "") or ""
+            image_id = raw_id.replace("sha256:", "")[:12]
+            image_created = (getattr(image_obj, "attrs", None) or {}).get("Created", "") or ""
+    except Exception:
+        pass
+    if not image_name:
+        image_name = attrs.get("Config", {}).get("Image", "") or ""
+    started_at = (attrs.get("State", {}) or {}).get("StartedAt") or ""
+    return {
+        "id": opt["id"],
+        "label": opt["label"],
+        "short": short_label(opt["id"]),
+        "category": opt["category"],
+        "status": "ok" if status == "running" else "error",
+        "detail": status,
+        "image": image_name,
+        "image_id": image_id,
+        "image_created": image_created,
+        "image_created_kst": format_kst(parse_docker_ts(image_created)),
+        "started_at": started_at,
+        "started_at_kst": format_kst(parse_docker_ts(started_at)),
+    }
+
+
+def _collect_container_status() -> list[dict]:
     result = []
     try:
         import docker
         client = docker.from_env()
         for opt in CONTAINER_OPTIONS:
-            cid = opt["id"]
             try:
-                container = _find_container(client, cid)
+                container = _find_container(client, opt["id"])
                 if container is None:
-                    raise Exception(f"Container {cid} not found")
-                status = container.status
-                attrs = container.attrs
-                image_name = ""
-                try:
-                    image_obj = getattr(container, "image", None)
-                    if image_obj and image_obj.tags:
-                        image_name = image_obj.tags[0]
-                except Exception:
-                    pass
-                if not image_name:
-                    image_name = attrs.get("Config", {}).get("Image", "") or ""
-                started_at = (attrs.get("State", {}) or {}).get("StartedAt") or ""
-                result.append({
-                    "id": cid,
-                    "label": opt["label"],
-                    "category": opt["category"],
-                    "status": "ok" if status == "running" else "error",
-                    "detail": status,
-                    "image": image_name,
-                    "started_at": started_at,
-                })
+                    raise Exception(f"Container {opt['id']} not found")
+                result.append(_inspect_container(container, opt))
             except Exception as e:
-                result.append({
-                    "id": cid,
-                    "label": opt["label"],
-                    "category": opt["category"],
-                    "status": "unavailable",
-                    "detail": str(e)[:80],
-                    "image": "",
-                    "started_at": "",
-                })
+                result.append(_unavailable_container(opt, str(e)))
     except Exception as e:
         logger.warning(f"Container status failed: {e}")
         for opt in CONTAINER_OPTIONS:
-            result.append({
-                "id": opt["id"],
-                "label": opt["label"],
-                "category": opt["category"],
-                "status": "unavailable",
-                "detail": str(e)[:80],
-                "image": "",
-                "started_at": "",
-            })
-    return {"containers": result}
+            result.append(_unavailable_container(opt, str(e)))
+    return result
+
+
+@router.get("/health/container-status")
+async def container_status(_user=Depends(require_role("admin"))) -> dict:
+    """Return status of all PTM containers (running, exited, etc.)."""
+    return {"containers": _collect_container_status()}
+
+
+@router.get("/health/runtime-banner")
+async def runtime_banner(_user=Depends(require_role("admin"))) -> dict:
+    """Sidebar footer: baked version plus live restart/image times.
+
+    ``applied_at_kst`` is the newest live stamp (deploy event or container
+    start). ``git_date`` is only the bind-mounted GIT_DATE file.
+    """
+    version = _read_version_files()
+    containers = _collect_container_status()
+    last_deploy = load_last_deploy(LAST_DEPLOY_PATH)
+    summary = summarize_runtime(containers, last_deploy)
+    return {
+        **version,
+        **summary,
+        "applied_at_kst": pick_applied_at(
+            last_deploy,
+            summary.get("latest_restart"),
+            version.get("git_date") or "",
+        ),
+        "containers": [
+            {
+                "id": c["id"],
+                "short": c.get("short") or short_label(c["id"]),
+                "status": c["status"],
+                "started_at": c.get("started_at") or "",
+                "started_at_kst": c.get("started_at_kst") or "",
+                "image_id": c.get("image_id") or "",
+                "image_created": c.get("image_created") or "",
+                "image_created_kst": c.get("image_created_kst") or "",
+            }
+            for c in containers
+        ],
+    }
 
 
 

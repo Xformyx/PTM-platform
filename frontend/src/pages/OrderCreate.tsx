@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import type { AnalysisOptions, TemporalContract } from "@/lib/types";
-import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, clampQuickSettings, formatQuickAnalysisSummary, pickQuickSettings, temporalContractLabel } from "@/lib/types";
+import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, clampQuickSettings, formatQuickAnalysisSummary, pickQuickSettings, researcherReportConfigFields, temporalContractLabel } from "@/lib/types";
 import AnalysisOptionsModal from "@/components/AnalysisOptionsModal";
 import QuickAnalysisCustomFields from "@/components/QuickAnalysisOptions";
 import { CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
@@ -554,7 +554,7 @@ export default function OrderCreate() {
       llm_temperature: reportConfig.llm_temperature,
       chromadb_results_per_section: reportConfig.chromadb_results_per_section,
       ptm_detail_count: reportConfig.ptm_detail_count,
-      ...(reportConfig.reader_authoring_shadow ? { reader_authoring_mode: "shadow" } : {}),
+      ...researcherReportConfigFields(Boolean(reportConfig.reader_authoring_shadow)),
     };
     formData.append("report_options", JSON.stringify({
       report_type: form.report_type, ptm_selection_mode: form.ptm_selection_mode, top_n_ptms: form.top_n_ptms, output_format: "md",

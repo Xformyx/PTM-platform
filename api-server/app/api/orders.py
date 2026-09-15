@@ -46,6 +46,36 @@ _CELERY_TASK_TTL = 7 * 24 * 3600
 _TEMPORAL_SIDECAR_ARTIFACT = "temporal_ptm_protein_analysis_v2.json"
 
 
+def _normalize_report_options(report_options: dict | None) -> dict:
+    """Persist canonical audience/mode fields or reject an invalid researcher request.
+
+    구현 대상: docs/report_audience_mode_contract_v1.md §2–§3
+    사전등록: 2026-09-15. API가 UI-only 검증을 우회할 수 없게 한다.
+    해석 한계: 설정 정규화는 renderer 선택이다. 분석 성능을 바꾸지 않는다.
+    주장 금지: 유효 설정을 kinase 예측 향상으로 해석하지 않는다.
+    """
+    from ptm_shared.report_mode import apply_report_mode_contract
+
+    options = dict(report_options or {})
+    report_config = dict(options.get("report_config") or {})
+    effective, contract = apply_report_mode_contract(report_config)
+    if not contract["valid"]:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "Report audience/mode contract is invalid. "
+                    "A legacy technical manuscript was not created."
+                ),
+                "reason_codes": list(contract["reason_codes"]),
+                "report_audience": contract.get("report_audience"),
+                "requested_reader_mode": contract.get("requested_reader_mode"),
+            },
+        )
+    options["report_config"] = effective
+    return options
+
+
 async def _save_celery_task_id(order_id: int, task_id: str) -> None:
     """Persist latest + SET of Celery task IDs so cancel can revoke the chain."""
     r = await get_redis()
@@ -841,7 +871,7 @@ async def update_order_options(
     if body.analysis_options is not None:
         order.analysis_options = body.analysis_options
     if body.report_options is not None:
-        order.report_options = body.report_options
+        order.report_options = _normalize_report_options(body.report_options)
     if body.rag_collections is not None:
         order.rag_collections = body.rag_collections
     await db.commit()
@@ -1033,6 +1063,7 @@ async def create_order(
         report_options_data = _safe_json_loads(report_options, {})
         if not report_options_data:
             raise HTTPException(status_code=400, detail="Invalid report_options JSON")
+        report_options_data = _normalize_report_options(report_options_data)
 
         # RAG collection selection (list of collection IDs; null = all active)
         rag_collections_data = _safe_json_loads(rag_collections)
@@ -1208,6 +1239,9 @@ async def start_order(
         raise HTTPException(
             status_code=400, detail=f"Cannot start order in '{order.status}' status"
         )
+    order.report_options = _normalize_report_options(order.report_options or {})
+    await db.commit()
+    await db.refresh(order)
 
     validated_sample_manifest = _validated_order_sample_manifest(order)
     prev_status = order.status
@@ -1508,6 +1542,10 @@ async def run_stage(
             status_code=400,
             detail="Blind benchmark snapshots run 0층 preprocessing only. Retry from the source Order Benchmark tab.",
         )
+    if body.stage == "report_generation":
+        order.report_options = _normalize_report_options(order.report_options or {})
+        await db.commit()
+        await db.refresh(order)
 
     output_dir = os.getenv("OUTPUT_DIR", "/app/data/outputs")
     order_output = Path(output_dir) / order.order_code

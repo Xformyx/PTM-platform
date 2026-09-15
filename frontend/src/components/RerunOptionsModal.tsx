@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { api } from "@/lib/api";
 import AnalysisOptionsModal from "./AnalysisOptionsModal";
 import type { AnalysisOptions, TemporalContract } from "@/lib/types";
-import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, clampQuickSettings, isReaderAuthoringShadow, pickQuickSettings, resolveTemporalContract } from "@/lib/types";
+import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, clampQuickSettings, isResearcherManuscriptRequest, pickQuickSettings, researcherReportConfigFields, resolveTemporalContract } from "@/lib/types";
 import QuickAnalysisCustomFields from "./QuickAnalysisOptions";
 import { cn } from "@/lib/utils";
 import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
@@ -271,7 +271,7 @@ export default function RerunOptionsModal({
           llm_temperature: typeof rc.llm_temperature === "number" ? rc.llm_temperature : 0.6,
           chromadb_results_per_section: n(rc.chromadb_results_per_section, 10),
           ptm_detail_count: n(rc.ptm_detail_count, 30),
-          reader_authoring_shadow: isReaderAuthoringShadow(rc.reader_authoring_mode),
+          reader_authoring_shadow: isResearcherManuscriptRequest(rc),
         });
       } else {
         setReportConfig((prev) => ({ ...prev, reader_authoring_shadow: false }));
@@ -309,7 +309,7 @@ export default function RerunOptionsModal({
         llm_temperature: reportConfig.llm_temperature,
         chromadb_results_per_section: reportConfig.chromadb_results_per_section,
         ptm_detail_count: reportConfig.ptm_detail_count,
-        ...(reportConfig.reader_authoring_shadow ? { reader_authoring_mode: "shadow" } : {}),
+        ...researcherReportConfigFields(Boolean(reportConfig.reader_authoring_shadow)),
       };
       await onConfirm({
         analysis_context: analysisContext,

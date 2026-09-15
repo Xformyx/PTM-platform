@@ -221,7 +221,7 @@ def test_data_only_report_uses_neutral_title_and_nonempty_scientific_sections():
         "temporal_report_evidence_packet": {"status": "unavailable", "records": []},
     })["final_report"]
     assert "Delineates a signaling network response" not in result
-    assert "# Data-only evidence and readiness summary" in result
+    assert "Data-only evidence and readiness summary" in result
     for section in ("## Abstract", "## Introduction", "## Results", "## Discussion", "## Conclusion"):
         assert section in result
 

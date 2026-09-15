@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # PTM Platform - Dev Deploy (변경된 것만 빌드 & 재시작, 버전 변경 없음)
-# - git pull / commit: 마지막 dev-deploy 커밋 대비 git diff
-# - 로컬 편집: 마지막 dev-deploy 이후 파일 mtime (uncommitted)
-# - 감지 범위: api-server, mcp-server, frontend, workers, gateway, docker-compose*.yml, .env
-# Usage: ./scripts/dev-deploy.sh [--all]
+#
+# Telegram Agent / 외부 호출은 이 명령 하나만 쓰면 된다.
+# 마운트된 Python은 이미지 빌드 없이 해당 프로세스만 재시작하고,
+# 이미지에 구워지는 입력(frontend, Dockerfile, pyproject)만 빌드한다.
+#
+# Usage:
+#   ./scripts/dev-deploy.sh
+#   ./scripts/dev-deploy.sh --all
+#   ./scripts/dev-deploy.sh --dry-run
+#   ./scripts/dev-deploy.sh --classify path [path...]
 
 set -e
 
@@ -48,6 +54,12 @@ APP_STACK_SERVICES=(
   gateway
 )
 
+WORKER_SERVICES=(
+  celery-worker-preprocessing
+  celery-worker-rag
+  celery-worker-report
+)
+
 # 제외할 경로 (node_modules, __pycache__ 등은 소스 변경 아님)
 FIND_EXCLUDE=(
   -not -path "*/node_modules/*"
@@ -61,20 +73,56 @@ FIND_EXCLUDE=(
   -not -name "*.pyc"
 )
 
-# 경로 → 컴포넌트 이름 (stdout; bash 3.2 호환 — local -n 미사용)
+# 경로 → 배포 단위. 테스트/문서만 바뀌면 skip.
+# bash 3.2 호환 — local -n 미사용.
 _component_for_path() {
   local f="$1"
+  f="${f#./}"
   [[ -z "$f" ]] && return 0
   case "$f" in
-    api-server/*)     echo "api-server" ;;
-    mcp-server/*)     echo "mcp-server" ;;
-    frontend/*)       echo "frontend" ;;
-    workers/*)        echo "workers" ;;
-    benchmarking/*)   echo "benchmarking" ;;
-    gateway/*)        echo "gateway" ;;
+    workers/tests/*|workers/scripts/*|api-server/tests/*|ptm_shared/tests/*|frontend/e2e/*)
+      echo "skip" ;;
+    *.md|docs/*)
+      echo "skip" ;;
+    workers/Dockerfile|workers/pyproject.toml|workers/requirements*.txt)
+      echo "workers-image" ;;
+    workers/report_generation/*|workers/pptx_generation/*)
+      echo "worker-report" ;;
+    workers/preprocessing/*)
+      echo "worker-preprocessing" ;;
+    workers/rag_enrichment/*)
+      echo "worker-rag" ;;
+    workers/common/*|workers/celery_app.py|workers/*)
+      echo "workers-shared" ;;
+    ptm_shared/*)
+      echo "ptm-shared" ;;
+    api-server/Dockerfile|api-server/pyproject.toml|api-server/entrypoint.sh)
+      echo "api-server" ;;
+    api-server/*)
+      echo "api-server" ;;
+    mcp-server/*)
+      echo "mcp-server" ;;
+    frontend/*)
+      echo "frontend" ;;
+    benchmarking/Dockerfile)
+      echo "benchmarking" ;;
+    benchmarking/*)
+      echo "benchmarking" ;;
+    gateway/*)
+      echo "gateway" ;;
     docker-compose.yml|docker-compose.override.yml|docker-compose.gpu.yml)
       echo "compose-file" ;;
-    .env)             echo "dotenv" ;;
+    .env)
+      echo "dotenv" ;;
+    *)
+      echo "skip" ;;
+  esac
+}
+
+_is_worker_component() {
+  case "$1" in
+    worker-report|worker-preprocessing|worker-rag|workers-shared|workers-image|workers) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -103,7 +151,7 @@ get_changed_components_git() {
   while IFS= read -r f; do
     local c
     c=$(_component_for_path "$f")
-    [[ -n "$c" ]] && result+=("$c")
+    [[ -n "$c" && "$c" != "skip" ]] && result+=("$c")
   done <<< "$diff_files"
 
   printf '%s\n' "${result[@]}" | sort -u
@@ -114,21 +162,29 @@ get_changed_components_git() {
 get_changed_components_mtime() {
   local result=()
   local marker="$LAST_DEV_BUILD"
+  local dir rel c
 
-  for dir in api-server mcp-server frontend workers benchmarking gateway; do
+  for dir in api-server mcp-server frontend workers benchmarking gateway ptm_shared; do
     [[ ! -d "$REPO_ROOT/$dir" ]] && continue
     if [[ ! -f "$marker" ]]; then
-      result+=("$dir")
-    else
-      if find "$REPO_ROOT/$dir" -type f -newer "$marker" "${FIND_EXCLUDE[@]}" 2>/dev/null | grep -q .; then
-        result+=("$dir")
-      fi
+      case "$dir" in
+        workers) result+=("workers-shared") ;;
+        ptm_shared) result+=("ptm-shared") ;;
+        *) result+=("$dir") ;;
+      esac
+      continue
     fi
+    while IFS= read -r rel; do
+      [[ -z "$rel" ]] && continue
+      c=$(_component_for_path "$rel")
+      [[ -n "$c" && "$c" != "skip" ]] && result+=("$c")
+    done < <(find "$REPO_ROOT/$dir" -type f -newer "$marker" "${FIND_EXCLUDE[@]}" 2>/dev/null | sed "s|^$REPO_ROOT/||")
   done
 
   if [[ -f "$marker" ]]; then
     local root_files=(docker-compose.yml docker-compose.gpu.yml .env)
     [[ -f "$REPO_ROOT/docker-compose.override.yml" ]] && root_files+=(docker-compose.override.yml)
+    local f
     for f in "${root_files[@]}"; do
       [[ -f "$REPO_ROOT/$f" ]] || continue
       if [[ "$REPO_ROOT/$f" -nt "$marker" ]]; then
@@ -155,13 +211,127 @@ get_changed_components() {
   printf '%s\n' $git_changed $mtime_changed | sort -u
 }
 
+# Image layers change only for Dockerfiles and install specs. Bind-mounted
+# Python (api-server/app, workers/, ptm_shared) is picked up by restart.
+_image_input_changed() {
+  local component="$1"
+  local paths=()
+  case "$component" in
+    api-server) paths=(api-server/Dockerfile api-server/pyproject.toml api-server/entrypoint.sh) ;;
+    worker-report|worker-preprocessing|worker-rag|workers-shared|workers-image|workers)
+      paths=(workers/Dockerfile workers/pyproject.toml) ;;
+    mcp-server) paths=(mcp-server/Dockerfile mcp-server/pyproject.toml) ;;
+    frontend) return 0 ;;
+    benchmarking) paths=(benchmarking/Dockerfile workers/pyproject.toml) ;;
+    compose-file) return 0 ;;
+    ptm-shared|gateway|dotenv) return 1 ;;
+    *) return 1 ;;
+  esac
+  local marker="$LAST_DEV_BUILD"
+  local old_commit=""
+  [[ -f "$LAST_DEV_COMMIT" ]] && old_commit=$(tr -d ' \n\r' < "$LAST_DEV_COMMIT")
+  local p
+  for p in "${paths[@]}"; do
+    [[ -f "$REPO_ROOT/$p" ]] || continue
+    if [[ -n "$old_commit" ]] && git diff --name-only "$old_commit" HEAD -- "$p" 2>/dev/null | grep -q .; then
+      return 0
+    fi
+    if git diff --name-only HEAD -- "$p" 2>/dev/null | grep -q .; then
+      return 0
+    fi
+    if git diff --name-only --cached HEAD -- "$p" 2>/dev/null | grep -q .; then
+      return 0
+    fi
+    if [[ -f "$marker" && "$REPO_ROOT/$p" -nt "$marker" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+_build_services_for() {
+  local component="$1"
+  case "$component" in
+    api-server)    echo "api-server benchmark-tmm-runner" ;;
+    mcp-server)    echo "mcp-server" ;;
+    frontend)      echo "frontend" ;;
+    workers-image|workers) echo "celery-worker-preprocessing" ;;
+    worker-report|worker-preprocessing|worker-rag|workers-shared)
+      ;;
+    benchmarking)  echo "benchmark-runner" ;;
+    compose-file)  echo "api-server mcp-server frontend celery-worker-preprocessing benchmark-runner" ;;
+  esac
+}
+
+_restart_services_for() {
+  local component="$1"
+  case "$component" in
+    api-server)            echo "api-server benchmark-tmm-runner" ;;
+    mcp-server)            echo "mcp-server" ;;
+    frontend)              echo "frontend" ;;
+    worker-report)         echo "celery-worker-report" ;;
+    worker-preprocessing)  echo "celery-worker-preprocessing" ;;
+    worker-rag)            echo "celery-worker-rag" ;;
+    workers-shared|workers-image|workers)
+      echo "${WORKER_SERVICES[*]}" ;;
+    ptm-shared)
+      echo "api-server ${WORKER_SERVICES[*]} benchmark-tmm-runner" ;;
+    benchmarking)          echo "benchmark-runner" ;;
+    gateway)               echo "gateway" ;;
+    dotenv|compose-file)   echo "${APP_STACK_SERVICES[*]}" ;;
+  esac
+}
+
 # Main
 FORCE_ALL=false
+DRY_RUN=false
+CLASSIFY_ONLY=false
+CLASSIFY_PATHS=()
 for arg in "$@"; do
-  [[ "$arg" == "--all" ]] && FORCE_ALL=true
+  case "$arg" in
+    --all) FORCE_ALL=true ;;
+    --dry-run) DRY_RUN=true ;;
+    --classify) CLASSIFY_ONLY=true ;;
+    --help|-h)
+      cat <<'EOF'
+Usage: ./scripts/dev-deploy.sh [--all] [--dry-run] [--classify path...]
+
+Bind-mounted Python (workers, ptm_shared, api-server/app) is restarted
+without an image rebuild. Frontend and Dockerfile/pyproject changes build.
+
+Worker trees restart only their queue:
+  workers/report_generation/**  -> celery-worker-report
+  workers/preprocessing/**      -> celery-worker-preprocessing
+  workers/rag_enrichment/**     -> celery-worker-rag
+  workers/common/**             -> all three report/rag/preprocessing workers
+  ptm_shared/**                 -> API + the three workers + benchmark-tmm
+EOF
+      exit 0
+      ;;
+    *)
+      if $CLASSIFY_ONLY; then
+        CLASSIFY_PATHS+=("$arg")
+      else
+        echo "Unknown argument: $arg" >&2
+        exit 1
+      fi
+      ;;
+  esac
 done
 
+if $CLASSIFY_ONLY; then
+  if [[ ${#CLASSIFY_PATHS[@]} -eq 0 ]]; then
+    echo "Usage: ./scripts/dev-deploy.sh --classify path [path...]" >&2
+    exit 1
+  fi
+  for p in "${CLASSIFY_PATHS[@]}"; do
+    printf '%s\t%s\n' "$p" "$(_component_for_path "$p")"
+  done
+  exit 0
+fi
+
 echo "=== PTM Platform Dev Deploy (버전 변경 없음) ==="
+$DRY_RUN && echo "Mode: dry-run (no build, restart, or marker update)"
 
 # 변경된 컴포넌트
 if $FORCE_ALL; then
@@ -199,44 +369,10 @@ export VERSION_FRONTEND="$_v"
 export VERSION_WORKERS="$_v"
 
 # GIT_HASH / GIT_DATE 를 빌드 전에 미리 기록 (docker bind mount가 파일을 필요로 함)
-git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true
-git log -1 --format="%cI" HEAD 2>/dev/null | tr -d '\n' > "$REPO_ROOT/GIT_DATE" || true
-
-# Image layers change only for Dockerfiles and install specs. Bind-mounted
-# Python (api-server/app, workers/, ptm_shared) is picked up by restart.
-_image_input_changed() {
-  local component="$1"
-  local paths=()
-  case "$component" in
-    api-server) paths=(api-server/Dockerfile api-server/pyproject.toml api-server/entrypoint.sh) ;;
-    workers) paths=(workers/Dockerfile workers/pyproject.toml) ;;
-    mcp-server) paths=(mcp-server/Dockerfile mcp-server/pyproject.toml) ;;
-    frontend) return 0 ;;
-    benchmarking) paths=(benchmarking/Dockerfile workers/pyproject.toml) ;;
-    compose-file) return 0 ;;
-    *) return 1 ;;
-  esac
-  local marker="$LAST_DEV_BUILD"
-  local old_commit=""
-  [[ -f "$LAST_DEV_COMMIT" ]] && old_commit=$(tr -d ' \n\r' < "$LAST_DEV_COMMIT")
-  local p
-  for p in "${paths[@]}"; do
-    [[ -f "$REPO_ROOT/$p" ]] || continue
-    if [[ -n "$old_commit" ]] && git diff --name-only "$old_commit" HEAD -- "$p" 2>/dev/null | grep -q .; then
-      return 0
-    fi
-    if git diff --name-only HEAD -- "$p" 2>/dev/null | grep -q .; then
-      return 0
-    fi
-    if git diff --name-only --cached HEAD -- "$p" 2>/dev/null | grep -q .; then
-      return 0
-    fi
-    if [[ -f "$marker" && "$REPO_ROOT/$p" -nt "$marker" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
+if ! $DRY_RUN; then
+  git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true
+  python3 "$REPO_ROOT/scripts/write-deploy-event.py" --repo-root "$REPO_ROOT" --stamp-only >/dev/null 2>&1 || true
+fi
 
 # Build
 BUILD_SERVICES=()
@@ -245,18 +381,10 @@ for c in "${CHANGED[@]}"; do
     echo "Build skip $c (bind-mounted source; restart is enough)"
     continue
   fi
-  case "$c" in
-    api-server)    BUILD_SERVICES+=(api-server benchmark-tmm-runner) ;;
-    mcp-server)    BUILD_SERVICES+=(mcp-server) ;;
-    frontend)      BUILD_SERVICES+=(frontend) ;;
-    workers)       BUILD_SERVICES+=(celery-worker-preprocessing) ;;
-    benchmarking)  BUILD_SERVICES+=(benchmark-runner) ;;
-    gateway)       ;;
-    dotenv)        ;;
-    compose-file)  BUILD_SERVICES+=(api-server mcp-server frontend celery-worker-preprocessing benchmark-runner) ;;
-  esac
+  # shellcheck disable=SC2206
+  BUILD_SERVICES+=($(_build_services_for "$c"))
 done
-BUILD_SERVICES=($(printf '%s\n' "${BUILD_SERVICES[@]}" | sort -u))
+BUILD_SERVICES=($(printf '%s\n' "${BUILD_SERVICES[@]}" | awk 'NF && !seen[$0]++'))
 
 COMPOSE_CMD=(docker compose)
 if [[ -f "$REPO_ROOT/docker-compose.gpu.yml" ]] && _use_gpu_compose; then
@@ -270,35 +398,43 @@ if [[ ${#BUILD_SERVICES[@]} -eq 0 ]]; then
   echo "Build: (skip — no image rebuild needed)"
 else
   echo "Building: ${BUILD_SERVICES[*]}"
-  "${COMPOSE_CMD[@]}" build "${BUILD_SERVICES[@]}"
+  if ! $DRY_RUN; then
+    "${COMPOSE_CMD[@]}" build "${BUILD_SERVICES[@]}"
+  fi
 fi
 
 # Restart
 RESTART_SERVICES=()
 for c in "${CHANGED[@]}"; do
-  case "$c" in
-    api-server)   RESTART_SERVICES+=(api-server) ;;
-    mcp-server)   RESTART_SERVICES+=(mcp-server) ;;
-    frontend)     RESTART_SERVICES+=(frontend) ;;
-    workers)      RESTART_SERVICES+=(celery-worker-preprocessing celery-worker-rag celery-worker-report benchmark-tmm-runner) ;;
-    benchmarking) RESTART_SERVICES+=(benchmark-runner) ;;
-    gateway)      RESTART_SERVICES+=(gateway) ;;
-    dotenv)       RESTART_SERVICES+=("${APP_STACK_SERVICES[@]}") ;;
-    compose-file) RESTART_SERVICES+=("${APP_STACK_SERVICES[@]}") ;;
-  esac
+  # shellcheck disable=SC2206
+  RESTART_SERVICES+=($(_restart_services_for "$c"))
 done
-RESTART_SERVICES=($(printf '%s\n' "${RESTART_SERVICES[@]}" | sort -u))
+RESTART_SERVICES=($(printf '%s\n' "${RESTART_SERVICES[@]}" | awk 'NF && !seen[$0]++'))
 
 if [[ ${#RESTART_SERVICES[@]} -eq 0 ]]; then
   echo "Warning: nothing to restart."
 else
   echo "Restarting: ${RESTART_SERVICES[*]}"
-  "${COMPOSE_CMD[@]}" up -d "${RESTART_SERVICES[@]}"
+  if ! $DRY_RUN; then
+    "${COMPOSE_CMD[@]}" up -d "${RESTART_SERVICES[@]}"
+  fi
+fi
+
+if $DRY_RUN; then
+  echo "Dry-run complete. (Version: $_v)"
+  exit 0
 fi
 
 touch "$LAST_DEV_BUILD"
 git rev-parse HEAD > "$LAST_DEV_COMMIT" 2>/dev/null || true
 git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true
-# 빌드 시점의 commit 날짜/시각 기록 (Web UI 표시용)
-git log -1 --format="%cI" HEAD 2>/dev/null | tr -d '\n' > "$REPO_ROOT/GIT_DATE" || true
+# 배포가 끝난 지금 시각을 기록한다. 커밋 시각이 아님.
+python3 "$REPO_ROOT/scripts/write-deploy-event.py" \
+  --repo-root "$REPO_ROOT" \
+  --kind "dev-deploy" \
+  --version "$_v" \
+  --commit "$(cat "$REPO_ROOT/GIT_HASH")" \
+  --built "${BUILD_SERVICES[*]}" \
+  --restarted "${RESTART_SERVICES[*]}" \
+  2>/dev/null || true
 echo "Done. (Version: $_v, Hash: $(cat "$REPO_ROOT/GIT_HASH"), Date: $(cat "$REPO_ROOT/GIT_DATE"))"

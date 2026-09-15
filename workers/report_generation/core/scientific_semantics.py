@@ -450,3 +450,9 @@ def audit_language_quality(text: str) -> dict[str, Any]:
         "technical_identifier_leaks": technical_identifier_leaks,
         "technical_identifier_leak_count": len(technical_identifier_leaks),
     }
+
+
+def audit_reader_technical_leakage(text: str, *, audience: str = "researcher_manuscript") -> dict:
+    """Re-export the reader-body technical-leakage audit."""
+    from .reader_authoring import audit_reader_technical_leakage as _audit
+    return _audit(text, audience=audience)

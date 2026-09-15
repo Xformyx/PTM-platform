@@ -186,6 +186,13 @@ docker compose up -d "${RESTART_SERVICES[@]}"
 
 git rev-parse HEAD > "$LAST_DEPLOY_FILE"
 git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true
-git log -1 --format="%cI" HEAD 2>/dev/null | tr -d '\n' > "$REPO_ROOT/GIT_DATE" || true
+python3 "$REPO_ROOT/scripts/write-deploy-event.py" \
+  --repo-root "$REPO_ROOT" \
+  --kind "deploy" \
+  --version "$NEW_VERSION" \
+  --commit "$(cat "$REPO_ROOT/GIT_HASH")" \
+  --built "${BUILD_SERVICES[*]}" \
+  --restarted "${RESTART_SERVICES[*]}" \
+  2>/dev/null || true
 
 echo "Deploy complete. Version $NEW_VERSION is live."

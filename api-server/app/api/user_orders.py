@@ -680,6 +680,11 @@ async def _create_order_from_user_impl(
         "llm_model": "qwen3.5:27b",  # User mode: fixed model for report generation
         "rag_enrichment_llm_model": "qwen2.5:14b",  # User mode: lighter model for RAG enrichment
         "rag_enrichment_llm_provider": "ollama",
+        "report_config": {
+            "report_audience": "researcher_manuscript",
+            "reader_authoring_mode": "shadow",
+            "technical_audit_delivery": "separate_sidecar",
+        },
     }
 
     # Build analysis_context

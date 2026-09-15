@@ -55,6 +55,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import {
+  formatVersionDisplay,
+  rememberRuntimeBanner,
+  restartSummary,
+  type RuntimeBannerData,
+} from "@/lib/runtimeBanner";
 
 interface NavItem {
   path: string;
@@ -207,37 +213,105 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-/** Format platform SemVer (Major.Minor.Patch). Legacy 4-part tags keep first 3 fields. */
-function formatVersionDisplay(raw: string): string {
-  const parts = raw
-    .split(".")
-    .map((s) => String(parseInt(s, 10) || 0));
-  if (parts.length >= 3) return parts.slice(0, 3).join(".");
-  while (parts.length < 3) parts.push("0");
-  return parts.join(".");
-}
-
 function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
   const [version, setVersion] = useState<string>("—");
   const [gitHash, setGitHash] = useState<string>("");
   const [gitDate, setGitDate] = useState<string>("");
+  const [restartLine, setRestartLine] = useState<string>("");
+  const [restartExact, setRestartExact] = useState<string>("");
+  const [changes, setChanges] = useState<string[]>([]);
+  const [agentStatus, setAgentStatus] = useState<string>("");
+  const [agentDetail, setAgentDetail] = useState<string>("");
+
   useEffect(() => {
-    fetch("/api/version")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => {
-        if (d?.version) setVersion(formatVersionDisplay(d.version));
-        if (d?.git_hash) setGitHash(d.git_hash);
-        if (d?.git_date) setGitDate(d.git_date);
-      })
-      .catch(() => {});
+    let cancelled = false;
+
+    const applyVersion = (d: { version?: string; git_hash?: string; git_date?: string; applied_at_kst?: string } | null) => {
+      if (!d || cancelled) return;
+      if (d.version) setVersion(formatVersionDisplay(d.version));
+      if (d.git_hash) setGitHash(d.git_hash);
+      const clock = d.applied_at_kst || d.git_date;
+      if (clock) setGitDate(clock);
+    };
+
+    const load = async () => {
+      try {
+        const banner = await api.get<RuntimeBannerData>("/health/runtime-banner");
+        if (cancelled) return;
+        applyVersion(banner);
+        setRestartLine(restartSummary(banner));
+        setRestartExact(banner.applied_at_kst || banner.latest_restart?.at_kst || "");
+        setChanges(rememberRuntimeBanner(banner));
+        return;
+      } catch {
+        /* fall back to baked version only */
+      }
+      try {
+        const res = await fetch("/api/version");
+        applyVersion(res.ok ? await res.json() : null);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    load();
+    const id = window.setInterval(load, 20000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAgent = async () => {
+      try {
+        const agent = await api.get<{ status?: string; detail?: string; telegram_polling?: boolean | null }>(
+          "/health/ptm-agent",
+        );
+        if (cancelled) return;
+        setAgentStatus(agent.status || "unavailable");
+        setAgentDetail(agent.detail || "");
+      } catch {
+        if (!cancelled) {
+          setAgentStatus("unavailable");
+          setAgentDetail("");
+        }
+      }
+    };
+    loadAgent();
+    const id = window.setInterval(loadAgent, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, []);
 
   const hashPart = gitHash ? gitHash.slice(0, 7) : "";
+  const changeText = changes.slice(0, 3).join(" · ");
+  const agentOk = agentStatus === "ok";
+  const agentKnown = Boolean(agentStatus);
+  const agentDot = agentKnown
+    ? agentOk
+      ? "bg-emerald-500"
+      : "bg-red-500"
+    : "bg-muted-foreground/40";
+  const agentLabel = "Telegram bot";
+  const agentState = agentOk
+    ? "정상"
+    : agentStatus === "unavailable"
+      ? "없음"
+      : agentStatus
+        ? "오류"
+        : "확인 중";
   const tooltip = [
     `Version: ${version}`,
     hashPart ? `Commit: ${hashPart}` : "",
-    gitDate ? `Built: ${gitDate}` : "",
-  ].filter(Boolean).join(" · ");
+    gitDate ? `적용: ${gitDate}` : "",
+    restartExact && restartExact !== gitDate ? `재시작: ${restartLine} (${restartExact})` : restartLine ? `재시작: ${restartLine}` : "",
+    changeText ? `변경: ${changeText}` : "",
+    agentKnown ? `Telegram bot · ${agentState}${agentDetail ? ` · ${agentDetail}` : ""}` : "",
+  ].filter(Boolean).join("\n");
 
   return (
     <div
@@ -245,9 +319,15 @@ function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
       title={tooltip}
     >
       {collapsed ? (
-        <span className="text-[11px] text-muted-foreground font-mono">{hashPart || "—"}</span>
+        <span className="relative text-[11px] text-muted-foreground font-mono">
+          {hashPart || "—"}
+          <span className={cn("absolute -left-1.5 -top-0.5 h-1.5 w-1.5 rounded-full", agentDot)} />
+          {changeText && (
+            <span className="absolute -right-1.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-amber-500" />
+          )}
+        </span>
       ) : (
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex w-full flex-col items-center gap-0.5">
           <div className="flex items-center justify-center gap-1.5">
             <span className="text-xs text-muted-foreground font-mono">v{version}</span>
             {hashPart && (
@@ -256,8 +336,24 @@ function VersionDisplay({ collapsed }: { collapsed?: boolean }) {
               </span>
             )}
           </div>
+          <div className="flex items-center justify-center gap-1.5">
+            <span className={cn("h-2 w-2 rounded-full", agentDot)} />
+            <span className="text-[10px] text-muted-foreground">{agentLabel}</span>
+          </div>
           {gitDate && (
-            <div className="text-[11px] text-muted-foreground font-mono">{gitDate}</div>
+            <div className="text-[11px] text-muted-foreground font-mono">
+              {gitDate}
+            </div>
+          )}
+          {restartLine && (
+            <div className="text-[11px] text-muted-foreground">
+              재시작 {restartLine}
+            </div>
+          )}
+          {changeText && (
+            <div className="mt-0.5 max-w-full rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+              변경 {changeText}
+            </div>
           )}
         </div>
       )}

@@ -267,9 +267,22 @@ def run_section_writing(state: dict) -> dict:
 
     # Load report_config from state for dynamic settings
     report_config = state.get("report_config", {})
-    reader_authoring_mode = str(report_config.get("reader_authoring_mode", "")).strip().lower()
-    from ptm_shared.report_mode import is_reader_mode
-    reader_authoring_shadow = is_reader_mode(reader_authoring_mode)
+    from ptm_shared.report_mode import (
+        contract_from_state,
+        is_researcher_manuscript,
+        uses_reader_renderer,
+    )
+    report_mode_contract = contract_from_state(state)
+    reader_authoring_shadow = (
+        uses_reader_renderer(report_mode_contract)
+        if report_mode_contract.get("valid")
+        else is_researcher_manuscript(report_mode_contract)
+    )
+    reader_authoring_mode = str(
+        report_mode_contract.get("effective_reader_mode")
+        or report_config.get("reader_authoring_mode")
+        or ""
+    ).strip().lower()
     llm_tokens_cfg = report_config.get("llm_tokens", {})
     section_max_tokens = {
         "abstract": llm_tokens_cfg.get("abstract", SECTION_MAX_TOKENS["abstract"]),
@@ -1665,6 +1678,8 @@ def run_section_writing(state: dict) -> dict:
         "reader_authoring_plan_attempts": authoring_plan_attempts,
         "figure_manifest": state.get("figure_manifest") or {},
         "reader_authoring_mode": "shadow" if reader_authoring_shadow else "legacy",
+        "writer_effective_mode": "shadow" if reader_authoring_shadow else "legacy",
+        "report_mode_contract": dict(report_mode_contract),
     }
 
 

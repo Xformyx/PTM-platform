@@ -398,6 +398,28 @@ def run_report_generation(self, order_id: int, config: dict):
     send_step_webhook(order_id, "report_generation", "started")
 
     try:
+        from datetime import datetime, timezone
+        from ptm_shared.report_mode import apply_report_mode_contract, uses_reader_renderer
+
+        requested_report_config = dict(config.get("report_config") or {})
+        effective_report_config, report_mode_contract = apply_report_mode_contract(requested_report_config)
+        report_generation_started_at = datetime.now(timezone.utc).isoformat()
+        if not report_mode_contract["valid"]:
+            error_msg = (
+                "Report audience/mode contract is invalid. "
+                f"Reason codes: {', '.join(report_mode_contract['reason_codes'])}. "
+                "A legacy technical manuscript was not created."
+            )
+            logger.error("[Order %s] %s", order_id, error_msg)
+            update_order_status(order_id, "failed", error_message=error_msg)
+            notify_order_status(order_id, "failed", error_msg)
+            publish_progress(
+                order_id, "report_generation", "mode_contract", "failed", -1, error_msg,
+            )
+            raise RuntimeError(error_msg)
+        config = dict(config)
+        config["report_config"] = effective_report_config
+
         # Resolve enriched data path (handles missing explicit path after RAG stop / volume issues)
         rag_dir = Path(config.get("rag_output_dir", str(order_output)))
         enriched_path = _resolve_enriched_json_path(
@@ -598,6 +620,8 @@ def run_report_generation(self, order_id: int, config: dict):
             "report_title": config.get("report_title", "PTM Comprehensive Analysis Report"),
             "report_type": config.get("report_type", "comprehensive"),
             "report_config": config.get("report_config", {}),
+            "report_mode_contract": dict(report_mode_contract),
+            "report_generation_started_at": report_generation_started_at,
             # v12.1: opt-in external Discussion Evidence Packet integration.
             "co_scientist_integration": config.get("co_scientist_integration", {}),
             # P3: Optional post-analysis intervention evidence. This is kept
@@ -812,8 +836,8 @@ def run_report_generation(self, order_id: int, config: dict):
             report_release_requires_warning,
             resolve_report_release,
         )
-        from ptm_shared.report_mode import is_reader_mode
-        reader_authoring_shadow = is_reader_mode(config)
+        report_mode_contract = dict(final_state.get("report_mode_contract") or report_mode_contract)
+        reader_authoring_shadow = uses_reader_renderer(report_mode_contract)
 
         # v11.8: Save TF inference data to signal_propagation_data (append tf_inferences key)
         _tf_inf = final_state.get("tf_inference_data") or {}
@@ -888,7 +912,10 @@ def run_report_generation(self, order_id: int, config: dict):
                 prose_trace_path.write_text(
                     json.dumps(
                         {
-                            "contract_version": "reader_prose_trace.v2",
+                            "contract_version": "reader_prose_trace.v3",
+                            "report_mode_contract": report_mode_contract,
+                            "writer_effective_mode": final_state.get("writer_effective_mode"),
+                            "graph_effective_mode": final_state.get("graph_effective_mode"),
                             "sections": final_state.get("reader_prose_snapshots") or {},
                             "authoring_plan_attempts": final_state.get("reader_authoring_plan_attempts") or [],
                             "final_document_sources": [
@@ -997,6 +1024,12 @@ def run_report_generation(self, order_id: int, config: dict):
                     },
                     temporal_required=not bool(config.get("single_time_point", False)),
                     derived_packet_paths=persist_report_packets(final_state, order_output),
+                    report_mode_contract=report_mode_contract,
+                    requested_report_config=requested_report_config,
+                    effective_report_config=effective_report_config,
+                    writer_effective_mode=final_state.get("writer_effective_mode"),
+                    graph_effective_mode=final_state.get("graph_effective_mode"),
+                    report_generation_started_at=report_generation_started_at,
                 )
                 final_state["report_artifact_manifest"] = artifact_manifest
                 final_state["report_artifact_manifest_path"] = artifact_manifest.get("manifest_path")
@@ -1016,6 +1049,9 @@ def run_report_generation(self, order_id: int, config: dict):
             figure_manifest=final_state.get("figure_manifest") or {}, reader_mode=reader_authoring_shadow,
             requested_formats=(config.get("report_config") or {}).get("requested_formats", ["docx", "html"]),
             references=final_state.get("collected_references") or [],
+            report_mode_contract=report_mode_contract,
+            writer_effective_mode=final_state.get("writer_effective_mode"),
+            graph_effective_mode=final_state.get("graph_effective_mode"),
         )
         artifact_manifest = finalization["manifest"]
         report_release = finalization["release"]

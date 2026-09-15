@@ -2820,3 +2820,30 @@
   `reader_display_policy.v1`의 사전 선언 상수 집합이며 데이터셋
   결과를 본 뒤 임계를 바꾸지 않는다. 새 추정량·seed·solver 없음.
 
+### [2026-09-15] Researcher Manuscript audience/mode dispatch 복구
+
+- **분류:** 구현
+- **대상:** `ptm_shared/report_mode.py`,
+  `api-server/app/api/orders.py`,
+  `api-server/app/api/user_orders.py`,
+  `workers/report_generation/tasks.py`,
+  `workers/report_generation/core/graph.py`,
+  `workers/report_generation/core/nodes/writer_node.py`,
+  `workers/report_generation/core/report_release.py`,
+  `workers/report_generation/core/reader_authoring.py`
+- **구현 대상 설계:** `docs/report_audience_mode_contract_v1.md` §1–§5
+  (2026-09-15 선언). 00:58 DOCX legacy renderer 유입 차단.
+- **사전등록 상태:** 결과 열람 후 표시·dispatch 계약. primary 승격 금지.
+  Frozen Order 65는 재생성 대상이 아니다.
+- **내용:** `report_audience`와 `reader_authoring_mode`를 단일 resolver로
+  고정한다. researcher + missing/legacy mode는 `audience_mode_mismatch`로
+  graph 전에 차단한다. historical shadow-only는 researcher로 이관하고,
+  audience가 비어 있는 설정은 researcher로 추정하지 않는다. researcher
+  본문에는 legacy observation-only composer와 P0–P5/footprint append를
+  넣지 않는다. 기술 진단은 sidecar에 남긴다.
+- **논문에서의 용도:** methods (표시·전달 계약) / 사용 안 함 (kinase 성능)
+- **해석 한계:** renderer dispatch는 연구자 본문과 기술 audit의 경계를
+  고정할 뿐이며 분석층 성능을 바꾸지 않는다.
+- **결정성:** `report_audience_mode.v1`의 사전 선언 enum과 reason code.
+  새 추정량·seed·solver 없음.
+

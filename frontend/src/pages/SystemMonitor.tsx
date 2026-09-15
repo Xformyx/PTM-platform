@@ -276,7 +276,7 @@ export default function SystemMonitor() {
   }, [fetchContainerStatus]);
 
   const leftCol = ["client", "gateway", "api_server"];
-  const rightCol = ["mysql", "redis", "chromadb", "mcp_server", "ollama", "cytoscape"];
+  const rightCol = ["mysql", "redis", "chromadb", "mcp_server", "ollama", "cytoscape", "ptm_agent"];
 
   const archNodeToContainer: Record<string, { id: string; label: string }> = {
     api_server: { id: "ptm-api-server", label: "API Server" },
@@ -420,7 +420,7 @@ export default function SystemMonitor() {
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            {id === "ollama" || id === "cytoscape" ? (
+                            {id === "ollama" || id === "cytoscape" || id === "ptm_agent" ? (
                               <Network className="h-4 w-4" />
                             ) : (
                               <Database className="h-4 w-4" />

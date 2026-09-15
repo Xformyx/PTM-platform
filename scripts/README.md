@@ -19,8 +19,17 @@
 ./scripts/dev-deploy.sh
 ```
 
-- 마지막 빌드 이후 **실제로 수정된** 컴포넌트만 빌드 & 재시작
-- 버전 변경 없음
+- Telegram Agent / 외부 호출은 이 명령 하나만 쓰면 된다
+- **마운트된 Python**(`workers`, `ptm_shared`, `api-server/app`)은 이미지 빌드 없이 해당 프로세스만 재시작
+- **이미지에 구워지는 입력**(frontend, Dockerfile, `pyproject.toml`)만 빌드
+- worker 트리는 큐 단위로만 재시작
+  - `workers/report_generation/**` → `celery-worker-report`
+  - `workers/preprocessing/**` → `celery-worker-preprocessing`
+  - `workers/rag_enrichment/**` → `celery-worker-rag`
+  - `workers/common/**` 또는 `workers/celery_app.py` → 세 worker 모두
+  - `ptm_shared/**` → API + 세 worker + `benchmark-tmm-runner`
+- 테스트·문서만 바뀌면 배포하지 않음
+- 계획만 보려면: `./scripts/dev-deploy.sh --dry-run`
 - 전체 빌드가 필요하면: `./scripts/dev-deploy.sh --all`
 
 ---
@@ -81,6 +90,7 @@ git push
 - **이미지 태그**: 모든 컴포넌트가 동일 SemVer 사용 (예: `ptm-frontend:2.1.1`, `ptm-api-server:2.1.1`)
 - **(3fa4c71)**: 현재 표시 중인 git commit hash
 - `dev-deploy.sh`는 버전을 올리지 않습니다. 큰 변화가 있을 때만 `deploy.sh --bump/--set`을 사용하세요.
+- 배포 성공 시 `data/.last-dev-deploy.json`을 갱신합니다. 사이드바 하단은 이 파일과 컨테이너 시작 시각으로 빌드/재시작 차이를 보여 줍니다.
 
 ---
 

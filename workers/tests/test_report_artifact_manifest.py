@@ -79,6 +79,62 @@ def test_same_run_manifest_blocks_legacy_temporal_sidecar_without_charge_crosswa
     assert "temporal_site_form_and_vector_provenance_not_validated" in manifest["reason_codes"]
 
 
+def test_manifest_records_audience_mode_dispatch_fields(tmp_path):
+    from ptm_shared.report_mode import resolve_report_mode_contract
+
+    vector = _write(tmp_path / "vector.tsv", "Precursor.Id\tCondition\nFORM2\t5min\n")
+    enriched = _write(
+        tmp_path / "enriched.json",
+        json.dumps([{
+            "site_form_trajectories": [{"site_form_key": "GENE_S1|precursor=FORM2|z=2"}],
+            "site_aggregation": {"form_count": 1},
+            "site_form_provenance_audit": {"status": "validated"},
+            "report_eligible_temporal_site_aggregation": True,
+        }]),
+    )
+    temporal = _write(
+        tmp_path / "temporal_ptm_protein_analysis_v2.json",
+        json.dumps({
+            "provenance": {"temporal_input": {
+                "site_form_provenance_audit": {"status": "validated"},
+                "enriched_vector_crosswalk_audit": {"status": "validated"},
+                "feature_provenance_input": {"path": str(vector)},
+            }}
+        }),
+    )
+    evidence = _write(tmp_path / "evidence_and_reproducibility_audit.md", "# Audit\n")
+    prose = _write(tmp_path / "report_prose_trace.json", "{}")
+    correctness = _write(tmp_path / "report_output_correctness_audit.json", "{}")
+    report = _write(tmp_path / "report.md", "# Report\n")
+    contract = dict(resolve_report_mode_contract({
+        "report_audience": "researcher_manuscript",
+        "reader_authoring_mode": "shadow",
+    }))
+    manifest = build_report_artifact_manifest(
+        order_id=103,
+        output_dir=tmp_path,
+        report_markdown_paths=[report],
+        vector_path=vector,
+        enriched_path=enriched,
+        temporal_sidecar_path=temporal,
+        evidence_audit_path=evidence,
+        prose_trace_path=prose,
+        output_correctness_path=correctness,
+        report_config=contract,
+        temporal_required=True,
+        report_mode_contract=contract,
+        writer_effective_mode="shadow",
+        graph_effective_mode="shadow",
+        report_generation_started_at="2026-09-15T00:00:00+00:00",
+    )
+    assert manifest["report_mode_contract"]["report_audience"] == "researcher_manuscript"
+    assert manifest["report_mode_contract_sha256"]
+    assert manifest["writer_effective_mode"] == "shadow"
+    assert manifest["graph_effective_mode"] == "shadow"
+    assert manifest["runtime_provenance"]["worker_git_revision"]
+    assert manifest["report_generation_started_at"] == "2026-09-15T00:00:00+00:00"
+
+
 def test_manifest_runtime_records_declared_display_policy():
     from report_generation.core.report_artifact_manifest import report_runtime_provenance
     provenance = report_runtime_provenance()

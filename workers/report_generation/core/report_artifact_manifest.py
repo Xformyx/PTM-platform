@@ -28,6 +28,8 @@ def report_runtime_provenance():
     except (OSError, subprocess.SubprocessError):
         pass
     return {"git_commit_sha": commit, "tracked_worktree_dirty": dirty,
+            "worker_git_revision": commit or "unknown",
+            "worker_image_or_mount_revision": os.getenv("PTM_CONTAINER_DIGEST") or os.getenv("PTM_WORKER_VERSION") or "unknown",
             "container_digest": os.getenv("PTM_CONTAINER_DIGEST"),
             "worker_version": os.getenv("PTM_WORKER_VERSION"),
             "generated_at": datetime.now(timezone.utc).isoformat(), "generation_timezone": "UTC",
@@ -143,6 +145,13 @@ def build_report_artifact_manifest(
     report_config: Mapping[str, Any] | None,
     temporal_required: bool,
     derived_packet_paths: Mapping[str, str | Path] | None = None,
+    report_mode_contract: Mapping[str, Any] | None = None,
+    requested_report_config: Mapping[str, Any] | None = None,
+    effective_report_config: Mapping[str, Any] | None = None,
+    writer_effective_mode: str | None = None,
+    graph_effective_mode: str | None = None,
+    release_effective_mode: str | None = None,
+    report_generation_started_at: str | None = None,
 ) -> dict[str, Any]:
     artifacts = [
         _artifact("vector_tsv", vector_path, required=True),
@@ -192,6 +201,14 @@ def build_report_artifact_manifest(
         "enriched_provenance": enriched_status,
         "temporal_provenance": temporal_status,
         "runtime_provenance": report_runtime_provenance(),
+        "report_mode_contract": dict(report_mode_contract or {}),
+        "report_mode_contract_sha256": dict(report_mode_contract or {}).get("report_mode_contract_sha256"),
+        "requested_report_config": dict(requested_report_config or {}),
+        "effective_report_config": dict(effective_report_config or report_config or {}),
+        "writer_effective_mode": writer_effective_mode,
+        "graph_effective_mode": graph_effective_mode,
+        "release_effective_mode": release_effective_mode,
+        "report_generation_started_at": report_generation_started_at,
     }
     output_path = Path(output_dir) / "report_artifact_manifest.json"
     output_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

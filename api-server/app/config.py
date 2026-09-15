@@ -83,6 +83,8 @@ class Settings(BaseSettings):
 
     # Webhook (order events)
     WEBHOOK_URL: str = ""
+    # OpenClaw-Home health (System Monitor / Dashboard). Empty → WEBHOOK_URL host + /health
+    PTM_AGENT_HEALTH_URL: str = ""
 
     # Email (notifications)
     SMTP_HOST: str = ""

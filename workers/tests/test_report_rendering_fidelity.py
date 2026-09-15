@@ -466,7 +466,7 @@ def test_authoring_packet_suppresses_kinase_names_when_all_footprints_are_non_ev
     )
     summaries = "\n".join(card["reader_summary"] for card in packet["reader_cards"])
     assert "SHOULD_NOT_APPEAR" not in summaries
-    assert "did not support a stable evaluation of kinase footprint candidate context" in summaries
+    assert "did not support a family-specific footprint interpretation under the prespecified criteria" in summaries
 
 
 def test_authoring_packet_uses_kinase_family_not_isoform_specific_activity():

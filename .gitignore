@@ -70,6 +70,7 @@ Thumbs.db
 .last-deploy
 .last-dev-build
 .last-dev-build-commit
+data/.last-dev-deploy.json
 GIT_HASH
 GIT_DATE
 =1.9.0
