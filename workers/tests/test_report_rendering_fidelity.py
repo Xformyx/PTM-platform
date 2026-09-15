@@ -54,6 +54,7 @@ TECHNICAL_AUDIT_CONFIG = {
     "report_audience": "technical_audit",
     "reader_authoring_mode": "legacy",
     "technical_audit_delivery": "embedded_technical_report",
+    "technical_audit_explicit": True,
 }
 
 

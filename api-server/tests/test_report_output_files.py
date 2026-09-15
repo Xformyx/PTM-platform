@@ -41,6 +41,7 @@ def test_explicit_technical_audit_is_kept_out_of_researcher_report_files(tmp_pat
         report_options={"report_config": {
             "report_audience": "technical_audit",
             "reader_authoring_mode": "legacy",
+            "technical_audit_explicit": True,
         }},
     )
     assert merged["report_files"] == []

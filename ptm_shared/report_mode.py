@@ -12,7 +12,7 @@ import json
 from types import MappingProxyType
 from typing import Any, Mapping
 
-REPORT_MODE_CONTRACT_VERSION = "report_audience_mode.v1"
+REPORT_MODE_CONTRACT_VERSION = "report_audience_mode.v2"
 """Canonical audience/mode contract id.
 
 docs/report_audience_mode_contract_v1.md §1 에서 2026-09-15 선언.
@@ -39,6 +39,16 @@ def _implicit_legacy_contract(payload: Mapping[str, Any]) -> bool:
     )
 
 
+def _technical_audit_was_explicitly_requested(payload: Mapping[str, Any]) -> bool:
+    """Return true only for a deliberate, boolean technical-audit choice.
+
+    A legacy Order can already contain ``report_audience=technical_audit`` after
+    historical UI/default serialization.  That field alone is not evidence that
+    the researcher asked to replace a manuscript with a technical document.
+    """
+    return payload.get("technical_audit_explicit") is True
+
+
 def _missing_audience_contract(*, requested_mode: str = "", extra_reasons: list[str] | None = None) -> Mapping[str, Any]:
     """Return a forensic but non-routable contract for incomplete Report intent."""
     reasons = {"missing_report_audience_contract", *(extra_reasons or [])}
@@ -47,6 +57,7 @@ def _missing_audience_contract(*, requested_mode: str = "", extra_reasons: list[
         "requested_reader_mode": requested_mode,
         "effective_reader_mode": "",
         "technical_audit_delivery": "",
+        "technical_audit_explicit": False,
         "valid": False,
         "reason_codes": sorted(reasons),
         "migration_rule": "missing_audience_fail_closed",
@@ -68,10 +79,11 @@ def _extract_report_config(config: Any) -> dict[str, Any]:
         "report_audience" in nested
         or "reader_authoring_mode" in nested
         or "technical_audit_delivery" in nested
+        or "technical_audit_explicit" in nested
         or "report_config" in nested
     ):
         return dict(nested)
-    if any(key in config for key in ("report_audience", "reader_authoring_mode", "technical_audit_delivery")):
+    if any(key in config for key in ("report_audience", "reader_authoring_mode", "technical_audit_delivery", "technical_audit_explicit")):
         return dict(config)
     return dict(nested) if isinstance(nested, Mapping) else {}
 
@@ -87,6 +99,7 @@ def _contract_sha256(payload: Mapping[str, Any]) -> str:
             "requested_reader_mode": payload.get("requested_reader_mode"),
             "effective_reader_mode": payload.get("effective_reader_mode"),
             "technical_audit_delivery": payload.get("technical_audit_delivery"),
+            "technical_audit_explicit": payload.get("technical_audit_explicit") is True,
             "valid": payload.get("valid"),
             "reason_codes": payload.get("reason_codes"),
             "migration_rule": payload.get("migration_rule"),
@@ -106,6 +119,11 @@ def resolve_report_mode_contract(config: Any = None) -> Mapping[str, Any]:
     해석 한계: 이 매핑은 dispatch 계약이다. 데이터 품질이나 kinase 귀속을 증명하지 않는다.
     주장 금지: valid=True를 연구 결론의 과학적 승인으로 쓰지 않는다.
     """
+    if isinstance(config, Mapping) and _implicit_legacy_contract(config):
+        return _missing_audience_contract(
+            requested_mode=_normalize_enum(config.get("requested_reader_mode")),
+            extra_reasons=["implicit_legacy_contract_rejected"],
+        )
     if isinstance(config, Mapping) and config.get("contract_version") == REPORT_MODE_CONTRACT_VERSION:
         existing = dict(config)
         if _implicit_legacy_contract(existing):
@@ -117,6 +135,11 @@ def resolve_report_mode_contract(config: Any = None) -> Mapping[str, Any]:
     raw = _extract_report_config(config)
     if isinstance(config, Mapping) and isinstance(config.get("report_mode_contract"), Mapping):
         existing = dict(config["report_mode_contract"])
+        if _implicit_legacy_contract(existing):
+            return _missing_audience_contract(
+                requested_mode=_normalize_enum(existing.get("requested_reader_mode")),
+                extra_reasons=["implicit_legacy_contract_rejected"],
+            )
         if existing.get("contract_version") == REPORT_MODE_CONTRACT_VERSION:
             if _implicit_legacy_contract(existing):
                 return _missing_audience_contract(
@@ -127,6 +150,7 @@ def resolve_report_mode_contract(config: Any = None) -> Mapping[str, Any]:
     audience = _normalize_enum(raw.get("report_audience"))
     requested_mode = _normalize_enum(raw.get("reader_authoring_mode"))
     delivery = _normalize_enum(raw.get("technical_audit_delivery"))
+    technical_audit_explicit = _technical_audit_was_explicitly_requested(raw)
     reasons: list[str] = []
     migration_rule = "explicit"
 
@@ -153,13 +177,19 @@ def resolve_report_mode_contract(config: Any = None) -> Mapping[str, Any]:
 
     if audience == "researcher_manuscript" and requested_mode not in READER_RENDERER_MODES:
         reasons.append("audience_mode_mismatch")
+    if audience == "researcher_manuscript" and technical_audit_explicit:
+        reasons.append("technical_audit_intent_conflicts_with_researcher")
     if audience == "technical_audit" and requested_mode in READER_RENDERER_MODES:
         reasons.append("technical_audience_with_shadow_renderer")
+    if audience == "technical_audit" and not technical_audit_explicit:
+        reasons.append("technical_audit_intent_not_explicit")
 
     valid = not {
         "schema_validation_error",
         "audience_mode_mismatch",
         "technical_audience_with_shadow_renderer",
+        "technical_audit_intent_conflicts_with_researcher",
+        "technical_audit_intent_not_explicit",
     }.intersection(reasons)
     if audience == "researcher_manuscript":
         effective_mode = requested_mode if requested_mode in READER_RENDERER_MODES else ""
@@ -175,6 +205,7 @@ def resolve_report_mode_contract(config: Any = None) -> Mapping[str, Any]:
         "requested_reader_mode": requested_mode,
         "effective_reader_mode": effective_mode,
         "technical_audit_delivery": delivery,
+        "technical_audit_explicit": technical_audit_explicit,
         "valid": valid,
         "reason_codes": sorted(set(reasons)),
         "migration_rule": migration_rule,
@@ -201,6 +232,7 @@ def apply_report_mode_contract(report_config: Any = None) -> tuple[dict[str, Any
     elif contract["requested_reader_mode"]:
         effective["reader_authoring_mode"] = contract["requested_reader_mode"]
     effective["technical_audit_delivery"] = contract["technical_audit_delivery"]
+    effective["technical_audit_explicit"] = bool(contract.get("technical_audit_explicit"))
     return effective, contract
 
 

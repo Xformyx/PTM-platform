@@ -124,6 +124,7 @@ def test_technical_legacy_output_is_labelled_and_not_researcher_final():
         "report_audience": "technical_audit",
         "reader_authoring_mode": "legacy",
         "technical_audit_delivery": "embedded_technical_report",
+        "technical_audit_explicit": True,
     }
     result = format_citations({
         "report_config": config,

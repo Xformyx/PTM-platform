@@ -38,6 +38,7 @@ def test_technical_legacy_is_valid_and_labelled():
         "report_audience": "technical_audit",
         "reader_authoring_mode": "legacy",
         "technical_audit_delivery": "embedded_technical_report",
+        "technical_audit_explicit": True,
     })
     assert contract["valid"] is True
     assert contract["effective_reader_mode"] == "legacy"
@@ -48,6 +49,7 @@ def test_technical_shadow_is_rejected_as_mode_mismatch():
     contract = resolve_report_mode_contract({
         "report_audience": "technical_audit",
         "reader_authoring_mode": "shadow",
+        "technical_audit_explicit": True,
     })
     assert contract["valid"] is False
     assert "technical_audience_with_shadow_renderer" in contract["reason_codes"]
@@ -93,6 +95,16 @@ def test_historical_implicit_legacy_contract_is_rejected_on_replay():
     assert contract["valid"] is False
     assert contract["report_audience"] == ""
     assert "implicit_legacy_contract_rejected" in contract["reason_codes"]
+
+
+def test_legacy_technical_fields_without_explicit_intent_are_rejected():
+    contract = resolve_report_mode_contract({
+        "report_audience": "technical_audit",
+        "reader_authoring_mode": "legacy",
+        "technical_audit_delivery": "embedded_technical_report",
+    })
+    assert contract["valid"] is False
+    assert "technical_audit_intent_not_explicit" in contract["reason_codes"]
 
 
 def test_apply_writes_canonical_fields():

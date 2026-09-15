@@ -249,17 +249,19 @@ export function isResearcherManuscriptRequest(config: unknown): boolean {
   return isReaderAuthoringShadow(value.reader_authoring_mode);
 }
 
-export function researcherReportConfigFields(enabled: boolean): Record<string, string> {
+export function researcherReportConfigFields(enabled: boolean): Record<string, string | boolean> {
   return enabled
     ? {
         report_audience: "researcher_manuscript",
         reader_authoring_mode: "shadow",
         technical_audit_delivery: "separate_sidecar",
+        technical_audit_explicit: false,
       }
     : {
         report_audience: "technical_audit",
         reader_authoring_mode: "legacy",
         technical_audit_delivery: "embedded_technical_report",
+        technical_audit_explicit: true,
       };
 }
 
