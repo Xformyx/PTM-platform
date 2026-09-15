@@ -78,7 +78,9 @@ def test_phase2_results_fallback_reports_named_features_and_adjustment_before_te
     assert "protein-adjusted relative PTM log2 contrast" in results
     assert "linked protein contrast" in results
     assert "GENEA" in results
-    assert results.count("GENEA modified-precursor") == 1
+    # One display label introduces the observation and one begins the
+    # sentence-local numerical binding; internal PF IDs remain absent.
+    assert results.count("GENEA modified-precursor") == 2
     assert "PTM_Absolute_Log2FC" not in results
 
 

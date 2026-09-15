@@ -33,7 +33,7 @@ from typing import Any, Iterable, Mapping
 
 from common.section_budgets import SECTION_BUDGETS
 from common.temporal_utils import condition_sort_key
-from .quantitative_claims import AXIS_LABELS, quantitative_records, validate_quantitative_sentence, render_value_record
+from .quantitative_claims import AXIS_LABELS, quantitative_records, validate_quantitative_sentence
 from report_generation.core.measured_feature_cards import (
     build_feature_observation_cards,
     build_quantitation_comparison_cards,
@@ -1372,27 +1372,29 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
             "observation": _clean_text(card.get("reader_summary")),
             "evidence_ids": [str(item) for item in card.get("evidence_ids") or []],
             "reader_feature_id": str(_as_mapping(card.get("feature_identity")).get("reader_feature_id") or "") or None,
+            "reader_display_identity": _card_display_identity(card),
             "figure_keys": figure_keys_for(card),
             "citation_ids": [str(item) for item in card.get("citation_ids") or []],
             "allowed_interpretation": "retain the card claim tier and reader-facing verbs",
             "alternative_explanation": _clean_text(card.get("counterevidence")) or "the observed pattern can reflect multiple biological and measurement processes",
             "next_test": next_test_for(category),
         })
-    for card in _supporting_context_cards(cards):
-        category = str(card.get("category") or "kinase_context")
-        key_findings.append({
-            **_finding_metadata(card, selected_cards),
-            "finding_id": f"F{len(key_findings) + 1}",
-            "category": category,
+    # Candidate-family, multiform, and cluster cards are supporting context for
+    # the narrative. They must not inflate the selected named-observation set or
+    # cause reader coverage to require a PF/FEATURE-like internal binding.
+    supporting_contexts = [
+        {
+            "category": str(card.get("category") or "kinase_context"),
             "observation": _clean_text(card.get("reader_summary")),
             "evidence_ids": [str(item) for item in card.get("evidence_ids") or []],
-            "reader_feature_id": str(_as_mapping(card.get("feature_identity")).get("reader_feature_id") or "") or None,
+            "reader_display_identity": _card_display_identity(card),
             "figure_keys": figure_keys_for(card),
             "citation_ids": [str(item) for item in card.get("citation_ids") or []],
-            "allowed_interpretation": "retain the card claim tier and reader-facing verbs",
             "alternative_explanation": _clean_text(card.get("counterevidence")) or "candidate context is not a direct kinase–substrate assignment",
-            "next_test": next_test_for(category),
-        })
+            "next_test": next_test_for(str(card.get("category") or "kinase_context")),
+        }
+        for card in _supporting_context_cards(cards)
+    ]
     feature_findings = [finding for finding in key_findings if finding.get("category") == "measured_feature_observation"]
     central_answer = " ".join(str(finding.get("observation") or "") for finding in (feature_findings or key_findings)[:3]).strip()
     finding_ids = [str(finding.get("finding_id")) for finding in key_findings]
@@ -1408,6 +1410,7 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
         "central_question": central_question,
         "central_answer": central_answer or "The available reader-safe evidence supports a bounded descriptive answer and a defined next experiment.",
         "key_findings": key_findings,
+        "supporting_contexts": supporting_contexts,
         "finding_selection_audit": selection_audit,
         "section_finding_map": {
             "abstract": finding_ids,
@@ -1868,8 +1871,9 @@ def audit_finding_coverage(sections, packet, plan=None):
     links = []
     for finding in findings:
         fid = finding["reader_feature_id"]
+        display = str(finding.get("reader_display_identity") or "").strip()
         evidence = set(finding.get("evidence_ids") or [])
-        matched = [s for s in sentences if (fid in s or evidence.intersection(_EVIDENCE_MARKER_RE.findall(s)))
+        matched = [s for s in sentences if (fid in s or (display and display.lower() in s.lower()) or evidence.intersection(_EVIDENCE_MARKER_RE.findall(s)))
                    and not validate_quantitative_sentence(s, packet)
                    and re.search(r"\b(?:contrast|PTM|protein)\b.*?[+−-]?\d+\.\d+", s, re.I)]
         if "results" in sections and not matched:
@@ -1880,7 +1884,7 @@ def audit_finding_coverage(sections, packet, plan=None):
             duplicates.append(finding["finding_id"])
         if "discussion" in sections:
             paragraphs = re.split(r"\n\s*\n", str(sections.get("discussion") or ""))
-            substantive = [p for p in paragraphs if (fid in p or evidence.intersection(_EVIDENCE_MARKER_RE.findall(p)))
+            substantive = [p for p in paragraphs if (fid in p or (display and display.lower() in p.lower()) or evidence.intersection(_EVIDENCE_MARKER_RE.findall(p)))
                            and len(p.split()) >= 25 and re.search(r"contrast|response|abundance|precursor", p, re.I)
                            and re.search(r"explain|interpret|contribut|compare|comparison|test|validat|denominator|reference level|observed", p, re.I)]
             if not substantive:
@@ -1975,9 +1979,25 @@ def restore_missing_finding_paragraphs(section, text, packet, plan=None):
     missing = set(coverage["missing_finding_ids"] + coverage["discussion_missing_finding_ids"])
     if not missing:
         return text, kinase_audit
-    feature_ids = {f["reader_feature_id"] for f in plan["key_findings"] if f["finding_id"] in missing and f.get("reader_feature_id")}
-    fallback = render_reader_section_fallback(section, packet)
-    candidate = "\n\n".join(p for p in re.split(r"\n\s*\n", fallback) if any(fid in p for fid in feature_ids))
+    missing_findings = [finding for finding in plan["key_findings"] if finding["finding_id"] in missing]
+    selected_cards, _ = select_finding_cards(packet.get("reader_cards") or [])
+    cards_by_id = {
+        str(_as_mapping(card.get("feature_identity")).get("reader_feature_id") or ""): card
+        for card in selected_cards
+    }
+    recovered = []
+    for finding in missing_findings:
+        card = cards_by_id.get(str(finding.get("reader_feature_id") or ""))
+        if not card:
+            continue
+        if section == "results":
+            recovered.append(_named_finding_clause(card, finding))
+        else:
+            recovered.append(
+                f"{_card_display_identity(card)} {_joint_description(card)} "
+                "This observation remains subject to protein-denominator, mapping, and sampling alternatives and requires matched validation."
+            )
+    candidate = "\n\n".join(recovered)
     validated, audit = validate_and_repair_sections({section: candidate}, packet)
     addition = validated.get(section, "")
     if not addition:
@@ -2319,7 +2339,7 @@ def _sampled_trajectory_interpretation(card):
 def _named_finding_clause(card, finding=None, *, maximum_conditions=3):
     records = [r for r in quantitative_records(card) if r.get("value") is not None]
     conditions = finding_observation_conditions(card)[:maximum_conditions]
-    compact = []
+    compact: list[str] = []
     for condition in conditions:
         values = [
             f"{AXIS_LABELS.get(r['axis'], r['axis'])} {r['value']:+.3f}"
@@ -2328,11 +2348,14 @@ def _named_finding_clause(card, finding=None, *, maximum_conditions=3):
         ]
         if values:
             compact.append(f"{condition}: " + ", ".join(values))
-    description = _joint_description(card)
+    description = _joint_description(card).rstrip(". ")
     label = _card_display_identity(card)
     clause = f"{label} {description[0].lower() + description[1:]}"
     if compact:
-        clause += " Recorded contrasts were " + "; ".join(compact) + "."
+        # Sentence splitting treats the explanatory clause as complete. Repeat
+        # the reader-safe (never PF/FEATURE) display identity once at the start
+        # of the numeric clause so every value remains locally auditable.
+        clause += f" {label} recorded contrasts were " + "; ".join(compact) + "."
     return clause
 
 
@@ -2359,6 +2382,8 @@ def _evidence_bound_bridge(kind: str) -> str:
 def _literature_status_card(packet) -> str:
     statuses = []
     pending = 0
+    failed = 0
+    not_searched = 0
     anchored = 0
     for card in packet.get("reader_cards") or []:
         context = _as_mapping(card.get("literature_comparison"))
@@ -2368,17 +2393,25 @@ def _literature_status_card(packet) -> str:
         statuses.append(status)
         if status == "retrieved_comparison_pending":
             pending += 1
+        elif status == "retrieval_failed":
+            failed += 1
+        elif status in {"not_searched", "retrieval_unavailable"}:
+            not_searched += 1
         if context.get("comparisons"):
             anchored += 1
     if not statuses:
         return "A compact literature-status summary was not available for the selected findings."
-    if pending and not anchored:
-        return (
-            "Retrieved literature remains comparison-pending for the selected findings; "
-            "this status does not erase the measured observations."
-        )
     if anchored:
         return f"Source-anchored comparisons were available for {anchored} selected finding(s)."
+    if failed:
+        return "Finding-scoped literature search failed for the selected observations; this search failure does not erase the measured observations."
+    if pending:
+        return (
+            "Retrieved literature comparison remains incomplete for the selected findings; "
+            "this status does not erase the measured observations."
+        )
+    if not_searched:
+        return "Finding-scoped literature comparison was not performed for the selected observations; this does not erase the measured observations."
     return "Traceable feature-specific literature comparison remained incomplete for the selected findings."
 
 
@@ -2442,17 +2475,24 @@ def _render_role_based_results(packet, study, cards, plan, figures):
 
 
 def _render_role_based_discussion(packet, cards, plan):
-    named = cards[:2]
-    observation = " ".join(_joint_description(card) for card in named) or "Selected current-order observations remain the interpretation anchor."
+    # A reader paragraph can carry at most three selected observations.  This
+    # keeps the discussion concise while preserving the full default finding
+    # set used by Results and the public coverage audit.
+    named = cards[:3]
+    observation = " ".join(
+        f"{_card_display_identity(card)} {_joint_description(card)}"
+        for card in named
+    ) or "Selected current-order observations remain the interpretation anchor."
     literature_bits = []
-    for finding in (plan.get("key_findings") or [])[:2]:
-        context = _as_mapping(finding.get("literature_comparison"))
+    for card, finding in zip(named, (plan.get("key_findings") or [])):
+        context = _as_mapping(finding.get("literature_comparison")) or _as_mapping(card.get("literature_comparison"))
         for comparison in (context.get("comparisons") or [])[:2]:
             relation = "agreed with" if comparison.get("relationship") == "known_agreement" else "differed from" if comparison.get("relationship") == "disagreement" else "provided biological context for"
             differences = "; ".join(comparison.get("condition_differences") or []) or "experimental comparability has not been established"
+            external = str(comparison.get("external_finding") or "").rstrip(". ")
             literature_bits.append(
                 f"The {comparison.get('reference_scope', 'supplied')}-level literature comparison {relation} "
-                f"the recorded observation: {comparison.get('external_finding')} "
+                f"the recorded observation: {external} "
                 f"[REF:{comparison.get('citation_id')}]. Conditions differ in {differences}."
             )
     if not literature_bits:

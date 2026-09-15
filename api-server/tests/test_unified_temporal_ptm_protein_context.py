@@ -42,4 +42,5 @@ def test_shared_summary_reaches_question_context_without_causal_claim() -> None:
     )
 
     assert any("observational temporal candidate" in question for question in questions)
-    assert any("local co-wave membership transitions" in question for question in questions)
+    assert any("within-cluster interval-wise activity-state concordance" in question for question in questions)
+    assert not any("co-wave" in question.lower() for question in questions)

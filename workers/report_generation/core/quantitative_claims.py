@@ -328,7 +328,29 @@ def validate_typed_aggregate_sentence(sentence: str, packet: Mapping[str, Any]) 
     return []
 
 
-def structured_authoring_instructions(packet: Mapping[str, Any]) -> str:
+def structured_authoring_instructions(
+    packet: Mapping[str, Any],
+    *,
+    token_catalog: Mapping[str, Any] | None = None,
+    unavailable_records: list[Mapping[str, Any]] | None = None,
+) -> str:
+    """Build structured-generation instructions from an explicitly scoped payload.
+
+    The audit packet remains the canonical source for validation. A section model
+    packet may, however, provide a reduced token/unavailable-record view so audit
+    only observations cannot silently consume the provider prompt budget.
+    """
+    catalog = dict(token_catalog) if token_catalog is not None else value_token_catalog(packet)
+    unavailable = (
+        [dict(record) for record in unavailable_records]
+        if unavailable_records is not None
+        else [
+            record
+            for card in packet.get("reader_cards") or []
+            for record in quantitative_records(card)
+            if record["value"] is None
+        ]
+    )
     return ("\nReturn a JSON object with sentences matching this schema: "
             + json.dumps(SENTENCE_RESPONSE_FORMAT["json_schema"]["schema"])
             + "\nEach sentence carries evidence_ids and scope. Use {{V1}} style tokens for quantitative clauses; "
@@ -337,10 +359,9 @@ def structured_authoring_instructions(packet: Mapping[str, Any]) -> str:
               "List only figures supporting this sentence in figure_keys. Use separate sentences for background, "
               "current observations and hypotheses. Preserve [REF:*] citations in text. Group sentences with paragraph integers. "
               "Do not emit numeric feature measurements outside tokens.\nImmutable token references: "
-            + json.dumps(value_token_catalog(packet), ensure_ascii=False, separators=(",", ":"))
+            + json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
             + "\nUnavailable observations (not value tokens; preserve the supplied reasons): "
-            + json.dumps([r for c in packet.get("reader_cards") or [] for r in quantitative_records(c)
-                          if r["value"] is None], ensure_ascii=False, separators=(",", ":")))
+            + json.dumps(unavailable, ensure_ascii=False, separators=(",", ":")))
 
 
 SENTENCE_RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {

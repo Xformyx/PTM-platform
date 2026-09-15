@@ -353,6 +353,35 @@ def _catalog_for_model(audit_packet: Mapping[str, Any], model_packet: Mapping[st
     return redact_token_catalog_for_model(catalog)
 
 
+def _unavailable_records_for_model(audit_packet: Mapping[str, Any], model_packet: Mapping[str, Any]) -> list[dict]:
+    """Keep only section-retained unavailable records in the model prompt."""
+    retained = set(model_packet.get("retained_evidence_ids") or [])
+    stage = int(model_packet.get("prompt_compaction_stage") or 0)
+    records = [
+        record
+        for card in audit_packet.get("reader_cards") or []
+        for record in quantitative_records(card)
+        if record.get("value") is None
+        and (not retained or record.get("evidence_id") in retained)
+    ]
+    if stage >= 3:
+        compact_conditions = set()
+        for card in model_packet.get("reader_cards") or []:
+            trajectory = card.get("trajectory")
+            if isinstance(trajectory, Mapping):
+                for key in ("first", "peak", "last"):
+                    condition = _as_mapping(trajectory.get(key)).get("condition")
+                    if condition:
+                        compact_conditions.add(condition)
+        if compact_conditions:
+            records = [
+                record for record in records
+                if record.get("condition") in compact_conditions
+                or record.get("record_type") != "feature_axis"
+            ]
+    return list(redact_token_catalog_for_model({str(index): record for index, record in enumerate(records)}).values())
+
+
 def format_section_model_prompt(
     model_packet: Mapping[str, Any],
     section_type: str,
@@ -366,18 +395,12 @@ def format_section_model_prompt(
         plan,
         include_quantitative_records=False,
     )
-    instructions = structured_authoring_instructions(audit_packet)
     catalog = _catalog_for_model(audit_packet, model_packet)
-    prefix, _, remainder = instructions.partition("Immutable token references: ")
-    if remainder:
-        _serialized, sep, unavailable = remainder.partition("\nUnavailable observations (not value tokens; preserve the supplied reasons): ")
-        instructions = (
-            prefix
-            + "Immutable token references: "
-            + json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
-            + sep
-            + unavailable
-        )
+    instructions = structured_authoring_instructions(
+        audit_packet,
+        token_catalog=catalog,
+        unavailable_records=_unavailable_records_for_model(audit_packet, model_packet),
+    )
     return prompt + instructions
 
 

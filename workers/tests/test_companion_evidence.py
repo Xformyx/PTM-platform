@@ -145,7 +145,10 @@ def test_fallback_results_include_kinase_cards():
         "vector_plot_raw_data": _vector_rows(),
     })
     plan = deterministic_authoring_plan(packet)
-    assert any(finding.get("category") == "kinase_context" for finding in plan["key_findings"])
+    # Kinase context is intentionally supporting evidence, not a named
+    # measured-feature finding that could be mistaken for direct attribution.
+    assert not any(finding.get("category") == "kinase_context" for finding in plan["key_findings"])
+    assert any(context.get("category") == "kinase_context" for context in plan["supporting_contexts"])
     results = render_reader_section_fallback("results", packet)
     assert "direction concordance fraction" in results.lower()
     assert "supplementary figure 2" in results.lower()

@@ -151,7 +151,7 @@ export default function RerunOptionsModal({
     llm_tokens_results: 16384, llm_tokens_time_course: 8192,
     llm_tokens_discussion: 12288, llm_tokens_conclusion: 6144,
     llm_temperature: 0.6, chromadb_results_per_section: 10,
-    ptm_detail_count: 30, reader_authoring_shadow: false,
+    ptm_detail_count: 30, reader_authoring_shadow: true,
   });
 
   // Load RAG collections when modal opens
@@ -274,7 +274,9 @@ export default function RerunOptionsModal({
           reader_authoring_shadow: isResearcherManuscriptRequest(rc),
         });
       } else {
-        setReportConfig((prev) => ({ ...prev, reader_authoring_shadow: false }));
+        // Historical Orders without a report config are ordinary researcher
+        // report requests. Technical audit must be an explicit choice.
+        setReportConfig((prev) => ({ ...prev, reader_authoring_shadow: true }));
       }
     }
   }, [open, order, llmModels]);
@@ -976,7 +978,7 @@ export default function RerunOptionsModal({
                         llm_tokens_results: 16384, llm_tokens_time_course: 8192,
                         llm_tokens_discussion: 12288, llm_tokens_conclusion: 6144,
                         llm_temperature: 0.6, chromadb_results_per_section: 10,
-                        ptm_detail_count: 30, reader_authoring_shadow: false,
+                        ptm_detail_count: 30, reader_authoring_shadow: true,
                       })}>
                       <RotateCcw className="h-3 w-3" /> Reset to Defaults
                     </Button>

@@ -58,6 +58,19 @@ def _normalize_report_options(report_options: dict | None) -> dict:
 
     options = dict(report_options or {})
     report_config = dict(options.get("report_config") or {})
+    # User-facing Order creation, duplication and Report-only re-runs are
+    # researcher manuscript requests unless the caller explicitly selects a
+    # technical audit.  A missing legacy config must not silently regenerate a
+    # developer-facing report.
+    audience_supplied = bool(str(report_config.get("report_audience") or "").strip())
+    mode_supplied = bool(str(report_config.get("reader_authoring_mode") or "").strip())
+    if not audience_supplied and not mode_supplied:
+        report_config = {
+            "report_audience": "researcher_manuscript",
+            "reader_authoring_mode": "shadow",
+            "technical_audit_delivery": "separate_sidecar",
+            **report_config,
+        }
     effective, contract = apply_report_mode_contract(report_config)
     if not contract["valid"]:
         raise HTTPException(

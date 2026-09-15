@@ -11,7 +11,11 @@ from report_generation.core.reader_authoring import (
     render_reader_section_fallback,
 )
 from report_generation.core.report_release import resolve_report_release
-from report_generation.core.section_model_packet import compose_compacted_section_prompt
+from report_generation.core.section_model_packet import (
+    build_section_model_packet,
+    compose_compacted_section_prompt,
+    format_section_model_prompt,
+)
 from common.report_display_policy import effective_display_policy
 
 
@@ -92,6 +96,34 @@ def test_oversized_audit_compacts_and_leaves_audit_unchanged():
     assert trace["retained_evidence_ids"]
     assert "section_model_packet" in trace
     assert trace["prompt_compaction_stage"] >= 0
+
+
+def test_section_prompt_does_not_reintroduce_unavailable_records_from_omitted_cards():
+    packet = build_authoring_packet(_vector_state(16))
+    plan = deterministic_authoring_plan(packet)
+    feature_cards = [card for card in packet["reader_cards"] if card.get("feature_identity")]
+    for index, card in enumerate(feature_cards):
+        card["value_records"] = [{
+            "evidence_id": (card.get("evidence_ids") or [f"evidence.{index}"])[0],
+            "feature_id": card["feature_identity"]["reader_feature_id"],
+            "display_identity": card["feature_identity"]["reader_display_identity"],
+            "condition": f"MISSING_MARKER_{index}",
+            "axis": "unadjusted",
+            "value": None,
+            "record_type": "feature_axis",
+        }]
+    model_packet = build_section_model_packet(packet, plan, "results", compaction_stage=5)
+    prompt = format_section_model_prompt(model_packet, "results", plan, packet)
+    omitted_ids = {
+        evidence_id
+        for item in model_packet["omitted_evidence_ids_and_reason"]
+        for evidence_id in item.get("evidence_ids") or []
+    }
+    for index, card in enumerate(feature_cards):
+        marker = f"MISSING_MARKER_{index}"
+        evidence_id = (card.get("evidence_ids") or [""])[0]
+        if evidence_id in omitted_ids:
+            assert marker not in prompt
 
 
 def test_malformed_sibling_sentence_is_dropped_without_section_blanking():

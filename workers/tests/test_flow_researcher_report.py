@@ -180,7 +180,9 @@ def test_study_search_is_cached_and_failed_comparison_keeps_provider_text():
         model, provider = 'fixture', 'mock'
         def generate(self, *args, **kwargs): return '{malformed'
     result = retrieve_finding_literature(build_feature_observation_cards(researcher_state(2)), Retriever(), {'organism': 'rat', 'cell_type': 'fixture cells'}, llm=Model())
-    assert len(calls) == 5 and sum('signaling time course' in c for c in calls) == 1
+    # One shared study-context query is cached; the other three retrieval
+    # layers remain feature specific for each of the two named observations.
+    assert len(calls) == 7 and sum('signaling time course' in c for c in calls) == 1
     assert 'rat' in calls[0] and all('mouse' not in c for c in calls)
     for record in result['records'].values():
         assert record['comparison_generation']['provider_raw_text'] == '{malformed'

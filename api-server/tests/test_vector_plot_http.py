@@ -49,7 +49,15 @@ def test_route_to_ui_preserves_null_support_and_distinct_forms(tmp_path, monkeyp
     # markup with this route response. This is not a browser layout test.
     frontend = Path(__file__).resolve().parents[2] / "frontend"
     script = tmp_path / "ui.cjs"
-    subprocess.run([str(frontend / "node_modules/.bin/esbuild"), "src/components/QuantitationEvidenceTable.tsx",
+    esbuild = frontend / "node_modules/.bin/esbuild"
+    if not esbuild.exists():
+        # pnpm's isolated linker does not expose transitive package bins in
+        # node_modules/.bin. Locate the installed Vite/esbuild binary without
+        # depending on a particular package-manager linker mode.
+        candidates = sorted((frontend / "node_modules/.pnpm").glob("esbuild@*/node_modules/esbuild/bin/esbuild"))
+        assert candidates, "esbuild binary was not installed for component bundle regression"
+        esbuild = candidates[-1]
+    subprocess.run([str(esbuild), "src/components/QuantitationEvidenceTable.tsx",
                     "--bundle", "--platform=node", "--format=cjs", "--jsx=automatic", f"--outfile={script}"], cwd=frontend, check=True, capture_output=True)
     render = "const React=require('react'), R=require('react-dom/server'); const C=require(process.argv[1]); let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>process.stdout.write(R.renderToStaticMarkup(React.createElement(C.QuantitationEvidenceTable,{rows:JSON.parse(s).vector_data}))));"
     result = subprocess.run(["node", "-e", render, str(script)], cwd=frontend, input=json.dumps(payload), text=True, capture_output=True, check=True)

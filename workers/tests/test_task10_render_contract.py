@@ -24,7 +24,8 @@ def test_t10_12_frozen_findings_bind_to_three_axis_render(tmp_path, count):
     validated, audit = reader.validate_and_repair_sections(prose, packet)
     assert audit["finding_coverage"]["missing_finding_ids"] == []
     assert audit["finding_coverage"]["status"] == "covered"
-    assert all(f["reader_feature_id"] in validated["results"] for f in plan["key_findings"])
+    assert all(f["reader_display_identity"] in validated["results"] for f in plan["key_findings"])
+    assert "PF-" not in validated["results"]
     assert "next" in validated["conclusion"].lower()
 
 

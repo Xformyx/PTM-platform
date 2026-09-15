@@ -332,7 +332,7 @@ export default function OrderCreate() {
     llm_temperature: 0.6,
     chromadb_results_per_section: 10,
     ptm_detail_count: 30,
-    reader_authoring_shadow: false,
+    reader_authoring_shadow: true,
   });
 
   const goTo = useCallback((s: number) => {
@@ -1794,7 +1794,7 @@ export default function OrderCreate() {
                             llm_tokens_results: 16384, llm_tokens_time_course: 8192,
                             llm_tokens_discussion: 12288, llm_tokens_conclusion: 6144,
                             llm_temperature: 0.6, chromadb_results_per_section: 10,
-                            ptm_detail_count: 30, reader_authoring_shadow: false,
+                            ptm_detail_count: 30, reader_authoring_shadow: true,
                           })}>
                           <RotateCcw className="h-3 w-3" /> Reset to Defaults
                         </Button>
