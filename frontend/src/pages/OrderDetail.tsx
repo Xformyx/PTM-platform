@@ -829,31 +829,42 @@ function ResultFiles({
           </CardHeader>
           <CardContent className="space-y-2">
             {reportRevisions.map((rev) => {
-              const open = openRevisions.includes(rev.key);
+              const open = rev.latest || openRevisions.includes(rev.key);
+              const header = (
+                <div className="flex min-w-0 items-center gap-2">
+                  {!rev.latest && (
+                    open ? <ChevronUp className="h-3.5 w-3.5 shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                  )}
+                  <span className="text-sm font-medium font-mono">{rev.label}</span>
+                  {rev.latest && (
+                    <Badge variant="secondary" className="text-[10px]">Latest</Badge>
+                  )}
+                  <span className="text-[11px] text-muted-foreground">
+                    {rev.files.length} files
+                  </span>
+                </div>
+              );
               return (
                 <div key={rev.key} className="rounded-md border">
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/40"
-                    onClick={() =>
-                      setOpenRevisions((current) =>
-                        current.includes(rev.key)
-                          ? current.filter((key) => key !== rev.key)
-                          : [...current, rev.key],
-                      )
-                    }
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      {open ? <ChevronUp className="h-3.5 w-3.5 shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0" />}
-                      <span className="text-sm font-medium font-mono">{rev.label}</span>
-                      {rev.latest && (
-                        <Badge variant="secondary" className="text-[10px]">Latest</Badge>
-                      )}
-                      <span className="text-[11px] text-muted-foreground">
-                        {rev.files.length} files
-                      </span>
+                  {rev.latest ? (
+                    <div className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left">
+                      {header}
                     </div>
-                  </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/40"
+                      onClick={() =>
+                        setOpenRevisions((current) =>
+                          current.includes(rev.key)
+                            ? current.filter((key) => key !== rev.key)
+                            : [...current, rev.key],
+                        )
+                      }
+                    >
+                      {header}
+                    </button>
+                  )}
                   {open && (
                     <div className="border-t overflow-x-auto">
                       <FileTable
