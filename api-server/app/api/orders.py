@@ -14,6 +14,7 @@ from sqlalchemy import select, text, func as sqlfunc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.core.bounded_compute import CpuBoundBusy, CpuBoundTimeout, run_cpu_bound
 from app.core.database import get_db
 from app.core.json_files import atomic_write_json, load_json_first_value
 from app.core.redis import get_redis
@@ -44,6 +45,39 @@ _CELERY_TASKS_SET = "celery_tasks:{order_id}"
 _RUN_GEN_KEY = "order_run_gen:{order_id}"
 _CELERY_TASK_TTL = 7 * 24 * 3600
 _TEMPORAL_SIDECAR_ARTIFACT = "temporal_ptm_protein_analysis_v2.json"
+
+
+async def _bounded_weighted_kinase_scores(**kwargs):
+    """Run TMM scoring in a killable child process.
+
+    구현 대상: operational isolation (2026-09-18 login outage)
+    사전등록: 해당 없음
+    해석 한계: timeout/격리는 요청 중단이다. NNLS 비율과 가중합은
+    ``compute_weighted_kinase_scores`` 그대로다.
+    주장 금지: 점수나 kinase 귀속을 바꾸지 않는다.
+    """
+    from app.services.temporal_kinase_scoring import compute_weighted_kinase_scores
+
+    settings = get_settings()
+    try:
+        return await run_cpu_bound(
+            compute_weighted_kinase_scores,
+            timeout_sec=float(settings.API_CPU_BOUND_TIMEOUT_SEC),
+            **kwargs,
+        )
+    except CpuBoundBusy:
+        raise HTTPException(
+            status_code=429,
+            detail="Another kinase activity computation is already running. Retry shortly.",
+        ) from None
+    except CpuBoundTimeout:
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "Kinase activity computation exceeded the API time limit and was stopped "
+                "so login and health checks stay available."
+            ),
+        ) from None
 
 
 def _normalize_report_options(report_options: dict | None) -> dict:
@@ -9187,7 +9221,6 @@ async def kinase_activity_heatmap(
     raw_cowave_groups = list(cowave_groups)
     tmm_weighted_cowave_groups: list[dict] = []
     try:
-        from app.services.temporal_kinase_scoring import compute_weighted_kinase_scores
         # Build members-based kinase_modules list for TMM
         _tmm_modules = []
         for km in kinase_modules:
@@ -9202,7 +9235,7 @@ async def kinase_activity_heatmap(
                 # Guard: skip keys with trailing underscore (missing position)
                 "members": [{"key": k} for k in _keys if k in temporal_inputs["features"]],
             })
-        tmm_scores = compute_weighted_kinase_scores(
+        tmm_scores = await _bounded_weighted_kinase_scores(
             kinase_modules=_tmm_modules,
             ptm_timeseries=ptm_timeseries,
             ptm_to_kinases=ptm_to_kinases,
@@ -9248,7 +9281,7 @@ async def kinase_activity_heatmap(
             )
             occupancy_wave_contract["analysis_scope"] = "paired_occupancy_logit_delta_observed_only"
             occupancy_wave_contract["track_provenance"] = occupancy_track_provenance
-            occupancy_tmm_scores = compute_weighted_kinase_scores(
+            occupancy_tmm_scores = await _bounded_weighted_kinase_scores(
                 kinase_modules=_tmm_modules,
                 ptm_timeseries=occupancy_complete_timeseries,
                 ptm_to_kinases=ptm_to_kinases,

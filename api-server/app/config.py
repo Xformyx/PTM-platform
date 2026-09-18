@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     # OpenClaw-Home health (System Monitor / Dashboard). Empty → WEBHOOK_URL host + /health
     PTM_AGENT_HEALTH_URL: str = ""
 
+    # Wall-clock cap for one in-API TMM/heatmap child process.
+    # Operational only — not a TMM scoring threshold.  Declared 2026-09-18
+    # after kinase-activity-heatmap blocked uvicorn (login/health timeout)
+    # for >10h.  Exceeding this kills the child and returns 504.
+    # Must stay below gateway /api/ proxy_read_timeout (600s).
+    API_CPU_BOUND_TIMEOUT_SEC: float = 240.0
+
     # Email (notifications)
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

@@ -2847,3 +2847,22 @@
 - **결정성:** `report_audience_mode.v1`의 사전 선언 enum과 reason code.
   새 추정량·seed·solver 없음.
 
+### [2026-09-18] API TMM을 자식 프로세스로 격리 (로그인 장애)
+
+- **분류:** 구현
+- **대상:** `api-server/app/core/bounded_compute.py`,
+  `api-server/app/api/orders.py` (`kinase-activity-heatmap`),
+  `api-server/app/config.py` (`API_CPU_BOUND_TIMEOUT_SEC`),
+  `api-server/entrypoint.sh`
+- **구현 대상 설계:** 신규 — 운영 격리. 2026-09-18 로그인 장애 후 선언.
+  TMM 공식·가드 정책·캐시 해시는 변경하지 않는다.
+- **사전등록 상태:** 해당 없음 (요청 수명 운영 한도). primary 승격 금지.
+- **내용:** `compute_weighted_kinase_scores`를 uvicorn 이벤트 루프가 아니라
+  spawn 자식에서 실행한다. 기본 240s를 넘기면 자식을 종료하고 504를 반환한다.
+  동시에 한 건만 허용(429). API 프로세스의 BLAS/OpenMP 스레드는 기본 1.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** timeout은 미완료 요청을 중단할 뿐이며 NNLS 비율·가중합·
+  kinase 귀속을 바꾸지 않는다. 캐시 hit 경로도 그대로다.
+- **결정성:** 새 seed·solver·dtype 없음. 동일 입력이 제한 시간 안에 끝나면
+  기존 함수와 같은 값을 반환한다.
+
