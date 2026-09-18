@@ -94,3 +94,11 @@ docs/*
 !docs/05-pipeline-guide.md
 !docs/BUILD_AND_RUN.md
 !docs/BUILD_AND_DEPLOY.md
+
+# Versioned implementation evidence requested for the PTM integration change.
+!docs/implementation/
+docs/implementation/*
+!docs/implementation/ptm-report-integration-status.md
+!docs/implementation/ptm-report-contract-map.md
+!docs/implementation/ptm-report-validation.md
+!docs/implementation/ptm-report-validation-summary.json

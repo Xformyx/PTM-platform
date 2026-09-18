@@ -131,7 +131,7 @@ def test_section_prompt_does_not_reintroduce_unavailable_records_from_omitted_ca
         marker = f"MISSING_MARKER_{index}"
         evidence_id = (card.get("evidence_ids") or [""])[0]
         if evidence_id in omitted_ids:
-            assert marker not in prompt
+            assert not re.search(re.escape(marker) + r'(?![0-9])', prompt)
 
 
 def test_narrative_decoder_keeps_valid_bridge_when_one_paragraph_is_malformed():

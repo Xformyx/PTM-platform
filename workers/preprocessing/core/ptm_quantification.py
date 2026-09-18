@@ -47,6 +47,7 @@ class PTMQuantificationAnalyzer:
         condition_map: Optional[Dict[str, str]] = None,
         progress_callback: Optional[Callable[[float, str], None]] = None,
         sample_manifest: Optional[dict] = None,
+        normalization_policy: str = "legacy_median.v1",
     ):
         self.fasta_path = fasta_path
         self.output_dir = Path(output_dir)
@@ -68,6 +69,9 @@ class PTMQuantificationAnalyzer:
         self.pg_matrix_normalized = None
         self.sample_columns = None
         self.sample_manifest = sample_manifest or {}
+        if normalization_policy not in {"legacy_median.v1", "already_normalized.v1"}:
+            raise ValueError("Unsupported normalization policy")
+        self.normalization_policy = normalization_policy
         self.condition_map = condition_map if condition_map else {}
         self.external_condition_map = condition_map is not None
         self.available_conditions: List[str] = []
@@ -155,6 +159,7 @@ class PTMQuantificationAnalyzer:
                 all_protein_changes, ptm_protein_changes, ptm_vector_df, pair_audit_df,
                 unadjusted_ptm_comparisons=unadjusted_ptm_comparisons,
             )
+            self._write_observation_inventory(ptm_vector_df.to_dict('records'))
 
             self._progress(0.95, "Quantification complete")
             return True
@@ -173,13 +178,18 @@ class PTMQuantificationAnalyzer:
                 logger.error(f"FASTA not found: {self.fasta_path}")
                 return False
 
+            from collections import defaultdict
+            references, descriptions = defaultdict(set), defaultdict(set)
             for record in SeqIO.parse(self.fasta_path, "fasta"):
                 uniprot_id = self._extract_uniprot_id(record.id)
                 if uniprot_id:
-                    self.fasta_dict[uniprot_id] = str(record.seq)
-                    pname, gname = self._extract_protein_and_gene_info(record.description)
-                    self.protein_names[uniprot_id] = pname
-                    self.gene_names[uniprot_id] = gname
+                    references[uniprot_id].add(str(record.seq))
+                    descriptions[uniprot_id].add(self._extract_protein_and_gene_info(record.description))
+            self.fasta_reference_candidates = {key: sorted(values) for key, values in references.items()}
+            self.fasta_dict = {key: next(iter(values)) for key, values in references.items() if len(values) == 1}
+            for key, values in descriptions.items():
+                self.protein_names[key] = next(iter(values))[0] if len(values) == 1 else "Unknown protein"
+                self.gene_names[key] = next(iter(values))[1] if len(values) == 1 else "Unknown"
 
             logger.info(f"FASTA loaded: {len(self.fasta_dict):,} proteins")
             return True
@@ -290,6 +300,15 @@ class PTMQuantificationAnalyzer:
                 return False
             self.pg_matrix = pd.read_csv(self.pg_matrix_path, sep="\t", on_bad_lines="warn", low_memory=False)
             logger.info(f"PG Matrix loaded: {len(self.pg_matrix):,} protein groups")
+            # Conflicting denominator rows are not resolved by file order.
+            self.pg_matrix = self.pg_matrix.drop_duplicates()
+            if 'Protein.Group' in self.pg_matrix:
+                conflicts = self.pg_matrix.duplicated('Protein.Group', keep=False)
+                if conflicts.any():
+                    from ptm_shared.report_revision import _atomic_json, file_sha256
+                    _atomic_json(self.output_dir / ('protein_denominator_conflicts_' + file_sha256(self.pg_matrix_path) + '.json'),
+                                 self.pg_matrix.loc[conflicts].to_dict('records'))
+                    self.pg_matrix = self.pg_matrix.loc[~conflicts].copy()
 
             self.sample_columns = [col for col in self.pr_matrix.columns if col.endswith(".mzML")]
             # Blind-benchmark snapshots may alias headers as S001.mzML; if a
@@ -314,10 +333,57 @@ class PTMQuantificationAnalyzer:
 
             self._build_diann_gene_map()
             self.create_condition_mapping()
+            self._write_observation_inventory()
             return True
         except Exception as e:
             logger.error(f"Data loading failed: {e}")
             return False
+
+    def _write_observation_inventory(self, analysis_records=None):
+        """Preserve input row/sample accounting before normalization or filtering.
+
+        Logical content IDs are row-order independent; source locators retain the
+        exact original row. Repeated identical rows share a content ID, not n.
+        """
+        import hashlib
+        from ptm_shared.report_revision import file_sha256, _atomic_json
+        source_hash = file_sha256(self.pr_matrix_path)
+        identity_cols = [c for c in ("Protein.Group", "Precursor.Id", "Modified.Sequence", "Precursor.Charge") if c in self.pr_matrix]
+        distinct = self.pr_matrix.drop_duplicates()
+        conflicts = distinct.loc[distinct.duplicated(identity_cols, keep=False), identity_cols]
+        conflict_keys = {tuple(str(x) for x in row) for row in conflicts.itertuples(index=False, name=None)}
+        seen, records = set(), []
+        def logical_key(row):
+            return tuple("" if pd.isna(row.get(c)) else str(row.get(c)) for c in identity_cols)
+        processed_keys = {logical_key(row) for row in (analysis_records or [])}
+        for row_number, row in enumerate(self.pr_matrix.to_dict('records'), start=2):
+            safe = {k: None if pd.isna(v) else v for k, v in row.items()}
+            content_id = hashlib.sha256(json.dumps(safe, sort_keys=True, default=str).encode()).hexdigest()
+            key = tuple(str(row[c]) for c in identity_cols)
+            target = any(re.search(rf"UniMod:{uid}\b", str(row.get('Modified.Sequence', ''))) for uid in self.target_ptms)
+            reason = ('conflicting_duplicate' if key in conflict_keys else 'exact_duplicate' if content_id in seen
+                      else 'not_requested_ptm' if not target else 'eligible_pending_analysis')
+            seen.add(content_id)
+            records.append({'observation_content_id': content_id, 'source_row': row_number,
+                            'source_dataset_sha256': source_hash, 'identity': {c: safe[c] for c in identity_cols},
+                            'analysis_status': 'pending' if reason == 'eligible_pending_analysis' else 'excluded',
+                            'reason': reason, 'sample_observations': {s: safe.get(s) for s in self.sample_columns},
+                            'source_qc': {c: safe[c] for c in safe if 'Q.Value' in c or 'Localiz' in c or 'Probability' in c}})
+            if reason == 'eligible_pending_analysis' and analysis_records is not None:
+                matched = logical_key(row) in processed_keys
+                records[-1].update(analysis_status='processed' if matched else 'not_evaluable',
+                                   reason='contrast_inventory_created' if matched else 'no_eligible_contrast')
+        inventory = {'schema_version': 'source_observation_inventory.v1', 'source_dataset_sha256': source_hash,
+                     'input_rows': len(records), 'input_sample_observations': len(records) * len(self.sample_columns),
+                     'normalization_policy': self.normalization_policy, 'records': records}
+        inventory['analysis_completed'] = analysis_records is not None
+        inventory['condition_map'] = self.condition_map
+        inventory['sample_manifest'] = self.sample_manifest
+        inventory_hash = hashlib.sha256(json.dumps(inventory, sort_keys=True, default=str).encode()).hexdigest()
+        path = self.output_dir / ('observation_inventory_' + inventory_hash + '.json')
+        if not path.exists():
+            _atomic_json(path, inventory)
+        _atomic_json(self.output_dir / 'observation_inventory_current.json', {'filename': path.name, 'sha256': file_sha256(path)})
 
     def create_condition_mapping(self):
         if self.external_condition_map and self.condition_map:
@@ -390,6 +456,8 @@ class PTMQuantificationAnalyzer:
             return False
 
     def _normalize_matrix(self, matrix: pd.DataFrame, sample_columns: List[str], matrix_type: str) -> Dict[str, float]:
+        if getattr(self, "normalization_policy", "legacy_median.v1") == "already_normalized.v1":
+            return {sample: 1.0 for sample in sample_columns}
         factors: Dict[str, float] = {}
         medians: Dict[str, float] = {}
         for sample in sample_columns:
@@ -417,7 +485,7 @@ class PTMQuantificationAnalyzer:
     def filter_target_ptms(self) -> pd.DataFrame:
         parts = []
         for uid, name in self.target_ptms.items():
-            pattern = f"UniMod:{uid}"
+            pattern = rf"UniMod:{uid}\b"
             matched = self.pr_matrix_normalized[
                 self.pr_matrix_normalized["Modified.Sequence"].str.contains(pattern, na=False)
             ]
@@ -425,7 +493,15 @@ class PTMQuantificationAnalyzer:
             parts.append(matched)
 
         if parts:
-            df = pd.concat(parts, ignore_index=True).drop_duplicates(subset=["Precursor.Id"])
+            df = pd.concat(parts, ignore_index=True).drop_duplicates()
+            identity_cols = [c for c in ("Protein.Group", "Precursor.Id", "Modified.Sequence", "Precursor.Charge") if c in df]
+            conflicts = df.duplicated(subset=identity_cols, keep=False)
+            self.conflicting_precursors = df.loc[conflicts].to_dict("records")
+            # Keep conflicts in an audit artifact; never choose a last-write winner.
+            if conflicts.any():
+                (self.output_dir / "conflicting_precursors.json").write_text(
+                    json.dumps(self.conflicting_precursors, default=str, sort_keys=True), encoding="utf-8")
+            df = df.loc[~conflicts].sort_values(identity_cols).reset_index(drop=True)
             logger.info(f"Filtered PTMs: {len(df):,}")
             return df
         return pd.DataFrame()
@@ -456,11 +532,13 @@ class PTMQuantificationAnalyzer:
                 paired = pr_observed and pg_observed
 
                 results.append({
+                    **self._source_fields(row),
                     "Protein.Group": protein_group,
                     "Precursor.Id": precursor_id,
                     "Modified.Sequence": modified_sequence,
                     "PTM_Type": ptm_type,
                     "PTM_Position": ptm_position,
+                    "Gene.Name": self._resolve_gene_name(protein_group),
                     "Sample": sample,
                     "Condition": self.condition_map.get(sample, "Unknown"),
                     "PTM_Intensity": ptm_intensity if pr_observed else np.nan,
@@ -661,58 +739,33 @@ class PTMQuantificationAnalyzer:
         logger.info("Paired occupancy audit: qualified=%s, audits=%s", len(occupancy_df), len(audit_df))
         return occupancy_df, audit_df
 
+    def _mapping_assertion(self, protein_id, modified_sequence, ptm_type=None):
+        from ptm_shared.site_form_provenance import peptide_mapping_assertion
+        ptm_type = ptm_type or self._determine_ptm_type(modified_sequence)
+        targets = [uid for uid, info in VARIABLE_MODIFICATIONS.items() if info["name"] == ptm_type]
+        return peptide_mapping_assertion(protein_id, modified_sequence,
+            {**self.fasta_dict, **getattr(self, "fasta_reference_candidates", {})}, targets)
+
     def _extract_ptm_position(self, protein_id: str, modified_sequence: str, ptm_type: str = None) -> str:
-        try:
-            if ptm_type is None:
-                ptm_type = self._determine_ptm_type(modified_sequence)
+        mapping = self._mapping_assertion(protein_id, modified_sequence, ptm_type)
+        if mapping["status"] == "unique" and mapping["candidate_positions"]:
+            return ";".join(mapping["candidate_positions"])
+        if mapping["candidates"]:
+            return "Unknown"  # Candidate coordinates remain in the mapping assertion.
+        residues = sorted({m["residue"] for m in mapping["modifications"]
+                           if m["unimod_id"] in self.target_ptms})
+        return ";".join(residues) or "Unknown"
 
-            target_unimod_ids = [uid for uid, info in VARIABLE_MODIFICATIONS.items() if info["name"] == ptm_type]
-
-            candidate_ids = self._split_protein_ids(protein_id)
-            if protein_id in self.fasta_dict and protein_id not in candidate_ids:
-                candidate_ids.insert(0, protein_id)
-
-            for pid in candidate_ids:
-                if pid not in self.fasta_dict:
-                    continue
-                protein_sequence = self.fasta_dict[pid]
-                clean_sequence = re.sub(r"\([^)]*\)", "", modified_sequence)
-                peptide_start = protein_sequence.find(clean_sequence)
-
-                if peptide_start != -1:
-                    clean_index = 0
-                    i = 0
-                    while i < len(modified_sequence):
-                        m = re.match(r"([A-Z])\(UniMod:(\d+)\)", modified_sequence[i:])
-                        if m:
-                            residue, unimod_id = m.group(1), m.group(2)
-                            if unimod_id not in FIXED_MODIFICATIONS:
-                                if not target_unimod_ids or unimod_id in target_unimod_ids:
-                                    return f"{residue}{peptide_start + clean_index + 1}"
-                            clean_index += 1
-                            i += m.end()
-                        elif modified_sequence[i].isupper():
-                            clean_index += 1
-                            i += 1
-                        else:
-                            i += 1
-
-                    if modified_sequence.startswith("(UniMod:1)"):
-                        return "N-term"
-
-            for match in re.finditer(r"([A-Z])\(UniMod:(\d+)\)", modified_sequence):
-                residue, unimod_id = match.group(1), match.group(2)
-                if unimod_id in FIXED_MODIFICATIONS:
-                    continue
-                if target_unimod_ids and unimod_id not in target_unimod_ids:
-                    continue
-                return residue
-
-            if modified_sequence.startswith("(UniMod:1)"):
-                return "N-term"
-            return "Unknown"
-        except Exception:
-            return "Unknown"
+    def _source_fields(self, row):
+        mapping = self._mapping_assertion(row["Protein.Group"], row["Modified.Sequence"])
+        keys = ("Precursor.Charge", "Localization.Probability", "PTM_Probability", "Q.Value",
+                "Global.Q.Value", "PG.Q.Value", "FASTA_Taxonomy_ID", "Isoform")
+        result = {k: row.get(k) for k in keys if k in row}
+        result["Precursor.Charge"] = row.get("Precursor.Charge", "")
+        result["Site_Mapping_Assertion"] = json.dumps(mapping, sort_keys=True)
+        result["PTM_Positions"] = ";".join(mapping["candidate_positions"])
+        result["Normalization_Policy"] = getattr(self, "normalization_policy", "legacy_median.v1")
+        return result
 
     # ------------------------------------------------------------------
     # Condition comparisons & Log2FC
@@ -768,11 +821,9 @@ class PTMQuantificationAnalyzer:
 
             for treatment in treatments:
                 current_values = positive_values(row, treatment_samples.get(treatment, []))
-                if not current_values:
-                    continue
 
                 control_mean = float(np.mean(control_values)) if control_values else np.nan
-                treatment_mean = float(np.mean(current_values))
+                treatment_mean = float(np.mean(current_values)) if current_values else np.nan
                 conventional_log2fc = (
                     float(np.log2(treatment_mean / control_mean))
                     if control_values and control_mean > 0 and treatment_mean > 0
@@ -780,7 +831,9 @@ class PTMQuantificationAnalyzer:
                 )
                 status = (
                     "computed_from_normalized_pr_replicates"
-                    if control_values
+                    if control_values and current_values
+                    else "treatment_not_detected_conventional_log2fc_na" if control_values
+                    else "both_not_detected_conventional_log2fc_na" if not current_values
                     else "control_not_detected_conventional_log2fc_na"
                 )
                 from ptm_shared.sample_manifest import compare_sample_units
@@ -791,6 +844,7 @@ class PTMQuantificationAnalyzer:
                 p_value = test["p_value"] if test["p_value"] is not None else np.nan
 
                 records.append({
+                    **self._source_fields(row),
                     "Protein.Group": protein_group,
                     "Precursor.Id": precursor_id,
                     "Modified.Sequence": modified_sequence,
@@ -806,15 +860,17 @@ class PTMQuantificationAnalyzer:
                     "PTM_Unadjusted_Treatment_N": len(current_values),
                     "PTM_Unadjusted_Control_Sample_IDs": json.dumps(sorted(s for s in control_samples if positive_values(row, [s]))),
                     "PTM_Unadjusted_Treatment_Sample_IDs": json.dumps(sorted(s for s in treatment_samples.get(treatment, []) if positive_values(row, [s]))),
+                    "PTM_Unadjusted_Control_Biological_N": test.get("control_biological_n"),
+                    "PTM_Unadjusted_Treatment_Biological_N": test.get("treatment_biological_n"),
                     "PTM_Unadjusted_Method": test["method"] + "; BH across valid unadjusted feature-condition comparisons",
                     "PTM_Unadjusted_Statistical_Unit": test["statistical_unit"],
                     "PTM_Unadjusted_Test_Status": test["status"],
                     "PTM_Unadjusted_Status": status,
-                    "PTM_Unadjusted_Conventional_Log2FC_NA": not bool(control_values),
+                    "PTM_Unadjusted_Conventional_Log2FC_NA": not bool(control_values and current_values),
                     "PTM_Unadjusted_Calculation_Mode": (
                         "ratio_of_condition_arithmetic_means_from_normalized_pr_intensity"
                     ),
-                    "PTM_Unadjusted_Input_Scale": "sample_wise_median_scaled_pr_intensity",
+                    "PTM_Unadjusted_Input_Scale": ("provided_normalized_pr_intensity" if getattr(self, "normalization_policy", "legacy_median.v1") == "already_normalized.v1" else "sample_wise_median_scaled_pr_intensity"),
                     "PTM_Unadjusted_Pseudocount_Used": False,
                     "PTM_Unadjusted_Estimator_ID": "independent_unadjusted_ratio_of_condition_arithmetic_means.v1",
                     "Quantitation_Estimator_Contract_Version": "ptm_quantitation_estimators.v1",
@@ -846,7 +902,11 @@ class PTMQuantificationAnalyzer:
         if relative_quant_df.empty:
             return pd.DataFrame()
         # --- Build replicate-level grouped data (keep individual replicates) ---
-        id_cols = ["Protein.Group", "Precursor.Id", "Modified.Sequence", "PTM_Type", "PTM_Position"]
+        relative_quant_df = relative_quant_df.copy()
+        if "Precursor.Charge" not in relative_quant_df:
+            relative_quant_df["Precursor.Charge"] = ""
+        relative_quant_df["Precursor.Charge"] = relative_quant_df["Precursor.Charge"].fillna("")
+        id_cols = ["Protein.Group", "Precursor.Id", "Modified.Sequence", "PTM_Type", "PTM_Position", "Precursor.Charge"]
 
         # Condition means (for Log2FC calculation, same as before)
         condition_means = relative_quant_df.groupby(
@@ -880,13 +940,13 @@ class PTMQuantificationAnalyzer:
         # Create a lookup dict: (Protein.Group, Precursor.Id, Condition) -> list of replicate values
         replicate_lookup = {}
         for _, rrow in replicate_groups.iterrows():
-            key = (rrow["Protein.Group"], rrow["Precursor.Id"], rrow["Condition"])
+            key = tuple(rrow[c] for c in id_cols) + (rrow["Condition"],)
             replicate_lookup[key] = [v for v in rrow["replicate_values"] if pd.notna(v) and np.isfinite(v) and v > 0]
         pr_lookup = {}
         pg_lookup = {}
         paired_samples = {}
         paired_values = {}
-        for key, group in relative_quant_df.groupby(["Protein.Group", "Precursor.Id", "Condition"], dropna=False):
+        for key, group in relative_quant_df.groupby(id_cols + ["Condition"], dropna=False):
             paired_values[key] = {str(r["Sample"]): float(r["PTM_Relative_Abundance"]) for _, r in group.iterrows() if pd.notna(r["PTM_Relative_Abundance"]) and np.isfinite(r["PTM_Relative_Abundance"]) and r["PTM_Relative_Abundance"] > 0}
             paired_samples[key] = sorted(group.loc[np.isfinite(group["PTM_Relative_Abundance"]) & (group["PTM_Relative_Abundance"] > 0), "Sample"].astype(str).unique())
             for column, lookup in (("PTM_Intensity", pr_lookup), ("Protein_Intensity", pg_lookup)):
@@ -900,12 +960,11 @@ class PTMQuantificationAnalyzer:
             for _, row in pivot_df.iterrows():
                 control_value = row["Control"]
                 treatment_value = row[treatment]
-                control_key = (row["Protein.Group"], row["Precursor.Id"], "Control")
-                treatment_key = (row["Protein.Group"], row["Precursor.Id"], treatment)
-                if not pr_lookup.get(treatment_key, 0):
-                    continue
+                control_key = tuple(row[c] for c in id_cols) + ("Control",)
+                treatment_key = tuple(row[c] for c in id_cols) + (treatment,)
                 ctrl_reps = replicate_lookup.get(control_key, [])
                 treat_reps = replicate_lookup.get(treatment_key, [])
+                treatment_missing = not pr_lookup.get(treatment_key, 0)
                 denominator_unavailable = (
                     (pr_lookup.get(control_key, 0) > 0 and not ctrl_reps)
                     or not treat_reps
@@ -916,7 +975,9 @@ class PTMQuantificationAnalyzer:
                 control_adj = control_pseudo_count if used_pc else control_value
                 log2_fc = np.log2(treatment_value / control_adj) if not denominator_unavailable else np.nan
                 missing_reason = (
-                    "protein_denominator_unavailable" if denominator_unavailable
+                    "both_not_detected" if treatment_missing and not pr_lookup.get(control_key, 0)
+                    else "treatment_not_detected" if treatment_missing
+                    else "protein_denominator_unavailable" if denominator_unavailable
                     else "control_not_detected" if used_pc else ""
                 )
 
@@ -925,6 +986,7 @@ class PTMQuantificationAnalyzer:
                 p_value = test["p_value"] if test["p_value"] is not None else np.nan
 
                 results.append({
+                    **self._source_fields(row),
                     "Protein.Group": row["Protein.Group"],
                     "Precursor.Id": row["Precursor.Id"],
                     "Modified.Sequence": row["Modified.Sequence"],
@@ -944,6 +1006,8 @@ class PTMQuantificationAnalyzer:
                     "PTM_ProteinAdjusted_Treatment_N": len(treat_reps),
                     "PTM_ProteinAdjusted_Control_Sample_IDs": json.dumps(paired_samples.get(control_key, [])),
                     "PTM_ProteinAdjusted_Treatment_Sample_IDs": json.dumps(paired_samples.get(treatment_key, [])),
+                    "PTM_ProteinAdjusted_Control_Biological_N": test.get("control_biological_n"),
+                    "PTM_ProteinAdjusted_Treatment_Biological_N": test.get("treatment_biological_n"),
                     "PTM_ProteinAdjusted_Method": test["method"] + "; BH across valid adjusted feature-condition comparisons",
                     "PTM_ProteinAdjusted_Statistical_Unit": test["statistical_unit"],
                     "PTM_ProteinAdjusted_Test_Status": test["status"],
@@ -979,8 +1043,13 @@ class PTMQuantificationAnalyzer:
             from ptm_shared.de_novo_representation import attach_de_novo_fields
 
             df = attach_de_novo_fields(
-                df, relative_quant_df, condition_map=self.condition_map,
+                df, relative_quant_df, id_cols=id_cols, condition_map=self.condition_map,
             )
+            metadata = [c for c in relative_quant_df.columns if c in {
+                "Localization.Probability", "PTM_Probability", "Q.Value", "Global.Q.Value", "PG.Q.Value", "FASTA_Taxonomy_ID", "Isoform"}]
+            if metadata:
+                meta = relative_quant_df[id_cols + metadata].drop_duplicates()
+                df = df.drop(columns=[c for c in metadata if c in df]).merge(meta, on=id_cols, how="left", validate="many_to_one")
             n_denovo = int(df["Conventional_Log2FC_NA"].sum()) if "Conventional_Log2FC_NA" in df.columns else 0
             logger.info(
                 f"Condition comparisons: {len(df)} records, "
@@ -1092,6 +1161,8 @@ class PTMQuantificationAnalyzer:
                     unadjusted_lookup[(
                         str(unadjusted_row.get("Protein.Group", "")),
                         str(unadjusted_row.get("Precursor.Id", "")),
+                        str(unadjusted_row.get("Modified.Sequence", "")),
+                        str(unadjusted_row.get("Precursor.Charge", "")),
                         str(unadjusted_row.get("Condition", "")),
                     )] = unadjusted_row.to_dict()
             treatments = self.treatment_conditions or [
@@ -1116,7 +1187,7 @@ class PTMQuantificationAnalyzer:
                     str(protein_group), str(ptm_row["Modified.Sequence"]), str(condition)
                 ), {})
                 unadjusted = unadjusted_lookup.get((
-                    str(protein_group), str(ptm_row["Precursor.Id"]), str(condition)
+                    str(protein_group), str(ptm_row["Precursor.Id"]), str(ptm_row["Modified.Sequence"]), str(ptm_row.get("Precursor.Charge", "")), str(condition)
                 ), {})
                 cmeans: Dict[str, float] = {
                     "Control_Mean_PTM_Relative": ptm_row["Control_Mean"],
@@ -1132,11 +1203,15 @@ class PTMQuantificationAnalyzer:
                         & (ptm_comparisons["Precursor.Id"] == ptm_row["Precursor.Id"])
                         & (ptm_comparisons["Condition"] == cond)
                     ]
+                    for identity_col in ("Modified.Sequence", "Precursor.Charge"):
+                        if identity_col in cond_data.columns:
+                            cond_data = cond_data[cond_data[identity_col].fillna("").astype(str) == str(ptm_row.get(identity_col, ""))]
                     cmeans[f"{cond}_Mean_PTM_Relative"] = (
                         cond_data.iloc[0]["Treatment_Mean"] if not cond_data.empty else np.nan
                     )
 
                 vector_data.append({
+                    **self._source_fields(ptm_row),
                     "Protein.Group": protein_group,
                     "Protein.Name": pc["Protein.Name"],
                     "Gene.Name": pc["Gene.Name"],
@@ -1149,8 +1224,8 @@ class PTMQuantificationAnalyzer:
                     "Comparison": ptm_row["Comparison"],
                     "PTM_Relative_Log2FC": ptm_row["Log2FC"],
                     "PTM_ProteinAdjusted_Log2FC": ptm_row["Log2FC"],
-                    **{f"PTM_ProteinAdjusted_{suffix}": ptm_row.get(f"PTM_ProteinAdjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method", "Statistical_Unit", "Test_Status")},
-                    **{f"PTM_Unadjusted_{suffix}": unadjusted.get(f"PTM_Unadjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method", "Statistical_Unit", "Test_Status")},
+                    **{f"PTM_ProteinAdjusted_{suffix}": ptm_row.get(f"PTM_ProteinAdjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method", "Statistical_Unit", "Test_Status", "Control_Biological_N", "Treatment_Biological_N")},
+                    **{f"PTM_Unadjusted_{suffix}": unadjusted.get(f"PTM_Unadjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method", "Statistical_Unit", "Test_Status", "Control_Biological_N", "Treatment_Biological_N")},
                     **{f"Protein_{suffix}": pc.get(f"Protein_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Control_N", "Treatment_N", "Method")},
                     "PTM_ProteinAdjusted_Control_N": ptm_row.get("PTM_ProteinAdjusted_Control_N", ptm_row.get("Control_N", np.nan)),
                     "PTM_ProteinAdjusted_Treatment_N": ptm_row.get("PTM_ProteinAdjusted_Treatment_N", ptm_row.get("Treatment_N", np.nan)),

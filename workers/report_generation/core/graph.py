@@ -2,11 +2,11 @@
 LangGraph StateGraph for PTM Report Generation.
 
 Replaces the custom multi-agent orchestrator with a structured state graph.
-Flow (19 nodes):
+Execution flow:
   load_context → generate_questions → research → hypothesize → validate_hypotheses
     → data_verification → network_analysis → temporal_comovement → kinase_annotation
-    → rq_refinement → external_coscientist_context → write_sections → report_copilot
-    → cascade_mediator → [crosstalk_analysis →] generate_qa_report → drug_repositioning
+    → rq_refinement → external_coscientist_context → crosstalk_analysis
+    → drug_repositioning → write_sections → report_copilot → cascade_mediator → generate_qa_report
     → format_citations → edit_report
 
 Each node reads/writes to a shared TypedDict state.
@@ -47,6 +47,9 @@ class ReportState(TypedDict, total=False):
     """Shared state flowing through the report generation graph."""
 
     # Inputs
+    biological_unit_crosswalk: dict
+    source_run_manifest: dict
+    source_observation_inventory: dict
     order_id: int
     enriched_ptm_data: List[dict]
     md_report_path: str
@@ -78,8 +81,10 @@ class ReportState(TypedDict, total=False):
     pathway_candidates: dict          # v7.0: scored pathway candidates for mediator
     sections: Dict[str, str]
     collected_references: List[dict]
+    resolved_references: List[dict]  # final display order, stable identity for every exporter
     cascade_diagrams: Dict[str, str]  # v7.0: condition → diagram path (from mediator)
     cascade_pathway_names: Dict[str, list]  # v7.0: condition → pathway names (from mediator)
+    cascade_context_snapshot: dict
 
     # v8.0: Temporal co-movement analysis
     comovement_analysis: dict              # clusters, singletons, summary
@@ -303,15 +308,51 @@ def report_copilot(state: ReportState) -> dict:
 
 
 def cascade_mediator(state: ReportState) -> dict:
-    """v7.0: Extract discussed pathways from LLM text and generate cascade diagrams."""
+    """Reuse the context diagrams frozen before authoring; prose cannot add edges."""
+    from ptm_shared.report_revision import file_sha256
+    snapshot = state.get('cascade_context_snapshot') or {}
+    for path, expected in snapshot.get('figure_hashes', {}).items():
+        if file_sha256(path) != expected:
+            raise ValueError('frozen_cascade_figure_changed')
+    return {'cascade_diagrams': snapshot.get('cascade_diagrams', {}),
+            'cascade_pathway_names': snapshot.get('cascade_pathway_names', {})}
+
+
+def prepare_cascade_context(state: ReportState) -> dict:
+    """Freeze descriptive template context independently of generated prose."""
+    import hashlib
+    import json
+    from pathlib import Path
+    from ptm_shared.report_revision import file_sha256
     from .nodes.cascade_mediator_node import run_cascade_mediator
-    return run_cascade_mediator(state)
+    candidates = (state.get('pathway_candidates') or {}).get('candidates') or []
+    # Existing deterministic pathway inventory supplies layout candidates.
+    # The placeholder is inventory labels, never a model-generated mechanism.
+    inventory_labels = '\n'.join(str(item.get('name') or item.get('pathway') or '') for item in candidates)
+    prepared = run_cascade_mediator({**state, 'sections': {'results': inventory_labels}})
+    figures = prepared.get('cascade_diagrams') or {}
+    selected_names = {name for names in (prepared.get('cascade_pathway_names') or {}).values() for name in names}
+    snapshot = {**prepared, 'schema_version': 'cascade_context_snapshot.v1',
+        'evidence_role': 'descriptive_pathway_template_context',
+        'direct_relation_claim_allowed': False,
+        'candidate_inventory': candidates,
+        'display_exclusions': [{'pathway': item.get('name'), 'reason': 'figure_layout_capacity_or_no_matched_data'}
+                               for item in candidates if item.get('name') not in selected_names],
+        'input_sha256': hashlib.sha256(json.dumps({'parsed': state.get('parsed_ptms'),
+            'enriched': state.get('enriched_ptm_data'), 'network': state.get('network_analysis')}, sort_keys=True, default=str).encode()).hexdigest(),
+        'template_sha256': file_sha256(Path(__file__).parent / 'nodes' / 'signaling_cascade.py'),
+        'figure_hashes': {str(path): file_sha256(path) for path in figures.values()},
+        'selection_policy': (state.get('report_config') or {}).get('cascade_mediator') or {'top_n_pathways': 5},
+        'required_limitations': ['Template context connectors are not measured or experimentally validated reactions.']}
+    return {**prepared, 'cascade_context_snapshot': snapshot}
 
 
 def crosstalk_analysis(state: ReportState) -> dict:
     """Run Cross-Talk (Phos x Ub) analysis pipeline."""
+    if state.get("analysis_mode") != "cross_talk":
+        return {"cross_talk_data": {"evaluation_status": "not_requested"}}
     from .nodes.crosstalk_node import run_crosstalk_analysis
-    return run_crosstalk_analysis(state)
+    return run_crosstalk_analysis(state, analysis_only=True)
 
 
 def drug_repositioning(state: ReportState) -> dict:
@@ -1555,12 +1596,28 @@ def format_citations(state: ReportState) -> dict:
     # inline citation unambiguous even when individual LLM sections received
     # different RAG subsets and local reference numbering.
     reference_by_key: dict[str, Reference] = {}
+    alias_candidates = {}
     for index, ref in enumerate(ref_objects, 1):
-        reference_by_key.setdefault(_reference_key(ref, index), ref)
+        canonical = ref.key
+        reference_by_key.setdefault(canonical, ref)
+        aliases = {_reference_key(ref, index)}
+        if ref.doi:
+            aliases.add('doi:' + _re.sub(r'^https?://(?:dx\.)?doi.org/', '', ref.doi.strip().lower()))
+        for alias in aliases:
+            alias_candidates.setdefault(alias, set()).add(canonical)
+    # DOI-only and PMID+DOI records join only when the crosswalk is unambiguous.
+    alias_to_key = {}
+    for alias, keys in alias_candidates.items():
+        persistent_pmids = {key for key in keys if key.startswith('pmid:')}
+        if len(persistent_pmids) == 1 and all(key.startswith(('doi:', 'pmid:')) for key in keys):
+            alias_to_key[alias] = next(iter(persistent_pmids))
+        elif len(keys) == 1:
+            alias_to_key[alias] = next(iter(keys))
     cited_keys: list[str] = []
 
     def _resolve_marker(match: _re.Match) -> str:
         key = str(match.group(1) or "").strip().lower()
+        key = alias_to_key.get(key, key if key.startswith(('pmid:', 'unresolved:')) else '')
         if key not in reference_by_key:
             logger.warning("[FORMAT-CIT] Dropping unresolved stable citation marker: %s", key)
             return ""
@@ -1778,7 +1835,15 @@ def format_citations(state: ReportState) -> dict:
             for snapshot in (state.get("reader_prose_snapshots") or {}).values()
         ) if reader_authoring_shadow else False,
         report_audience=report_mode_contract.get("report_audience"),
+        required_module_status=(state.get("authoring_packet") or state.get("reader_authoring_packet") or {}).get("required_module_status"),
     )
+    from .nodes.report_copilot_node import review_issue_ledger
+    issues = review_issue_ledger(state.get("copilot_review") or {})
+    report_output_correctness["review_issue_ledger"] = issues
+    if any(i["severity"] in {"high", "major", "critical"} and i["state"] != "verified_resolved" for i in issues):
+        report_output_correctness.setdefault("review_reason_codes", []).append("major_review_issue_unresolved")
+        if report_output_correctness.get("status") != "blocked_for_review":
+            report_output_correctness["status"] = "draft_review_required"
     state["report_output_correctness"] = report_output_correctness
     correctness_path = None
     if reader_authoring_shadow and state.get("output_dir"):
@@ -1797,6 +1862,12 @@ def format_citations(state: ReportState) -> dict:
 
     return {
         "final_report": processed,
+        "resolved_references": [{**vars(ref), "reference_id": ref.key, "display_number": index,
+            "identity_resolution_status": "persistent_identifier_supplied" if ref.pmid or ref.doi else "incomplete_metadata",
+            "source_paths": [dict(source) for source in collected_refs if
+                (ref.pmid and str(source.get('pmid') or '') == ref.pmid) or
+                (ref.doi and str(source.get('doi') or '').lower() == ref.doi.lower())]}
+            for index, ref in enumerate(resolved_refs, 1)],
         "citation_data": {
             "total_references": len(resolved_refs),
             "reference_section": reference_section,
@@ -1823,15 +1894,6 @@ def edit_report(state: ReportState) -> dict:
 # Graph builder
 # ---------------------------------------------------------------------------
 
-def _route_after_cascade(state: ReportState) -> str:
-    """Route after cascade_mediator: if cross_talk mode, go to crosstalk_analysis; else continue."""
-    mode = state.get("analysis_mode", "ptm_only")
-    if mode == "cross_talk":
-        logger.info("[GRAPH] Routing to crosstalk_analysis (cross_talk mode)")
-        return "crosstalk_analysis"
-    return "generate_qa_report"
-
-
 def _route_after_validate(state: ReportState) -> str:
     """Route after validate_hypotheses: co_scientist mode inserts data_verification."""
     report_type = state.get("report_type", "comprehensive")
@@ -1857,19 +1919,19 @@ def build_report_graph() -> StateGraph:
       Standard (ptm_only / ptm_nonptm_network):
         load_context → generate_questions → research → hypothesize
           → validate_hypotheses → network_analysis → temporal_comovement
-          → kinase_annotation → rq_refinement → external_coscientist_context → write_sections
+          → kinase_annotation → rq_refinement → external_coscientist_context
+          → crosstalk_analysis → drug_repositioning → write_sections
           → report_copilot → cascade_mediator → generate_qa_report
-          → drug_repositioning → format_citations → edit_report
+          → format_citations → edit_report
 
       Cross-Talk (cross_talk):
-        Same as standard but crosstalk_analysis inserted after cascade_mediator.
+        The same graph; unrequested cross-talk/drug modules return not_requested.
 
     v12.0: Co-Scientist mode: data_verification inserted after validate_hypotheses.
            co_scientist_context and verified_findings added to ReportState.
     v10.0: rq_refinement between kinase_annotation and write_sections.
            report_copilot between write_sections and cascade_mediator.
     v9.11: kinase_annotation between temporal_comovement and write_sections.
-    v9.0: crosstalk_analysis conditionally inserted after cascade_mediator.
     v8.0: temporal_comovement between network_analysis and write_sections.
     v7.0: cascade_mediator after write_sections for content-driven diagrams.
     """
@@ -1891,6 +1953,7 @@ def build_report_graph() -> StateGraph:
     graph.add_node("write_sections", write_sections)
     graph.add_node("report_copilot", report_copilot)
     graph.add_node("cascade_mediator", cascade_mediator)
+    graph.add_node("prepare_cascade_context", prepare_cascade_context)
     graph.add_node("crosstalk_analysis", crosstalk_analysis)
     graph.add_node("generate_qa_report", generate_qa_report)
     graph.add_node("drug_repositioning", drug_repositioning)
@@ -1925,23 +1988,16 @@ def build_report_graph() -> StateGraph:
     graph.add_edge("atlas_claim_ledger", "generate_atlas_report")
     graph.add_edge("generate_atlas_report", "rq_refinement")
     graph.add_edge("rq_refinement", "external_coscientist_context")
-    graph.add_edge("external_coscientist_context", "write_sections")
+    graph.add_edge("external_coscientist_context", "crosstalk_analysis")
+    graph.add_edge("crosstalk_analysis", "drug_repositioning")
+    graph.add_edge("drug_repositioning", "prepare_cascade_context")
+    graph.add_edge("prepare_cascade_context", "write_sections")
     graph.add_edge("write_sections", "report_copilot")
     graph.add_edge("report_copilot", "cascade_mediator")
 
-    # Conditional: cross_talk mode inserts crosstalk_analysis before qa_report
-    graph.add_conditional_edges(
-        "cascade_mediator",
-        _route_after_cascade,
-        {
-            "crosstalk_analysis": "crosstalk_analysis",
-            "generate_qa_report": "generate_qa_report",
-        },
-    )
-    graph.add_edge("crosstalk_analysis", "generate_qa_report")
+    graph.add_edge("cascade_mediator", "generate_qa_report")
 
-    graph.add_edge("generate_qa_report", "drug_repositioning")
-    graph.add_edge("drug_repositioning", "format_citations")
+    graph.add_edge("generate_qa_report", "format_citations")
     graph.add_edge("format_citations", "edit_report")
     graph.add_edge("edit_report", END)
 

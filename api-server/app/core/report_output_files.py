@@ -47,6 +47,32 @@ def merge_result_files_with_disk(
     registered = sorted({str(name) for name in (merged.get("report_files") or []) if (output_dir / str(name)).is_file()})
     technical = sorted({str(name) for name in (merged.get("technical_audit_files") or []) if (output_dir / str(name)).is_file()})
     release = dict(merged.get("report_release") or {})
+    from ptm_shared.report_revision import read_revision, verify_revision, derived_revision_files
+    try:
+        revision = read_revision(output_dir)
+        if revision:
+            verify_revision(output_dir, revision)
+            release = revision['release']
+            merged['report_release'] = release
+            merged['revision_id'] = revision['revision_id']
+            registered = [a['filename'] for a in revision['artifacts'] if a['role'] == 'report']
+            technical = [a['filename'] for a in revision['artifacts'] if a['role'] == 'technical_audit']
+            merged['derived_report_files'] = derived_revision_files(output_dir, revision['revision_id'])
+        else:
+            merged['legacy_report_files'] = registered
+            registered, technical = [], []
+            release = {"status": "legacy_not_gated", "publish_as_final": False,
+                       "review_artifact_available": False, "reason_codes": ["immutable_registry_migration_required"]}
+            merged['report_release'] = release
+    except (ValueError, OSError, KeyError):
+        registered, technical = [], []
+        release = {"status": "blocked_final", "final_artifact_withheld": True,
+                   "reason_codes": ["revision_registry_integrity_failure"]}
+        merged['report_release'] = release
+    if release.get('final_artifact_withheld') or release.get('status') in {'blocked_final', 'blocked_for_review'}:
+        registered, technical = [], []
+        merged['current_report_files'] = []
+        merged['derived_report_files'] = []
     release_audience = str(release.get("report_audience") or "").strip().lower()
 
     # The UI must never infer artifact kind from extension/name. With an absent
@@ -83,6 +109,7 @@ def merge_result_files_with_disk(
         if not is_report_output_name(str(name))
     }
     all_files.update(registered)
+    all_files.update(merged.get('derived_report_files') or [])
     merged["report_files"] = registered
     merged["technical_audit_files"] = technical
     merged["all_files"] = sorted(all_files)

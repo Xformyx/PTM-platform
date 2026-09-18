@@ -474,6 +474,11 @@ def _normalization_card(state: Mapping[str, Any]) -> dict:
     method = str(normalization.get("normalization_method") or normalization.get("method") or metadata.get("normalization_method") or "").strip()
     sample_scaling = str(normalization.get("sample_scaling_status") or "").strip()
     ratio_track = str(normalization.get("ratio_track_interpretation") or "").strip()
+    policy = (state.get('source_run_manifest') or {}).get('normalization_policy')
+    if policy == 'legacy_median.v1':
+        method = 'sample-wise median scaling of PR and PG separately; a global intensity shift can be removed by this policy'
+    elif policy == 'already_normalized.v1':
+        method = 'the supplied normalized intensities without additional sample scaling'
     if method:
         summary = f"Recorded preprocessing used {method}"
         if sample_scaling:
@@ -486,6 +491,7 @@ def _normalization_card(state: Mapping[str, Any]) -> dict:
     summary += " It is a protein-abundance-adjusted relative PTM ratio, not calibrated absolute occupancy or kinase activity."
     return {
         "card_id": "quantitation.provenance",
+        "normalization_policy": policy or 'not_recorded',
         "category": "quantitation_provenance",
         "reader_summary": summary,
         "claim_tier": "O1",
@@ -543,7 +549,7 @@ def _literature_cards(references: Iterable[Mapping[str, Any]]) -> list[dict]:
             "forbidden_interpretations": ["proved the current observation", "established a current direct relationship"],
             "counterevidence": "Literature context does not convert a prior relationship into a current-order observation.",
         })
-    return cards[:30]
+    return cards
 
 
 def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
@@ -594,19 +600,11 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
 
     grouped: dict[tuple, list[dict]] = {}
     for row in sorted(pool, key=sort_key):
-        trajectory = _as_mapping(row.get("trajectory_evidence"))
-        try:
-            peak = round(float(row.get("peak_score") or 0.0), 4)
-        except (TypeError, ValueError):
-            peak = 0.0
-        fingerprint = (
-            peak,
-            str(row.get("peak_condition") or ""),
-            trajectory.get("support_status"),
-            trajectory.get("median_direction_concordance_fraction"),
-            trajectory.get("median_signed_profile_correlation"),
-            trajectory.get("n_targets_evaluable"),
-        )
+        equivalence = _as_mapping(row.get("footprint_equivalence"))
+        group_id = equivalence.get("equivalence_group_id")
+        # Equal scores and temporal summaries do not establish shared identity.
+        fingerprint = ("explicit_equivalence", str(group_id)) if group_id else (
+            "candidate", str(row.get("canonical") or row.get("kinase") or ""))
         grouped.setdefault(fingerprint, []).append(row)
 
     emitted: set[str] = set()
@@ -631,7 +629,7 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
         trajectory_status = str(trajectory.get("support_status") or "legacy_unavailable")
         named_ok = footprint_status == "computed" or trajectory_status == "computed"
         family_label = (
-            (" / ".join(names) + " family" if len(names) >= 2 else f"{candidate} family")
+            (" / ".join(names) + " candidate group" if len(names) >= 2 else f"{candidate} candidate")
             if named_ok
             else "stored candidate"
         )
@@ -741,8 +739,6 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
                 "a catalytic rate."
             ),
         })
-        if candidate_index >= 3:
-            break
     return cards
 
 
@@ -917,7 +913,47 @@ def build_authoring_packet(
     if species_audit["status"] == "review_required":
         metadata_contract["review_reason_codes"].append("native_annotation_revalidation_required")
     cards = [_study_frame_card(state, synthesis), *_quantitative_cards(synthesis), _normalization_card(state)]
-    estimator_contract = build_quantitation_estimator_contract()
+    cross = state.get('cross_talk_data') or state.get('crosstalk_data') or {}
+    if cross.get('evaluation_status') == 'computed':
+        from ptm_shared.evidence_record_contract import typed_record
+        evidence_id = 'crosstalk.observation.counts'
+        metrics = {'shared_proteins': 'dual_ptm_proteins', 'concordant_patterns': 'concordant_pairs',
+                   'discordant_patterns': 'discordant_pairs', 'candidate_temporal_orderings': 'sequential_gating'}
+        cards.append({'card_id': evidence_id, 'category': 'quantitative_landscape',
+            'evidence_type': 'atlas_observation', 'claim_tier': 'O1', 'evidence_ids': [evidence_id],
+            'citation_ids': [], 'reader_summary': 'The two PTM inventories contain shared proteins and descriptive joint patterns. Counts describe overlap and temporal observations; they do not establish direct cross-talk.',
+            'counterevidence': 'Biological pairing, enzyme activity and causal gating are not established by overlapping proteins or temporal order.',
+            'allowed_verbs': ['observed', 'contained'], 'forbidden_interpretations': ['causal gating', 'activation', 'independent validation'],
+            'value_records': [typed_record(record_type='atlas_observation', entity_id='cross_talk',
+                metric_id=metric, value=len(cross.get(field) or []), unit='count', estimator='cross_ptm_descriptive_inventory_count.v1',
+                support_status='descriptive_observation', evidence_id=evidence_id,
+                source={'module': 'cross_talk', 'field': field, 'denominator': 'computed_cross_ptm_inventory'})
+                for metric, field in metrics.items()]})
+        import hashlib
+        for observation in cross.get("dual_ptm_proteins") or []:
+            gene = str(observation.get("gene") or "")
+            evidence_id = "crosstalk.observation." + hashlib.sha256(gene.encode()).hexdigest()[:16]
+            records = []
+            for condition, values in sorted((observation.get("temporal_comparison") or {}).items()):
+                for arm in ("primary", "secondary"):
+                    value = values.get(arm + "_ptm_log2fc")
+                    if value is None:
+                        continue
+                    records.append({**typed_record(record_type="atlas_observation", entity_id=gene,
+                        metric_id=arm + "_protein_adjusted_ptm", value=value, unit="log2 ratio",
+                        condition=condition, estimator="precomputed_protein_adjusted_contrast",
+                        support_status="descriptive_observation", evidence_id=evidence_id,
+                        source={"module": "cross_talk", "arm": arm, "ptm_type": cross.get(arm + "_ptm_type"),
+                                "sites": observation.get(arm + "_sites"), "input_status": cross.get("source_status")}),
+                        "axis": "protein_adjusted", "display_identity": gene + " " + str(cross.get(arm + "_ptm_type"))})
+            cards.append({"card_id": evidence_id, "category": "quantitative_landscape",
+                "evidence_type": "atlas_observation", "claim_tier": "O1", "evidence_ids": [evidence_id],
+                "citation_ids": [], "feature_label": gene,
+                "reader_summary": f"{gene}: {observation.get('pattern')} descriptive cross-PTM pattern; sites and axes remain separate.",
+                "counterevidence": "Different PTM forms and sampled condition patterns do not establish causal gating or catalytic activity. No replicate-level concordance test was supplied.",
+                "allowed_verbs": ["observed", "co-occurred"], "forbidden_interpretations": ["causal gating", "activation"],
+                "value_records": records})
+    estimator_contract = build_quantitation_estimator_contract((state.get('source_run_manifest') or {}).get('normalization_policy'))
     cards.append({
         "card_id": "quantitation.estimator.contract",
         "category": "quantitation_provenance",
@@ -935,12 +971,12 @@ def build_authoring_packet(
     observations.sort(key=lambda c: (c["feature_identity"]["reader_feature_id"] not in requested_ids,))
     for card in observations:
         card["question_ids"] = [q["question_id"] for q in question_map["questions"] if card["feature_identity"]["reader_feature_id"] in q["feature_ids"]]
-    selected_observations, observation_selection_audit = select_finding_cards(observations, maximum=40)
+    selected_observations = observations
+    observation_selection_audit = {"contract_version": "observation_inventory.v1", "input_unique_feature_count": len(observations),
+                                   "selected_count": len(observations), "exclusions": []}
     cards.extend(selected_observations)
-    cards.extend(build_quantitation_comparison_cards(state, maximum=8))
+    cards.extend(build_quantitation_comparison_cards(state, maximum=max(1, len(observations))))
     for index, record in enumerate(temporal.get("records") or [], 1):
-        if len([card for card in cards if card["category"] == "temporal_profile"]) >= 5:
-            break
         if isinstance(record, Mapping):
             card = _record_card(record, index)
             if card and card["category"] == "temporal_profile":
@@ -963,7 +999,8 @@ def build_authoring_packet(
         list(observations) + kinase_cards + protein_cards + pathway_cards + companion_cards,
     )
 
-    candidate_cards, candidate_transfer_audit = adapt_discovery_candidates(synthesis, state=state, maximum=20)
+    candidate_cards, candidate_transfer_audit = adapt_discovery_candidates(synthesis, state=state,
+        maximum=max(1, len(synthesis.get('candidate_observation_cards') or [])))
     cards.extend(candidate_cards)
     if not candidate_cards:
         cards.append({
@@ -1064,6 +1101,20 @@ def build_authoring_packet(
     }
     return {
         "contract_version": AUTHORING_PACKET_VERSION,
+        "report_scope_policy": "inventory_review_authoring.v1",
+        "main_finding_word_budget": (state.get("report_config") or {}).get("main_finding_word_budget", 2400),
+        "coverage_inventory": build_coverage_inventory(state, observations),
+        "module_evidence_index": build_module_evidence_index(observations),
+        "required_module_status": {
+            "cross_talk": (state.get("cross_talk_data") or state.get("crosstalk_data") or {}).get("evaluation_status", "not_evaluable")
+                           if state.get("analysis_mode") == "cross_talk" else "not_requested",
+            "drug_repositioning": (state.get("drug_repositioning_results") or {}).get("evaluation_status", "not_evaluable")
+                                  if state.get("report_type") == "extended" else "not_requested"},
+        "module_evidence": {"biological_unit_crosswalk": state.get('biological_unit_crosswalk') or {'status': 'pairing_not_declared'}, "cross_talk": state.get("cross_talk_data") or state.get("crosstalk_data") or {"evaluation_status": "not_evaluable" if state.get('analysis_mode') == 'cross_talk' else "not_requested"},
+                            "cascade_context": {key: (state.get('cascade_context_snapshot') or {}).get(key)
+                                                for key in ('evidence_role', 'direct_relation_claim_allowed', 'cascade_pathway_names', 'required_limitations')},
+                            "drug_repositioning": {"evidence_role": "candidate_hypothesis_context", "independent_validation": "not_performed",
+                                                   "analysis": state.get("drug_repositioning_results") or {"evaluation_status": "not_requested"}}},
         "study_design": dict(state.get("sample_manifest") or {}),
         "research_question_evidence_map": question_map,
         "feature_identity_audit": audit_feature_identities(state.get("vector_plot_raw_data") or []),
@@ -1088,6 +1139,54 @@ def build_authoring_packet(
             "study_metadata": "Use only the resolved study metadata label. A user-verified override supersedes stale free text; unresolved identity conflicts prohibit final release. Do not infer lineage, species, receptor status, or engineering history from a cell-model name.",
         },
     }
+
+
+def build_module_evidence_index(observations):
+    """Thin, complete grouping over existing observation/claim identities.
+
+    Descriptive temporal-pattern groups are not kinase families or causal
+    pathways. Section projection resolves included members from the same packet.
+    """
+    import hashlib
+    groups = {}
+    for card in observations:
+        patterns = tuple((axis, str(summary.get('label') or summary.get('pattern') or 'unknown'))
+                         for axis, summary in sorted((card.get('axis_patterns') or {}).items()))
+        key = hashlib.sha256(json.dumps(patterns).encode()).hexdigest()[:20]
+        group = groups.setdefault(key, {'bundle_id': 'pattern.' + key, 'grouping': 'descriptive_axis_pattern',
+            'patterns': patterns, 'study_frame_ref': 'study.frame', 'member_card_ids': [],
+            'observation_claim_ids': [], 'parent_protein_ids': [],
+            'required_limitations': ['Shared temporal patterns do not establish a regulatory relationship.'],
+            'review_status': 'not_independently_reviewed'})
+        group['member_card_ids'].append(card['card_id'])
+        group['observation_claim_ids'].extend(card.get('evidence_ids') or [])
+        group['parent_protein_ids'].extend(card.get('parent_protein_ids') or [])
+    for group in groups.values():
+        for field in ('member_card_ids', 'observation_claim_ids', 'parent_protein_ids'):
+            group[field] = sorted(set(group[field]))
+    return {'schema_version': 'module_evidence_index.v1', 'source': 'feature_observation_card.v3',
+            'member_count': len(observations), 'bundles': [groups[key] for key in sorted(groups)]}
+
+
+def build_coverage_inventory(state, observations):
+    """Account for every input row separately from literature depth and manuscript space."""
+    from ptm_shared.feature_identity import canonical_feature_identity
+    card_ids = {(c.get("feature_identity") or {}).get("reader_feature_id") for c in observations}
+    retrieval = (state.get("finding_literature_retrieval") or {}).get("records") or {}
+    records = []
+    for index, row in enumerate(state.get("vector_plot_raw_data") or []):
+        identity = canonical_feature_identity(row)
+        fid = identity.get("reader_feature_id")
+        records.append({"row_index": index, "feature_id": identity.get("feature_id"), "reader_feature_id": fid,
+                        "condition": row.get("condition") or row.get("Condition"),
+                        "analysis_status": "processed" if fid in card_ids else "not_evaluable",
+                        "analysis_reason": None if fid in card_ids else "identity_or_quantitation_unavailable",
+                        "deep_review_status": retrieval.get(fid, {}).get("status", "not_searched"),
+                        "authoring_destinations": ["appendix"], "authoring_reason": "inventory_retained"})
+    return {"schema_version": "report_coverage_inventory.v1", "denominator": "input_vector_rows",
+            "input_count": len(records), "accounted_count": len(records), "records": records,
+            "source_observation_inventory": state.get("source_observation_inventory"),
+            "source_inventory_status": "available" if state.get("source_observation_inventory") else "legacy_not_recorded"}
 
 
 def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str, plan: Mapping[str, Any] | None = None, *, include_quantitative_records: bool = True) -> str:
@@ -1188,6 +1287,12 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
     if section_type in {"results", "discussion"}:
         lines.append("Internal question evidence map (integrate observations into Results and meaning/uncertainty into Discussion; no Q&A headings): " + json.dumps(packet.get("research_question_evidence_map") or {}, ensure_ascii=False))
     lines.append("=== END READER-READY AUTHORING PACKET ===")
+    if packet.get("module_evidence"):
+        lines.append("Module evidence (observations and hypotheses remain separate): " + json.dumps(packet["module_evidence"], default=str))
+    if packet.get('resolved_module_bundles'):
+        groups = [{key: value for key, value in bundle.items() if key != 'resolved_members'}
+                  for bundle in packet['resolved_module_bundles']]
+        lines.append('Descriptive module groups; interpret only the member cards resolved above, and keep unresolved members outside claim scope: ' + json.dumps(groups, default=str))
     return "\n".join(lines)
 
 
@@ -1252,7 +1357,7 @@ def _finding_metadata(card, selected):
                                     "L1": "literature_context", "H1": "mechanistic_hypothesis", "D1": "requires_separate_perturbation_evidence"}}
 
 
-def _supporting_context_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int = 3) -> list[dict]:
+def _supporting_context_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int | None = None) -> list[dict]:
     """Keep kinase/module companions off the named-feature finding budget."""
     ranked = []
     for card in cards or []:
@@ -1278,7 +1383,7 @@ def _supporting_context_cards(cards: Iterable[Mapping[str, Any]], *, maximum: in
             continue
         seen.add(card_id)
         selected.append(card)
-        if len(selected) >= maximum:
+        if maximum is not None and len(selected) >= maximum:
             break
     return selected
 
@@ -1307,7 +1412,7 @@ def deterministic_authoring_plan(packet: Mapping[str, Any]) -> dict:
     central_question = _clean_text(study_card.get("reader_summary")) or (
         "How do the recorded phosphorylation and linked protein-abundance measurements change across the sampled study design?"
     )
-    selected_cards, selection_audit = select_finding_cards(cards)
+    selected_cards, selection_audit = select_finding_cards(cards, word_budget=packet.get("main_finding_word_budget"))
     if not selected_cards:
         # Preserve the existing aggregate fallback only when no named observation
         # can be bound. Availability/kinase no-call is never itself a discovery.
@@ -1510,13 +1615,18 @@ def apply_llm_authoring_plan(planned_text: str, fallback: Mapping[str, Any] | No
 
 def refresh_finding_context(plan, packet):
     """Refresh retrieved context without changing the frozen finding selection."""
-    candidates, _ = select_finding_cards(packet.get("reader_cards") or [], maximum=100)
+    candidates, _ = select_finding_cards(packet.get("reader_cards") or [])
     by_id = {c["feature_identity"]["reader_feature_id"]: c for c in candidates}
     result = dict(plan)
     result["key_findings"] = []
     for finding in plan.get("key_findings") or []:
         card = by_id.get(finding.get("reader_feature_id"))
         result["key_findings"].append({**finding, **(_finding_metadata(card, candidates) if card else {})})
+    selected_fids = {f.get("reader_feature_id") for f in result["key_findings"]}
+    for record in (packet.get("coverage_inventory") or {}).get("records") or []:
+        in_main = record.get("reader_feature_id") in selected_fids
+        record["authoring_destinations"] = ["main", "appendix"] if in_main else ["appendix"]
+        record["authoring_reason"] = "selected_finding" if in_main else "outside_main_manuscript_scope"
     # Update transfer counts for this exact packet, including final rebuilt packets.
     selected_ids = {f.get("reader_feature_id") for f in result["key_findings"]}
     transfer = packet.get("candidate_transfer_audit")
@@ -2031,6 +2141,7 @@ def audit_report_output_correctness(
     generation_failures: Iterable[str] | None = None,
     generation_degraded: bool = False,
     report_audience: str | None = None,
+    required_module_status: Mapping[str, str] | None = None,
 ) -> dict:
     """Audit final reader output without changing scientific content.
 
@@ -2107,6 +2218,10 @@ def audit_report_output_correctness(
     if metadata_blocking_conflicts:
         reason_codes.append("unresolved_study_metadata_conflict")
     review_reason_codes: list[str] = []
+    incomplete_modules = sorted(name for name, status in (required_module_status or {}).items()
+                                if status not in {"computed", "not_requested"})
+    if incomplete_modules:
+        review_reason_codes.append("required_module_analysis_incomplete")
     if metadata_review_reasons:
         review_reason_codes.append("study_metadata_review_required")
     quantitative_packet = {"reader_cards": list(reader_cards or []), "figure_cards": manifest.get("figures") or []}
@@ -2174,10 +2289,8 @@ def audit_report_output_correctness(
     registered_numbers = set(re.findall(r'(?m)^(\d+)\.\s', bibliography[1])) if len(bibliography) == 2 else set()
     cited_numbers = {n for group in re.findall(r'\[(\d+(?:\s*,\s*\d+)*)\]', narrative) for n in re.findall(r'\d+', group)}
     literature_count = max(len(cited_markers & registered_references), len(cited_numbers & registered_numbers))
-    # Product target is 20–30 only when that many traceable sources were supplied.
-    # Data-only or sparse retrieval must not look like a missing-citation defect.
-    if len(registered_references) >= 20 and literature_count < 20:
-        review_reason_codes.append("literature_coverage_below_product_target")
+    # Citation counts describe use, not claim fidelity or scientific quality.
+    # Claim/source binding and requested question coverage are separate gates.
     unreferenced = [f.get("display_label") for f in manifest.get("figures") or [] if f.get("placement") == "main"
                    and f.get("display_label") and f["display_label"] not in narrative]
     if unreferenced:
@@ -2233,8 +2346,11 @@ def audit_report_output_correctness(
         "generation_fallback_sections": list(generation_failures or []),
         "section_content_quality": section_quality,
         "research_question_coverage": question_coverage,
+        "required_module_status": dict(required_module_status or {}),
+        "incomplete_required_modules": incomplete_modules,
+        "scope_policy_version": "question_and_claim_coverage.v2",
         "literature_coverage": {"distinct_references": len(registered_references), "cited_reference_count": literature_count,
-                                "target_range": [20, 30], "padding_allowed": False,
+                                "target_range": None, "count_is_quality_gate": False, "padding_allowed": False,
                                 "evidence_types": sorted({comparison.get("relationship") for c in reader_cards or []
                                     for comparison in _as_mapping(c.get("literature_comparison")).get("comparisons") or [] if comparison.get("relationship")})},
         "main_figures_unreferenced_in_prose": unreferenced,
@@ -2526,6 +2642,14 @@ def _render_role_based_discussion(packet, cards, plan):
     for card, finding in zip(named, (plan.get("key_findings") or [])):
         context = _as_mapping(finding.get("literature_comparison")) or _as_mapping(card.get("literature_comparison"))
         for comparison in (context.get("comparisons") or [])[:2]:
+            if comparison.get("claim_support_status") != "verified":
+                quote = str(comparison.get("quote") or "").strip()
+                if quote:
+                    differences = "; ".join(comparison.get("condition_differences") or []) or "experimental comparability is unestablished"
+                    literature_bits.append(
+                        f'The retrieved source reports: “{quote}” [REF:{comparison.get("citation_id")}]. '
+                        f'Its support for this observation requires review; {differences}.')
+                continue
             relation = "agreed with" if comparison.get("relationship") == "known_agreement" else "differed from" if comparison.get("relationship") == "disagreement" else "provided biological context for"
             differences = "; ".join(comparison.get("condition_differences") or []) or "experimental comparability has not been established"
             external = str(comparison.get("external_finding") or "").rstrip(". ")

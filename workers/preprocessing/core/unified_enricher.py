@@ -35,24 +35,24 @@ PTM_TYPE_NAMES = {
     "ubi": "Ubiquitylation",
 }
 
+# The named group is the only modified residue that can support a match.
+# These are sequence hypotheses, not evidence of the regulator acting in this run.
 MOTIF_PATTERNS = {
-    "PKA_motif": {"pattern": r"[RK][RK].[ST]", "residues": ["S", "T"]},
-    "PKC_motif": {"pattern": r"[ST].[RK]", "residues": ["S", "T"]},
-    "CK2_motif": {"pattern": r"[ST]..E", "residues": ["S", "T"]},
-    "CDK_motif": {"pattern": r"[ST]P[RK]", "residues": ["S", "T"]},
-    "MAPK_motif": {"pattern": r"P.[ST]P", "residues": ["S", "T"]},
-    "SH2_motif": {"pattern": r"Y..P", "residues": ["Y"]},
-    "PTB_motif": {"pattern": r"NPX[YF]", "residues": ["Y"]},
-    "14-3-3_motif": {"pattern": r"R.[ST].P", "residues": ["S", "T"]},
-    "HAT_motif": {"pattern": r"K[GAVS]", "residues": ["K"]},
-    "HDAC_motif": {"pattern": r"K.[ST]", "residues": ["K"]},
-    "Basophilic_kinase": {"pattern": r"[RK].[ST]", "residues": ["S", "T"]},
-    "Acidophilic_kinase": {"pattern": r"[ST]..[DE]", "residues": ["S", "T"]},
-    "Proline_directed": {"pattern": r"[ST]P", "residues": ["S", "T"]},
-    "Cysteine_alkylation": {"pattern": r"C", "residues": ["C"]},
-    "Disulfide_bridge": {"pattern": r"C..C", "residues": ["C"]},
-    "N-terminal_acetylation": {"pattern": r"^[ASGM]", "residues": ["A", "S", "G", "M"]},
+    "PKA_motif": {"pattern": r"[RK][RK].(?P<ptm>[ST])", "residues": ["S", "T"]},
+    "PKC_motif": {"pattern": r"(?P<ptm>[ST]).[RK]", "residues": ["S", "T"]},
+    "CK2_motif": {"pattern": r"(?P<ptm>[ST])..E", "residues": ["S", "T"]},
+    "CDK_motif": {"pattern": r"(?P<ptm>[ST])P[RK]", "residues": ["S", "T"]},
+    "MAPK_motif": {"pattern": r"P.(?P<ptm>[ST])P", "residues": ["S", "T"]},
+    "SH2_motif": {"pattern": r"(?P<ptm>Y)..P", "residues": ["Y"]},
+    "PTB_motif": {"pattern": r"NP.(?P<ptm>[YF])", "residues": ["Y"]},
+    "14-3-3_motif": {"pattern": r"R.(?P<ptm>[ST]).P", "residues": ["S", "T"]},
+    "HAT_motif": {"pattern": r"(?P<ptm>K)[GAVS]", "residues": ["K"]},
+    "HDAC_motif": {"pattern": r"(?P<ptm>K).[ST]", "residues": ["K"]},
+    "Basophilic_kinase": {"pattern": r"[RK].(?P<ptm>[ST])", "residues": ["S", "T"]},
+    "Acidophilic_kinase": {"pattern": r"(?P<ptm>[ST])..[DE]", "residues": ["S", "T"]},
+    "Proline_directed": {"pattern": r"(?P<ptm>[ST])P", "residues": ["S", "T"]},
 }
+
 
 
 class UnifiedProteinEnricher:
@@ -85,6 +85,7 @@ class UnifiedProteinEnricher:
         self.fasta_organisms: Dict[str, str] = {}
         self.fasta_taxonomy_ids: Dict[str, str] = {}
         self.domain_cache: Dict[str, List[str]] = {}
+        self.domain_source_records: Dict[str, dict] = {}
         self.motif_cache: Dict[str, dict] = {}
 
         self.enhanced_motif_analyzer: Optional[EnhancedMotifAnalyzerV2] = None
@@ -95,16 +96,25 @@ class UnifiedProteinEnricher:
 
     def load_fasta(self) -> bool:
         try:
+            from collections import defaultdict
+            records = defaultdict(set)
             for record in SeqIO.parse(self.fasta_path, "fasta"):
                 uid = self._extract_uniprot_id(record.id)
                 if uid:
-                    self.fasta_dict[uid] = str(record.seq)
-                    pname, gname = self._parse_fasta_header(record.description)
-                    self.protein_names[uid] = pname
-                    self.gene_names[uid] = gname
-                    organism, taxonomy_id = self._parse_fasta_organism(record.description)
-                    self.fasta_organisms[uid] = organism
-                    self.fasta_taxonomy_ids[uid] = taxonomy_id
+                    records[uid].add((str(record.seq), *self._parse_fasta_header(record.description),
+                                      *self._parse_fasta_organism(record.description)))
+            self.fasta_conflicts = {}
+            for uid, candidates in records.items():
+                if len(candidates) != 1:
+                    self.fasta_conflicts[uid] = sorted(candidates)
+                    self.fasta_dict.pop(uid, None)
+                    self.protein_names[uid], self.gene_names[uid] = "Unknown protein", "Unknown"
+                    self.fasta_organisms[uid], self.fasta_taxonomy_ids[uid] = "Unknown", ""
+                    continue
+                sequence, pname, gname, organism, taxonomy_id = next(iter(candidates))
+                self.fasta_dict[uid] = sequence
+                self.protein_names[uid], self.gene_names[uid] = pname, gname
+                self.fasta_organisms[uid], self.fasta_taxonomy_ids[uid] = organism, taxonomy_id
             logger.info(f"FASTA loaded: {len(self.fasta_dict):,} proteins")
             return True
         except Exception as e:
@@ -184,11 +194,19 @@ class UnifiedProteinEnricher:
     # ------------------------------------------------------------------
 
     def load_cache(self):
-        domain_file = self.cache_dir / "domain_cache.json"
+        domain_file = self.cache_dir / "domain_source_cache_v2.json"
         if domain_file.exists():
             try:
                 with open(domain_file, "r", encoding="utf-8") as f:
-                    self.domain_cache = json.load(f)
+                    cache = json.load(f)
+                from datetime import datetime, timezone
+                age = datetime.now(timezone.utc).timestamp() - float(cache.get("stored_at_epoch", 0))
+                if age < 86400:
+                    self.domain_source_records = {
+                        pid: data for pid, data in (cache.get("sources") or {}).items()
+                        if (data.get("source_record") or {}).get("fetched_at")
+                        and (datetime.now(timezone.utc) - datetime.fromisoformat(data["source_record"]["fetched_at"])).total_seconds() < 86400}
+                    self.domain_cache = {pid: data.get("full_domains", []) for pid, data in self.domain_source_records.items()}
                 logger.info(f"Domain cache loaded: {len(self.domain_cache)} entries")
             except Exception as e:
                 logger.warning(f"Domain cache load failed: {e}")
@@ -204,8 +222,12 @@ class UnifiedProteinEnricher:
 
     def save_cache(self):
         try:
-            with open(self.cache_dir / "domain_cache.json", "w", encoding="utf-8") as f:
-                json.dump(self.domain_cache, f, ensure_ascii=False, indent=2)
+            from datetime import datetime, timezone
+            with open(self.cache_dir / "domain_source_cache_v2.json", "w", encoding="utf-8") as f:
+                json.dump({"stored_at_epoch": datetime.now(timezone.utc).timestamp(), "sources": {
+                    pid: data for pid, data in self.domain_source_records.items()
+                    if data.get("query_status") in {"hit", "no_hit"} and data.get("retrieval_complete")}},
+                    f, ensure_ascii=False, indent=2)
             with open(self.cache_dir / "motif_cache.json", "w", encoding="utf-8") as f:
                 json.dump(self.motif_cache, f, ensure_ascii=False, indent=2)
         except Exception as e:
@@ -240,7 +262,9 @@ class UnifiedProteinEnricher:
 
         for pid, data in results.items():
             # Store raw dicts {name, type, accession} for format flexibility
-            self.domain_cache[pid] = [d for d in data.get("domains", []) if d.get("name")]
+            self.domain_source_records[pid] = data
+            if data.get("query_status") in {"hit", "no_hit"} and data.get("retrieval_complete"):
+                self.domain_cache[pid] = [d for d in data.get("full_domains", data.get("domains", [])) if d.get("name")]
 
         logger.info(f"Domain cache now has {len(self.domain_cache)} entries")
         return self.domain_cache
@@ -249,14 +273,26 @@ class UnifiedProteinEnricher:
     # Local motif pattern analysis (Step 1 — v2 compatible)
     # ------------------------------------------------------------------
 
+    def _motif_cache_key(self, protein_id, modified_sequence, ptm_position):
+        import hashlib
+        sequence = self.fasta_dict.get(self.clean_protein_id(protein_id), "")
+        payload = json.dumps(["anchored_local_motif.v2", protein_id, modified_sequence,
+                              ptm_position, sequence, MOTIF_PATTERNS], sort_keys=True)
+        return hashlib.sha256(payload.encode()).hexdigest()
+
     def analyze_motif_patterns(self, protein_id: str, modified_sequence: str, ptm_position: str) -> Dict:
         """Analyze motif patterns for a PTM site using local FASTA sequences."""
-        cache_key = f"{protein_id}_{modified_sequence}_{ptm_position}"
+        cache_key = self._motif_cache_key(protein_id, modified_sequence, ptm_position)
         if cache_key in self.motif_cache:
             return self.motif_cache[cache_key]
 
-        result = {"motifs": [], "motif_descriptions": [], "sequence_window": "", "error": None}
+        result = {"motifs": [], "motif_descriptions": [], "sequence_window": "", "error": None,
+                  "schema_version": "anchored_local_motif.v2", "evidence_role": "sequence_pattern_hypothesis", "direct_relation_claim_allowed": False}
         try:
+            if ";" in protein_id or "," in protein_id:
+                result["error"] = "ambiguous_protein_group"
+                self.motif_cache[cache_key] = result
+                return result
             clean_id = self.clean_protein_id(protein_id)
             sequence = self.fasta_dict.get(clean_id, "")
             if not sequence:
@@ -269,7 +305,7 @@ class UnifiedProteinEnricher:
                 self.motif_cache[cache_key] = result
                 return result
 
-            match = re.match(r"([A-Z])(\d+)", pos_str)
+            match = re.fullmatch(r"([A-Z])(\d+)", pos_str)
             if not match:
                 result["error"] = f"PTM position parse failed: {pos_str}"
                 self.motif_cache[cache_key] = result
@@ -283,6 +319,10 @@ class UnifiedProteinEnricher:
                 self.motif_cache[cache_key] = result
                 return result
 
+            if sequence[pos] != aa:
+                result["error"] = "reference_residue_mismatch"
+                self.motif_cache[cache_key] = result
+                return result
             window_start = max(0, pos - 7)
             window_end = min(len(sequence), pos + 8)
             sequence_window = sequence[window_start:window_end]
@@ -296,7 +336,7 @@ class UnifiedProteinEnricher:
                 if aa not in target_residues:
                     continue
                 for m in re.finditer(pattern, sequence_window):
-                    if m.start() <= ptm_site_in_window < m.end():
+                    if m.start("ptm") == ptm_site_in_window:
                         result["motifs"].append(motif_name)
                         break
 
@@ -469,7 +509,7 @@ class UnifiedProteinEnricher:
             seq_window = ""
             motif_error = ""
             if row.get("Has_PTM", False) and pd.notna(row.get("Modified.Sequence", "")):
-                cache_key = f"{pid}_{row.get('Modified.Sequence', '')}_{row.get('PTM_Position', '')}"
+                cache_key = self._motif_cache_key(pid, str(row.get("Modified.Sequence", "")), str(row.get("PTM_Position", "")))
                 if cache_key in self.motif_cache:
                     mr = self.motif_cache[cache_key]
                     motifs = mr.get("motifs", [])
@@ -481,12 +521,18 @@ class UnifiedProteinEnricher:
             seq_windows.append(seq_window)
             motif_errors.append(motif_error)
 
+        unified_df["InterPro_Source_Record"] = unified_df["Protein.Group"].map(
+            lambda group: json.dumps({pid: self.domain_source_records.get(pid, {"query_status": "source_unavailable"})
+                                     for pid in self._split_protein_ids(str(group))}, ensure_ascii=False))
         unified_df["Domains"] = domains_list
         unified_df["Domain_Count"] = domain_counts
         unified_df["Motifs"] = motifs_list
         unified_df["Motif_Count"] = motif_counts
         unified_df["Sequence_Window"] = seq_windows
         unified_df["Motif_Analysis_Error"] = motif_errors
+        unified_df["Motif_Evidence_Metadata"] = json.dumps({
+            "schema_version": "anchored_local_motif.v2", "evidence_role": "sequence_pattern_hypothesis",
+            "direct_relation_claim_allowed": False, "generic_regulators_are_site_predictions": False})
 
         # Remove redundant columns from non-PTM merge
         for col in ["Control_Mean", "Treatment_Mean", "Log2FC", "Fold_Change"]:

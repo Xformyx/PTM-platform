@@ -16,6 +16,9 @@ interface ReportRow {
   project_name: string;
   ptm_type: string;
   status: string;
+  release_status?: string;
+  revision_id?: string;
+  release_reasons?: string[];
   filename: string;
   kind: "markdown" | "pptx" | "pdf" | string;
   size_bytes: number;
@@ -145,6 +148,7 @@ export default function Reports() {
                       </TableCell>
                       <TableCell className="font-mono text-xs max-w-[280px] truncate" title={r.filename}>
                         {r.filename}
+                        <div className="text-xs text-muted-foreground" title={(r.release_reasons || []).join(", ")}>{r.release_status || "legacy_not_gated"}</div>
                       </TableCell>
                       <TableCell>
                         <Badge variant="secondary" className="text-[10px] uppercase">{r.kind}</Badge>
@@ -155,7 +159,7 @@ export default function Reports() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
-                          {r.kind === "markdown" && (
+                          {["markdown", "md"].includes(r.kind) && (
                             <Button
                               variant="ghost"
                               size="icon"

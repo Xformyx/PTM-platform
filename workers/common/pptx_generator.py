@@ -11,78 +11,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import httpx
 from sqlalchemy import text
 
 from common.db_engine import get_engine
 
 logger = logging.getLogger("ptm-workers.pptx")
 
-MAX_REPORT_CHARS = 12000
-MAX_DATA_CHARS = 4000
-
-SYSTEM_PROMPT = """\
-You are a scientific presentation designer. Given a PTM (post-translational modification)
-analysis report and data summaries, create a structured slide deck for a research presentation.
-
-CRITICAL: Your entire reply must be ONLY one JSON object — no markdown headings (no ## lines),
-no "Instructions", no preamble, no code fences, no text before `{` or after the closing `}`.
-
-## RULES
-1. Create 8-12 slides covering the key findings
-2. Each slide should have a clear title, 3-5 bullet points, and optional speaker notes
-3. Include slides for: Title, Background/Objective, Methods, Key Findings (2-3 slides),
-   Signaling Architecture, Temporal Dynamics, Discussion, Conclusions, Future Directions
-4. Use actual protein names, PTM sites, and data values from the report
-5. Keep bullets concise (max 15 words each)
-6. Speaker notes should provide additional context for the presenter (2-3 sentences)
-7. If figures are available, reference them by suggesting which slide should include them
-
-## OUTPUT FORMAT
-Return ONLY a valid JSON object (no markdown fences, no commentary):
-{
-  "title": "Presentation title",
-  "subtitle": "Subtitle or experiment description",
-  "slides": [
-    {
-      "title": "Slide Title",
-      "layout": "title | content | two_column | section_header",
-      "bullets": ["Point 1", "Point 2", "Point 3"],
-      "notes": "Speaker notes for this slide",
-      "suggest_figure": "signal_flow | comovement | cascade | network | none"
-    }
-  ]
-}
-"""
-
-USER_PROMPT_TEMPLATE = """\
-## Experiment Overview
-- Order: {order_code}
-- PTM Type: {ptm_type}
-- Treatment: {treatment}
-- Time Points: {time_points}
-- Species: {species}
-
-## Research Questions
-{research_questions}
-
-## Report Content (Summary)
-{report_summary}
-
-## Key Data Points
-{data_summary}
-
-## Available Figures
-{figure_list}
-
-## Task
-Create a structured presentation (8-12 slides) covering the most important
-findings from this PTM analysis. Focus on biological significance and
-actionable insights.
-"""
-
-
-def _render_pptx(slide_data: dict, output_path: str, figure_dir: Path) -> str:
+def _render_pptx(slide_data: dict, output_path: str, figure_dir: Path, *, approved_figures=None) -> str:
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE
     from pptx.util import Inches, Pt
@@ -106,7 +41,7 @@ def _render_pptx(slide_data: dict, output_path: str, figure_dir: Path) -> str:
     DARK_TEXT = RGBColor(0x33, 0x33, 0x33)
     SECTION_BG = RGBColor(0x0D, 0x47, 0xA1)
 
-    figure_map = _collect_figures(figure_dir)
+    figure_map = dict(approved_figures or {})
 
     def _add_bg(slide, color):
         bg = slide.background
@@ -194,82 +129,12 @@ def _render_pptx(slide_data: dict, output_path: str, figure_dir: Path) -> str:
                         str(fig_path), Inches(7.8), Inches(1.5), Inches(4.8), Inches(5.0)
                     )
                 except Exception as e:
-                    logger.warning("Failed to embed figure %s: %s", fig_path, e)
+                    raise ValueError("approved_figure_render_failed") from e
         if notes:
             slide.notes_slide.notes_text_frame.text = notes
 
     prs.save(output_path)
     return output_path
-
-
-def _collect_figures(output_dir: Path) -> dict[str, Path]:
-    """Collect one PNG per figure type, selecting the most recently modified file."""
-    candidates: dict[str, list[Path]] = {}
-    if not output_dir.exists():
-        return {}
-    for p in output_dir.glob("*.png"):
-        name = p.stem.lower()
-        if "signal_flow" in name:
-            candidates.setdefault("signal_flow", []).append(p)
-        elif "comovement" in name or "co_movement" in name:
-            candidates.setdefault("comovement", []).append(p)
-        elif "cascade" in name or "signaling_cascade" in name:
-            candidates.setdefault("cascade", []).append(p)
-        elif "network" in name or "cytoscape" in name:
-            candidates.setdefault("network", []).append(p)
-        elif "heatmap" in name:
-            candidates.setdefault("heatmap", []).append(p)
-    # Pick the most recently modified file for each type
-    return {k: max(v, key=lambda p: p.stat().st_mtime) for k, v in candidates.items()}
-
-
-def _load_report_text(output_dir: Path, file_suffix: str) -> str:
-    candidates = sorted(
-        output_dir.glob("*_report_*.md"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if candidates:
-        text = candidates[0].read_text(encoding="utf-8", errors="replace")
-        return text[:MAX_REPORT_CHARS]
-    for name in (f"comprehensive_report{file_suffix}.md", "final_report.md", "report.md"):
-        alt = output_dir / name
-        if alt.exists():
-            return alt.read_text(encoding="utf-8", errors="replace")[:MAX_REPORT_CHARS]
-    return ""
-
-
-def _load_data_summary(output_dir: Path, file_suffix: str) -> str:
-    json_path = None
-    for p in sorted(output_dir.glob(f"enriched_ptm_data{file_suffix}*.json"), reverse=True):
-        json_path = p
-        break
-    if not json_path:
-        for p in sorted(output_dir.glob("enriched_ptm_data*.json"), reverse=True):
-            json_path = p
-            break
-    if not json_path:
-        return "(No enriched data available)"
-    try:
-        data = json.loads(json_path.read_text(encoding="utf-8"))
-    except Exception:
-        return "(Failed to load data)"
-    lines = [f"Total PTMs: {len(data)}"]
-    scored = []
-    for p in data:
-        gene = p.get("gene", p.get("gene_name", p.get("Gene_Name", "?")))
-        pos = p.get("position", p.get("Position", "?"))
-        fc = p.get("ptm_relative_log2fc", p.get("fold_change", p.get("Fold_Change", 0)))
-        try:
-            abs_fc = abs(float(fc))
-        except (ValueError, TypeError):
-            abs_fc = 0
-        scored.append((abs_fc, gene, pos, fc))
-    scored.sort(reverse=True)
-    lines.append("\nTop 15 PTMs by |fold-change|:")
-    for abs_fc, gene, pos, fc in scored[:15]:
-        lines.append(f"  {gene}-{pos}: FC={fc}")
-    return "\n".join(lines)[:MAX_DATA_CHARS]
 
 
 def _extract_balanced_json_object(text: str) -> str | None:
@@ -337,86 +202,6 @@ def _parse_json(raw: str) -> dict | None:
     return None
 
 
-def _call_llm_sync(provider: str, model: str, system_prompt: str, user_prompt: str) -> str:
-    ollama_url = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
-    timeout = httpx.Timeout(600.0, connect=30.0)
-
-    if provider not in ("gemini", "openai", "ollama"):
-        raise RuntimeError(
-            f"PPTX는 provider '{provider}'를 지원하지 않습니다. Ollama, Gemini, OpenAI 중에서 선택하세요."
-        )
-
-    with httpx.Client(timeout=timeout) as client:
-        if provider == "gemini":
-            api_key = os.getenv("GEMINI_API_KEY", "")
-            if not api_key:
-                raise RuntimeError("GEMINI_API_KEY not configured")
-            model_id = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={api_key}"
-            resp = client.post(url, json={
-                "contents": [{"parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}],
-                "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192},
-            })
-            resp.raise_for_status()
-            data = resp.json()
-            cands = data.get("candidates") or []
-            if not cands:
-                raise RuntimeError(f"Gemini returned no candidates: {data!r:.800}")
-            parts = (cands[0].get("content") or {}).get("parts") or []
-            texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
-            out = "".join(texts).strip()
-            if not out:
-                raise RuntimeError("Gemini returned empty text.")
-            return out
-
-        if provider == "openai":
-            api_key = os.getenv("OPENAI_API_KEY", "")
-            if not api_key:
-                raise RuntimeError("OPENAI_API_KEY not configured")
-            model_id = model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-            resp = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": model_id,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.4,
-                    "max_tokens": 8192,
-                    "response_format": {"type": "json_object"},
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            msg = (data.get("choices") or [{}])[0].get("message") or {}
-            return (msg.get("content") or "").strip() or ""
-
-        model_id = model or os.getenv("LLM_MODEL", "gemma3:27b")
-        resp = client.post(
-            f"{ollama_url}/api/chat",
-            json={
-                "model": model_id,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0.4, "num_predict": 8192},
-            },
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        content = (body.get("message") or {}).get("content") or ""
-        if not content.strip():
-            raise RuntimeError(
-                f"Ollama returned empty content for model '{model_id}'. Raw: {body!r:.500}"
-            )
-        return content
-
-
 def _parse_json_context(val: Any) -> dict:
     if val is None:
         return {}
@@ -430,12 +215,47 @@ def _parse_json_context(val: Any) -> dict:
     return {}
 
 
+def slide_plan_from_revision(plan, packet, revision):
+    """Use approved observations verbatim; the slide model cannot invent raw FC rankings."""
+    import re
+    cards = {c.get('card_id'): c for c in packet.get('reader_cards') or []}
+    all_evidence = {e for c in cards.values() for e in c.get('evidence_ids') or []}
+    slides = []
+    for finding in plan.get('key_findings') or []:
+        if not set(finding.get('evidence_ids') or []).issubset(all_evidence):
+            raise ValueError('slide_finding_evidence_unbound')
+        observation = str(finding.get('observation') or '')
+        observation = re.sub(r'\[(?:EVID|REF):[^]]+\]', '', observation).strip()
+        limitation = str(finding.get('alternative_explanation') or '')
+        # No free-text scientific rewriting. Longer observations continue over
+        # multiple slides instead of silently losing trailing qualifications.
+        import textwrap
+        segments = textwrap.wrap(observation, width=600, break_long_words=False, break_on_hyphens=False) or ['']
+        for index, segment in enumerate(segments):
+            slides.append({'title': finding.get('reader_display_identity') or 'Observed pattern',
+                           'layout': 'content', 'bullets': [segment, limitation],
+                           'claim_ids': [finding.get('finding_id')], 'evidence_ids': finding.get('evidence_ids', []),
+                           'reference_ids': finding.get('citation_ids', []), 'required_limitations': [limitation],
+                           'suggest_figure': next(iter(finding.get('figure_keys') or []), 'none'),
+                           'notes': json.dumps({'source_revision_id': revision['revision_id'],
+                                                'references': revision.get('references', []),
+                                                'next_test_hypothesis': finding.get('next_test'),
+                                                'continuation': index}, ensure_ascii=False)})
+    if not slides:
+        raise ValueError('no_approved_findings_for_presentation')
+    return {'schema_version': 'revision_slide_plan.v1', 'source_revision_id': revision['revision_id'],
+            'title': 'PTM Analysis Report — Review draft',
+            'subtitle': 'Slide layout review pending. ' + str(plan.get('central_question', '')),
+            'slides': slides, 'omitted_findings': plan.get('finding_selection_audit', {}).get('exclusions', [])}
+
+
 def generate_pptx_for_order_sync(
     order_id: int,
     llm_provider: str,
     llm_model: str,
     *,
     on_progress: Callable[[str, str, int], None] | None = None,
+    source_revision_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Build PPTX for order. Returns dict with filename, slide_count, figures_embedded.
@@ -461,59 +281,49 @@ def generate_pptx_for_order_sync(
     if not output_dir.exists():
         raise RuntimeError("No analysis output directory for this order")
 
-    file_suffix = "_phospho" if ptm_type == "phosphorylation" else "_ubi"
-    report_text = _load_report_text(output_dir, file_suffix)
-    if not report_text:
-        raise RuntimeError("No report found. Run Report Generation first.")
+    from ptm_shared.report_revision import read_revision, verify_revision, revision_packet, register_revision
+    if not source_revision_id:
+        raise RuntimeError("Pinned source revision is required; legacy jobs must be resubmitted")
+    revision = read_revision(output_dir, source_revision_id)
+    if not revision or revision['release'].get('publish_as_final') is not True:
+        raise RuntimeError('source_revision_not_final_ready')
+    verify_revision(output_dir, revision)
+    plan = revision_packet(output_dir, revision, 'reader_authoring_plan')
+    packet = revision_packet(output_dir, revision, 'authoring_packet')
+    parsed = slide_plan_from_revision(plan, packet, revision)
+    figures = {a['role'].split(':', 1)[1]: output_dir / a['filename']
+               for a in revision['artifacts'] if a['role'].startswith('figure:')}
 
-    data_summary = _load_data_summary(output_dir, file_suffix)
-    figures = _collect_figures(output_dir)
-    figure_list = ", ".join(figures.keys()) if figures else "None"
-    # research_questions: prefer explicit list; fall back to ai_questions text entries
-    rqs = report_opts.get("research_questions") or []
-    if not rqs:
-        ai_qs = report_opts.get("ai_questions") or []
-        rqs = [q.get("question", q) if isinstance(q, dict) else q for q in ai_qs if q]
-
-    user_prompt = USER_PROMPT_TEMPLATE.format(
-        order_code=order_code,
-        ptm_type=ptm_type,
-        treatment=ctx.get("treatment", "N/A"),
-        time_points=ctx.get("time_points", ctx.get("timepoints", "N/A")),
-        species=ctx.get("species", "N/A"),
-        research_questions="\n".join(f"- {q}" for q in rqs) if rqs else "(None)",
-        report_summary=report_text,
-        data_summary=data_summary,
-        figure_list=figure_list,
-    )
-
-    logger.info("[PPTX] order=%s provider=%s model=%s", order_code, llm_provider, llm_model)
-    if on_progress:
-        on_progress(
-            "llm",
-            "Generating slide structure with LLM (this may take several minutes)…",
-            25,
-        )
-    raw = _call_llm_sync(llm_provider, llm_model, SYSTEM_PROMPT, user_prompt)
-
-    parsed = _parse_json(raw)
-    if not parsed or "slides" not in parsed:
-        snippet = (raw or "")[:600].replace("\n", " ")
-        raise RuntimeError(
-            f"LLM 응답을 슬라이드 JSON으로 파싱하지 못했습니다. (응답 앞부분: {snippet!r})"
-        )
-
-    pptx_name = f"{order_code}_presentation.pptx"
+    pptx_name = f"{order_code}_{source_revision_id}_presentation.pptx"
     pptx_path = str(output_dir / pptx_name)
     if on_progress:
         on_progress("render", "Building PPTX file and embedding figures…", 70)
-    _render_pptx(parsed, pptx_path, output_dir)
+    _render_pptx(parsed, pptx_path, output_dir, approved_figures=figures)
+    from report_generation.core.report_artifact_manifest import _artifact, finalize_rendered_artifacts
+    from report_generation.core.report_release import resolve_report_release
+    from ptm_shared.report_revision import _atomic_json
+    slide_plan_path = output_dir / (f"{source_revision_id}_slide_plan.json")
+    _atomic_json(slide_plan_path, parsed)
+    manifest = finalize_rendered_artifacts({"status": "validated", "report_eligible": True,
+        "artifacts": [_artifact('slide_plan', slide_plan_path, required=True)]},
+        [pptx_path], {}, requested_formats=['pptx'])
+    # A parent's final status cannot certify a newly rendered slide layout.
+    release = resolve_report_release(reader_authoring_shadow=True,
+        output_correctness={"status": "draft_review_required", "reason_codes": ["presentation_visual_review_pending"]},
+        artifact_manifest=manifest,
+        report_mode_contract=revision.get('manifest', {}).get('report_mode_contract'))
+    derived = register_revision(output_dir, files=[pptx_path], manifest=manifest,
+                                release=release, references=revision["references"],
+                                source_revisions=[{"revision_id": source_revision_id, "registry_sha256": revision["registry_sha256"]}], make_current=False)
+    pptx_name = next(a["filename"] for a in derived["artifacts"] if a["role"] == "report")
     if on_progress:
         on_progress("finalize", "Saving presentation…", 92)
 
     return {
         "status": "ok",
         "filename": pptx_name,
+        "source_revision_id": source_revision_id,
+        "revision_id": derived["revision_id"],
         "slide_count": len(parsed.get("slides", [])) + 1,
         "figures_embedded": [k for k in figures if k in str(parsed)],
     }

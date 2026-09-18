@@ -138,6 +138,9 @@ def _phase_b_context_signature(context: Optional[dict], ptm: dict) -> str:
     """Hash fields that can change a literature-derived interpretation."""
     context = context or {}
     payload = {
+        "cache_schema": "phase_b_interpretation.v3",
+        "full_context": context,
+        "identity": {k: ptm.get(k) for k in ("Precursor.Id", "Modified.Sequence", "Precursor.Charge", "Protein.Group", "FASTA_Taxonomy_ID", "isoform")},
         "organism": context.get("organism") or context.get("species"),
         "treatment": context.get("treatment"),
         "cell_type": context.get("cell_type"),
@@ -170,6 +173,12 @@ class _GeneCache:
             return self._store.get(key)
 
     def set(self, key: str, value: dict) -> None:
+        def failed(item):
+            return isinstance(item, dict) and (bool(item.get('error')) or item.get('query_status') in
+                {'error', 'timeout', 'rate_limited', 'api_error', 'parse_failure', 'unavailable', 'unsupported'} or
+                any(failed(child) for child in item.values()))
+        if not value or not any(value.values()) or failed(value):
+            return
         with self._lock:
             self._store[key] = value
 
@@ -701,13 +710,18 @@ class RAGEnrichmentPipeline:
 
         def _source_result(payload: dict, state: str) -> dict:
             """Keep source execution provenance out of the cached domain payload."""
+            source_statuses = [item.get('query_status') for item in [payload, *payload.values()] if isinstance(item, dict)]
+            if any(status in {'error', 'timeout', 'rate_limited', 'api_error', 'parse_failure'} for status in source_statuses):
+                state = 'error'
+            elif any(status in {'unavailable', 'unsupported', 'unknown'} for status in source_statuses):
+                state = 'skipped'
             return {**payload, "_phase_a_state": state}
 
         def _iptmnet():
             if not _tax_id:
                 return _source_result({"query_status": "unavailable", "reason": "annotation_species_unresolved"}, "skipped")
             try:
-                iptmnet_data = self.mcp.query_iptmnet(gene=gene, position=position, organism=species)
+                iptmnet_data = self.mcp.query_iptmnet(gene=gene, position=position, organism=species, ptm_type=ptm_type)
                 return _source_result(
                     iptmnet_data,
                     "error" if iptmnet_data.get("error") or iptmnet_data.get("query_status") == "error" else "done",
@@ -962,13 +976,13 @@ class RAGEnrichmentPipeline:
                 # A human lookup is expensive and inferential. It is limited to
                 # selected discovery/regulation trajectories, never the broad
                 # All PTMs or Minor annotation universe, and cached per site.
-                ortholog_cache_key = f"{cache_namespace}__{gene}__{position}__{native_species}_human_ortholog_iptmnet"
+                ortholog_cache_key = f"{cache_namespace}__{gene}__{position}__{ptm_type}__{native_species}_human_ortholog_iptmnet_v4"
                 cached_ortholog = self._gene_cache.get(ortholog_cache_key)
                 if cached_ortholog is not None:
                     cross_species_iptmnet = {**cached_ortholog, "cache_hit": True}
                 else:
                     cross_species_iptmnet = self.mcp.query_iptmnet_human_ortholog(
-                        gene=gene, position=position, organism=native_species,
+                        gene=gene, position=position, organism=native_species, ptm_type=ptm_type,
                     )
                     self._gene_cache.set(ortholog_cache_key, cross_species_iptmnet)
             else:
@@ -1171,7 +1185,16 @@ class RAGEnrichmentPipeline:
         pmids = [a.get("pmid", "") for a in articles]
         tasks_to_run: dict = {}
         cache_hit_count = 0
-        context_cache_key = _phase_b_context_signature(context, ptm)
+        from pathlib import Path as _CachePath
+        prompt_hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in
+                         _CachePath(__file__).parent.glob("llm_*.py")}
+        context_cache_key = _phase_b_context_signature({**(context or {}),
+            "model": getattr(getattr(getattr(self, "kinase_predictor", None), "llm", None), "model", None),
+            "provider": getattr(getattr(getattr(self, "kinase_predictor", None), "llm", None), "provider", None),
+            "prompt_hashes": prompt_hashes, "articles": articles,
+            "structured_source": structured_packet if 'structured_packet' in locals() else iptmnet_data,
+            "budgets": [self.abstract_max_tokens, self.kinase_max_tokens, self.functional_max_tokens],
+        }, ptm)
         for name, fn in phase_b_tasks.items():
             cache_task_name = f"{name}__{route_name}__ctx_{context_cache_key}"
             cached = get_cached(gene, position, ptm_type, cache_task_name, pmids)

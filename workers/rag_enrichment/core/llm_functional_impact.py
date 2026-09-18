@@ -82,7 +82,7 @@ def _build_impact_prompt(
     if pubmed_evidence:
         lines = [f"PubMed Evidence ({len(pubmed_evidence)} articles):"]
         for a in pubmed_evidence[:5]:
-            lines.append(f"- PMID {a.get('pmid', '?')}: {(a.get('abstract') or '')[:200]}...")
+            lines.append(f"- PMID {a.get('pmid', '?')}: {a.get('abstract') or ''}")
         evidence_text = "\n".join(lines)
 
     # Pathways and interactions

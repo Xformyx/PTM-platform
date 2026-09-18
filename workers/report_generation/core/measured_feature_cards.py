@@ -8,6 +8,7 @@ from protein-adjusted and legacy reconstructed values.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import hashlib
@@ -369,7 +370,7 @@ def build_feature_observation_cards(
             point["ptm_protein_adjusted_log2fc"] is not None or point["ptm_unadjusted_log2fc"] is not None
             for point in points
         )
-        if numeric_points < minimum_points:
+        if numeric_points < minimum_points and not any(p.get("detection_context_only") for p in points):
             continue
         complexity = _trajectory_complexity(adjusted_values)
         quality_tier, quality_counts = _narrative_quality_tier(points)
@@ -525,7 +526,7 @@ def build_feature_observation_cards(
     return cards
 
 
-def select_finding_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int = 4) -> tuple[list[dict], dict]:
+def select_finding_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int | None = None, word_budget: int | None = None) -> tuple[list[dict], dict]:
     """Freeze descriptive findings using quality, parent and pattern diversity.
 
     A parent or repeated control is a dependency, never an independent replicate.
@@ -538,6 +539,7 @@ def select_finding_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int = 4
         fid = str(_mapping(card.get("feature_identity")).get("reader_feature_id") or "")
         eligible = any(any(_mapping(point.get("axes")).get(axis, {}).get("available")
                            for axis in ("unadjusted", "adjusted")) for point in card.get("trajectory") or [])
+        eligible = eligible or any(p.get("detection_context_only") for p in card.get("trajectory") or [])
         if not fid or not eligible:
             excluded.append({"card_id": card.get("card_id"), "reason": "no_bound_numeric_observation"})
             continue
@@ -579,14 +581,30 @@ def select_finding_cards(cards: Iterable[Mapping[str, Any]], *, maximum: int = 4
                 fid)
 
     remaining = dict(unique)
-    while remaining and len(selected) < maximum:
+    budget_used = 0
+    selected_signatures = set()
+    selection_trace = []
+    while remaining and (maximum is None or len(selected) < maximum):
         fid, card = min(remaining.items(), key=priority)
+        signature = (tuple(sorted(parents(card))), str(_mapping(card.get("feature_identity")).get("gene") or ""), pattern(card), tuple(sorted(card.get("question_ids") or [])))
+        estimated_words = max(80, len(str(card.get("reader_summary") or "").split()) + 60 + len(json.dumps(card.get("trajectory") or [], default=str)) // 60)
+        if signature in selected_signatures:
+            excluded.append({"reader_feature_id": fid, "reason": "redundant_parent_and_pattern", "destination": "appendix"})
+            del remaining[fid]
+            continue
+        if word_budget is not None and budget_used + estimated_words > word_budget:
+            excluded.append({"reader_feature_id": fid, "reason": "capacity_excluded", "destination": "appendix"})
+            del remaining[fid]
+            continue
+        selected_signatures.add(signature)
+        budget_used += estimated_words
+        selection_trace.append({"reader_feature_id": fid, "reason": "additional_parent_pattern_or_question", "estimated_words": estimated_words})
         selected.append(card)
         parents_seen.update(parents(card))
         patterns_seen.add(pattern(card))
         del remaining[fid]
     excluded.extend({"reader_feature_id": fid, "reason": "quality_parent_pattern_diversity_capacity"} for fid in sorted(remaining))
-    return selected, {"contract_version": "report_finding_selection.v3", "input_unique_feature_count": len(unique),
+    return selected, {"contract_version": "report_finding_selection.v4", "selection_trace": selection_trace, "word_budget": word_budget, "estimated_words": budget_used, "input_unique_feature_count": len(unique),
                       "selected_count": len(selected), "selected_reader_feature_ids": [c["feature_identity"]["reader_feature_id"] for c in selected],
                       "parent_count": len(parents_seen), "independent_sample_count": None,
                       "rule": "quality_then_question_relevance_parent_and_observed_temporal_diversity_then_point_support_and_stable_feature_id",

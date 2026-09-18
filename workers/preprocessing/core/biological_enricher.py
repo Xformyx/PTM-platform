@@ -188,6 +188,8 @@ class BiologicalEnricher:
                 df.loc[mask, "GO_Biological_Process"] = "; ".join(info.get("go_terms_bp", [])[:5])
                 df.loc[mask, "GO_Molecular_Function"] = "; ".join(info.get("go_terms_mf", [])[:5])
                 df.loc[mask, "GO_Cellular_Component"] = "; ".join(info.get("go_terms_cc", [])[:5])
+                # Display top-K is not the evidence inventory.
+                df.loc[mask, "UniProt_Source_Record"] = __import__('json').dumps(info, default=str, sort_keys=True)
 
             logger.info("UniProt enrichment complete")
 
@@ -241,6 +243,7 @@ class BiologicalEnricher:
                         scores = [i.get("score", 0) for i in interactions[:5]]
                         avg_score = f"{sum(scores) / len(scores):.2f}" if scores else ""
                         df.loc[mask, "STRING_Interaction_Score"] = avg_score
+                        df.loc[mask, "STRING_Source_Record"] = __import__('json').dumps(info, default=str, sort_keys=True)
             finally:
                 string_stop[0] = True
 
@@ -295,6 +298,7 @@ class BiologicalEnricher:
                         pathways = info.get("pathways", [])
                         pathway_str = "; ".join(f"{p['name']} ({p['id']})" for p in pathways[:5])
                         df.loc[mask, "KEGG_Pathways"] = pathway_str
+                        df.loc[mask, "KEGG_Source_Record"] = __import__('json').dumps(info, default=str, sort_keys=True)
             finally:
                 kegg_stop[0] = True
 

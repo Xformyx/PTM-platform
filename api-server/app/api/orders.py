@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import csv
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.bounded_compute import CpuBoundBusy, CpuBoundTimeout, run_cpu_bound
 from app.core.database import get_db
+from app.core.report_output_files import merge_result_files_with_disk
 from app.core.json_files import atomic_write_json, load_json_first_value
 from app.core.redis import get_redis
 from app.core.webhook import send_order_webhook
@@ -282,16 +284,18 @@ def _validate_order_code(code: str) -> None:
         )
 
 
-def _validated_order_sample_manifest(order, context=None):
+def _validated_order_sample_manifest(order, context=None, *, secondary=False):
     from ptm_shared.sample_manifest import validate_sample_manifest
     context = context if context is not None else (order.analysis_context or {})
-    manifest = context.get("sample_manifest")
+    manifest = context.get("secondary_sample_manifest" if secondary else "sample_manifest")
+    sample_config = order.secondary_sample_config if secondary else order.sample_config
+    paths = (order.secondary_pr_matrix_path, order.secondary_pg_matrix_path) if secondary else (order.pr_matrix_path, order.pg_matrix_path)
     try:
         columns = []
-        for path in (order.pr_matrix_path, order.pg_matrix_path) if manifest else ():
+        for path in paths if manifest else ():
             with open(path, encoding="utf-8-sig") as handle:
                 columns.append(next(csv.reader(handle, delimiter="\t")))
-        return validate_sample_manifest(manifest, _build_condition_map(order.sample_config),
+        return validate_sample_manifest(manifest, _build_condition_map(sample_config),
                                         *(columns or [None, None]))
     except (ValueError, OSError, StopIteration, TypeError) as error:
         raise HTTPException(status_code=422, detail="Invalid sample manifest or input columns: " + str(error)) from error
@@ -517,27 +521,20 @@ async def list_generated_reports(
         output_dir = output_root / (order.order_code or str(order.id))
         if not output_dir.is_dir():
             continue
-        seen: set[str] = set()
-        for pattern in _REPORT_GLOBS:
-            for path in output_dir.glob(pattern):
-                if not path.is_file() or path.name in seen:
-                    continue
-                seen.add(path.name)
-                stat = path.stat()
-                ext = path.suffix.lower().lstrip(".")
-                kind = "pptx" if ext == "pptx" else "pdf" if ext == "pdf" else "markdown"
-                reports.append({
-                    "order_id": order.id,
-                    "order_code": order.order_code,
-                    "project_name": order.project_name,
-                    "ptm_type": order.ptm_type,
-                    "status": order.status,
-                    "filename": path.name,
-                    "kind": kind,
-                    "size_bytes": stat.st_size,
-                    "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                    "completed_at": order.completed_at.isoformat() + "Z" if order.completed_at else None,
-                })
+        merged = merge_result_files_with_disk(order.result_files, output_dir, report_options=order.report_options)
+        for filename in list(merged.get("report_files") or []) + list(merged.get("derived_report_files") or []):
+            path = output_dir / filename
+            if not path.is_file():
+                continue
+            stat = path.stat()
+            reports.append({"order_id": order.id, "order_code": order.order_code,
+                            "project_name": order.project_name, "ptm_type": order.ptm_type,
+                            "status": order.status, "filename": filename, "kind": path.suffix.lstrip("."),
+                            "release_status": (merged.get("report_release") or {}).get("status", "legacy_not_gated"),
+                            "release_reasons": (merged.get("report_release") or {}).get("reason_codes", []),
+                            "revision_id": merged.get("revision_id"), "size_bytes": stat.st_size,
+                            "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                            "completed_at": order.completed_at.isoformat() + "Z" if order.completed_at else None})
 
     reports.sort(key=lambda r: r["modified_at"] or "", reverse=True)
     return {"reports": reports, "total": len(reports)}
@@ -1359,6 +1356,8 @@ async def start_order(
         "ptm_mode": ptm_mode,
         "condition_map": condition_map if condition_map else None,
         "sample_manifest": validated_sample_manifest,
+            "secondary_sample_manifest": _validated_order_sample_manifest(order, secondary=True),
+            "normalization_policy": (order.analysis_context or {}).get("normalization_policy", "legacy_median.v1"),
         "single_time_point": sample_cfg.get("single_time_point", False),
         "species_tax_id": species_context.taxonomy_id,
         "kegg_organism": species_context.kegg_organism,
@@ -1611,7 +1610,7 @@ async def run_stage(
     if body.stage == "report_generation":
         _pre_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
         _pre_enriched = order_output / f"enriched_ptm_data{_pre_suffix}.json"
-        if not _pre_enriched.exists() and not any(order_output.glob("enriched_ptm_data*.json")):
+        if not _pre_enriched.exists():
             raise HTTPException(
                 status_code=400,
                 detail="enriched_ptm_data JSON not found. Run RAG Enrichment first.",
@@ -1711,6 +1710,8 @@ async def run_stage(
             "custom_reference": species_context.custom_reference,
             "analysis_options": order.analysis_options,
             "sample_manifest": validated_sample_manifest,
+            "secondary_sample_manifest": _validated_order_sample_manifest(order, secondary=True),
+            "normalization_policy": (order.analysis_context or {}).get("normalization_policy", "legacy_median.v1"),
             "experimental_context": {**(order.analysis_context or {}), "ptm_type": order.ptm_type},
             "top_n_ptms": (order.report_options or {}).get("top_n_ptms", 50),
             "ptm_selection_mode": (order.report_options or {}).get("ptm_selection_mode", "top_n"),
@@ -1750,6 +1751,8 @@ async def run_stage(
             "ptm_mode": ptm_mode,
             "single_time_point": single_time_point,
             "sample_manifest": validated_sample_manifest,
+            "secondary_sample_manifest": _validated_order_sample_manifest(order, secondary=True),
+            "normalization_policy": (order.analysis_context or {}).get("normalization_policy", "legacy_median.v1"),
             "experimental_context": {**(order.analysis_context or {}), "ptm_type": order.ptm_type},
             "top_n_ptms": (order.report_options or {}).get("top_n_ptms", 50),
             "ptm_selection_mode": (order.report_options or {}).get("ptm_selection_mode", "top_n"),
@@ -1776,16 +1779,6 @@ async def run_stage(
         md_report = order_output / f"comprehensive_report{file_suffix}.md"
 
         if not enriched_json.exists():
-            # Fallback: any enriched_ptm_data*.json (newest first), e.g. suffix mismatch or manual copy
-            _cand = sorted(
-                order_output.glob("enriched_ptm_data*.json"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-            if _cand:
-                enriched_json = _cand[0]
-
-        if not enriched_json.exists():
             order.status = "failed"
             order.error_message = "Enriched JSON not found. Run RAG Enrichment first."
             await db.commit()
@@ -1802,6 +1795,8 @@ async def run_stage(
             "md_report_path": str(md_report) if md_report.exists() else None,
             "single_time_point": single_time_point,
             "sample_manifest": validated_sample_manifest,
+            "secondary_sample_manifest": _validated_order_sample_manifest(order, secondary=True),
+            "normalization_policy": (order.analysis_context or {}).get("normalization_policy", "legacy_median.v1"),
             "experimental_context": {**(order.analysis_context or {}), "ptm_type": order.ptm_type},
             "research_questions": report_opts.get("research_questions", []),
             "chromadb_collections": active_collections,
@@ -1823,6 +1818,10 @@ async def run_stage(
             "temporal_contract": report_opts.get("temporal_contract", "dynamics_v1"),
             "run_generation": run_generation,
         }
+        if task_config.get("analysis_mode") == "cross_talk":
+            sec_suffix = "_ubi" if str(order.secondary_ptm_type).startswith("ubiquit") else "_phospho"
+            task_config["secondary_enriched_json_path"] = str(order_output / f"enriched_ptm_data{sec_suffix}.json")
+            task_config["secondary_tsv_data_path"] = str(order_output / "secondary_ptm" / f"ptm_vector_data_normalized{sec_suffix}.tsv")
         if temporal_preparation_required:
             task_config["preprocessing_output_dir"] = str(order_output)
             task_config["prepare_temporal_evidence_for_report"] = True
@@ -3840,7 +3839,7 @@ async def get_vector_plot_data(
                 ptm_is_denovo=_ptm_is_denovo,
                 enriched_lookup=_enriched_lookup,
                 ptm_cluster_map=_ptm_to_cluster,
-                ptm_type=ptm_type if 'ptm_type' in locals() else "phosphorylation",
+                ptm_type=order.ptm_type or "phosphorylation",
                 tmm_site_contributions=(order.kinase_activity_heatmap or {}).get("tmm_site_contribution_matrix", {}),
             )
             # Store as dicts (include AI layer for each pair)
@@ -4221,6 +4220,16 @@ async def download_order_file(
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     file_path = output_dir / filename
+    from app.core.report_output_files import is_report_output_name
+    from ptm_shared.report_revision import read_revision, revision_download_path
+    if Path(filename).suffix.lower() in {".md", ".html", ".docx", ".pptx", ".pdf"}:
+        try:
+            pinned = None
+            if filename.startswith("rev_"):
+                pinned = read_revision(output_dir, filename.split("_", 2)[1])
+            file_path = revision_download_path(output_dir, filename, pinned)
+        except (ValueError, OSError, KeyError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
@@ -4264,6 +4273,16 @@ async def preview_order_file(
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     file_path = output_dir / filename
+    from app.core.report_output_files import is_report_output_name
+    from ptm_shared.report_revision import read_revision, revision_download_path
+    if Path(filename).suffix.lower() in {".md", ".html", ".docx", ".pptx", ".pdf"}:
+        try:
+            pinned = None
+            if filename.startswith("rev_"):
+                pinned = read_revision(output_dir, filename.split("_", 2)[1])
+            file_path = revision_download_path(output_dir, filename, pinned)
+        except (ValueError, OSError, KeyError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
@@ -4315,6 +4334,9 @@ async def delete_order_file(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
+
+    if filename.startswith("rev_"):
+        raise HTTPException(status_code=409, detail="Immutable revision artifacts cannot be deleted; select another current revision instead")
 
     ext = Path(filename).suffix.lower()
     if ext not in {".md", ".docx", ".html"}:
@@ -9559,6 +9581,7 @@ async def kinase_activity_heatmap(
     # avoid inflating the order JSON column; retain a compact, provenance-rich
     # projection in the cached heatmap response and downstream AI context.
     try:
+        from ptm_shared.study_temporal_context_resolution import resolve_study_temporal_context
         from ptm_shared.enrichment_free_temporal_sidecar import (
             build_production_temporal_ptm_protein_analysis,
             summarize_temporal_ptm_protein_analysis,
@@ -9592,17 +9615,30 @@ async def kinase_activity_heatmap(
                     atomic_write_json(previous_path, unified_sidecar, sort_keys=True, default=None, ensure_ascii=False)
                 unified_sidecar = None
         if unified_sidecar is None:
+            from ptm_shared.temporal_input_reconstruction import load_biological_replicate_series
+            replicate_series, replicate_audit = load_biological_replicate_series(
+                output_dir, file_suffix=file_suffix, conditions=conditions_sorted,
+                sample_manifest=_validated_order_sample_manifest(order),
+                feature_identities=temporal_inputs['features'],
+            )
             unified_sidecar = build_production_temporal_ptm_protein_analysis(
                 output_dir=output_dir,
                 ptm_type=order.ptm_type,
                 ptm_timeseries=ptm_timeseries,
                 conditions=conditions_sorted,
                 tmm_result=result_data,
+                raw_replicate_fc_series=replicate_series,
+                study_context=resolve_study_temporal_context(
+                    experimental_context=dict(order.analysis_context or {}),
+                    declared_conditions=conditions_sorted,
+                    study_id=f"order_{order_id}",
+                )[0],
                 feature_provenance_rows=feature_provenance_rows,
                 feature_identities=temporal_inputs["features"],
                 temporal_input_provenance={
                     "contract_version": temporal_inputs["contract_version"],
                     "feature_input_sha256": temporal_inputs["input_sha256"],
+                    "biological_replicate_adapter": replicate_audit,
                     "aggregation_rule": "none_feature_level_only",
                 },
                 mapping_source_bundle_path=os.getenv("PTM_MAPPING_SOURCE_BUNDLE_PATH"),
@@ -9610,6 +9646,12 @@ async def kinase_activity_heatmap(
                 relation_source_bundle_path=os.getenv("PTM_RELATION_SOURCE_BUNDLE_PATH"),
                 relation_snapshot_root=os.getenv("PTM_RELATION_SNAPSHOT_ROOT"),
             )
+            if unified_path.exists():
+                import shutil
+                previous_sha = hashlib.sha256(unified_path.read_bytes()).hexdigest()
+                previous_path = unified_path.with_name(f"{unified_path.stem}.previous-{previous_sha}.json")
+                if not previous_path.exists():
+                    shutil.copyfile(unified_path, previous_path)
             atomic_write_json(
                 unified_path,
                 unified_sidecar,

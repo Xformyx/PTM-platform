@@ -11,6 +11,7 @@ Features:
 """
 
 import asyncio
+from contextvars import ContextVar
 import logging
 import os
 import re
@@ -21,6 +22,21 @@ from urllib.parse import quote_plus
 import httpx
 
 logger = logging.getLogger("mcp-server.pubmed")
+
+_QUERY_EVENTS = ContextVar('pubmed_query_events', default=None)
+SEARCH_POLICY = {'version': 'pubmed_search.v3', 'minimum_publication_date': None,
+                 'language_restriction': None, 'ranking': 'all_tiers_then_rank', 'maximum_per_tier': 100}
+
+def _query_event(stage, *, count=None, error=None):
+    events = _QUERY_EVENTS.get()
+    if events is None:
+        return
+    status = 'hit' if count else 'no_hit'
+    if error is not None:
+        status = ('timeout' if isinstance(error, httpx.TimeoutException) else
+                  'rate_limited' if isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 429 else
+                  'parse_failure' if isinstance(error, (ValueError, ET.ParseError)) else 'api_error')
+    events.append({'stage': stage, 'status': status, 'count': count})
 
 NCBI_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 EUROPEPMC_BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest"
@@ -60,7 +76,13 @@ async def search_ptm_pubmed(
     Results are cached permanently in Redis (no TTL) so that once fetched,
     articles are always available without re-querying PubMed.
     """
-    cache_key = f"pubmed:search:{gene}:{position}:{ptm_type}"
+    from ptm_shared.evidence_contracts import source_cache_key
+    max_results = min(SEARCH_POLICY["maximum_per_tier"], max(0, int(max_results)))
+    if max_results == 0:
+        return {"articles": [], "query_status": "not_requested", "search_policy": SEARCH_POLICY}
+    cache_key = source_cache_key("pubmed", gene=gene, position=position, ptm_type=ptm_type,
+                                 context=sorted(context_keywords or []), max_results=max_results,
+                                 parser="pubmed.v3", policy=SEARCH_POLICY)
     if redis:
         import json
         cached = await redis.get(cache_key)
@@ -76,7 +98,19 @@ async def search_ptm_pubmed(
                 data["total_found"] = len(data["articles"])
             return data
 
-    result = await _multi_tier_search(gene, position, ptm_type, context_keywords or [], max_results)
+    events = []
+    event_token = _QUERY_EVENTS.set(events)
+    try:
+        result = await _multi_tier_search(gene, position, ptm_type, context_keywords or [], max_results)
+    finally:
+        _QUERY_EVENTS.reset(event_token)
+    errors = [event['status'] for event in events if event['status'] not in {'hit', 'no_hit'}]
+    result['query_status'] = errors[0] if errors else 'hit' if result.get('articles') else 'no_hit' if events else 'unknown'
+    result['query_events'] = events
+    result['search_policy'] = SEARCH_POLICY
+    from ptm_shared.evidence_contracts import source_query_record
+    result['source_record'] = source_query_record('pubmed', result['query_status'], payload=result,
+        query={'gene': gene, 'position': position, 'ptm_type': ptm_type, 'context': context_keywords, 'budget': max_results})
 
     # Stamp each article with search metadata for traceability
     from datetime import datetime, timezone
@@ -87,7 +121,7 @@ async def search_ptm_pubmed(
         article.setdefault("search_ptm_type", ptm_type)
         article.setdefault("cached_at", now_iso)
 
-    if redis and result.get("articles"):
+    if redis and result.get("articles") and result["query_status"] == "hit":
         import json
         await redis.set(cache_key, json.dumps(result), ex=604800)
         # Also cache each article individually with metadata
@@ -226,10 +260,11 @@ async def _multi_tier_search(
             seen.add(pmid)
             merged.append(pmid)
 
-    merged = merged[:max_results]
 
     # Fetch article details
-    articles = await _fetch_article_details(merged) if merged else []
+    articles = []
+    for offset in range(0, len(merged), 50):
+        articles.extend(await _fetch_article_details(merged[offset:offset + 50]))
 
     # Score relevance
     scored = []
@@ -238,13 +273,17 @@ async def _multi_tier_search(
         article["relevance_score"] = score
         scored.append(article)
 
-    scored.sort(key=lambda a: a["relevance_score"], reverse=True)
+    scored.sort(key=lambda a: (-a["relevance_score"], str(a.get("pmid", ""))))
+    candidate_count = len(scored)
+    scored = scored[:max_results]
 
     return {
         "gene": gene,
         "position": position,
         "ptm_type": ptm_type,
         "total_found": len(scored),
+        "candidate_count_before_quota": candidate_count,
+        "search_policy": "all_tiers_then_rank.v1",
         "search_tiers_used": {
             "tier1_general": len(tier1_pmids),
             "tier2_context": len(tier2_pmids),
@@ -353,7 +392,6 @@ async def _esearch(query: str, max_results: int = 15) -> list[str]:
         "retmax": str(max_results),
         "retmode": "xml",
         "sort": "relevance",
-        "mindate": "2000/01/01",
         "datetype": "pdat",
         "email": NCBI_EMAIL,
         "tool": NCBI_TOOL,
@@ -366,8 +404,11 @@ async def _esearch(query: str, max_results: int = 15) -> list[str]:
         resp = await client.get(f"{NCBI_BASE}/esearch.fcgi", params=params, timeout=30)
         resp.raise_for_status()
         root = ET.fromstring(resp.text)
-        return [el.text for el in root.findall(".//Id") if el.text]
+        pmids = [el.text for el in root.findall(".//Id") if el.text]
+        _query_event('esearch', count=len(pmids))
+        return pmids
     except Exception as e:
+        _query_event('esearch', error=e)
         logger.warning(f"PubMed esearch failed: {e}")
         return []
 
@@ -392,6 +433,7 @@ async def _fetch_article_details(pmids: list[str]) -> list[dict]:
         resp.raise_for_status()
         return _parse_pubmed_xml(resp.text)
     except Exception as e:
+        _query_event('efetch', error=e)
         logger.warning(f"PubMed efetch failed: {e}")
         return []
 
@@ -405,6 +447,7 @@ def _parse_pubmed_xml(xml_text: str) -> list[dict]:
             if article:
                 articles.append(article)
     except ET.ParseError as e:
+        _query_event('parse', error=e)
         logger.warning(f"XML parse error: {e}")
     return articles
 
@@ -506,6 +549,7 @@ async def _search_europe_pmc(gene: str, position: str, ptm_type: str, max_result
                 pmids.append(str(pmid))
         return pmids
     except Exception as e:
+        _query_event('europepmc', error=e)
         logger.warning(f"Europe PMC search failed: {e}")
         return []
 

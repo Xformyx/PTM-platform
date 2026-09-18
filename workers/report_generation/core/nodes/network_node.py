@@ -157,6 +157,74 @@ NODE_SHAPES = {
 # Activation state classifier aligned with guide §7.1
 # ---------------------------------------------------------------------------
 
+def _observation_node_id(ptm):
+    from ptm_shared.feature_identity import canonical_feature_identity
+    gene = ptm.get('gene') or ptm.get('Gene.Name') or 'Unknown'
+    site = ptm.get('position') or ptm.get('PTM_Position') or ''
+    if any(ptm.get(key) for key in ('Precursor.Id', 'precursor_id', 'Modified.Sequence', 'modified_sequence')):
+        return canonical_feature_identity(ptm)['feature_id']
+    return f'{gene}-{site}'
+
+
+def _scoped_relation_view(nodes, edges):
+    """Project legacy edges to their supported entity level without inventing sites.
+
+    Original measured nodes and every observation attachment remain available.
+    Imported legacy relations lack residue-exact assertions, so enzyme candidates
+    and PPI/co-membership are gene-level context, not site reaction evidence.
+    """
+    by_id = {node['id']: node for node in nodes}
+    aliases = defaultdict(list)
+    for node in nodes:
+        if node.get('site'):
+            aliases[f"{node.get('gene')}-{node['site']}"].append(node['id'])
+    for alias, members in aliases.items():
+        by_id.setdefault(alias, {**by_id[members[0]], 'id': alias})
+    additions, result, seen = {}, [], set()
+    undirected = {'STRING', 'BioGRID', 'KEGG', 'Shared-Regulator'}
+    relation_types = {'STRING': 'functional_association', 'BioGRID': 'physical_binding',
+                      'KEGG': 'pathway_co_membership', 'Shared-Regulator': 'shared_regulator_candidate'}
+    for original in edges:
+        edge = dict(original)
+        kind = edge.get('evidence_type', 'unknown')
+        observations = sorted({member for endpoint in (edge['source'], edge['target'])
+                               for member in aliases.get(endpoint, [endpoint])
+                               if member in by_id and by_id[member].get('site')})
+        for endpoint in ('source', 'target'):
+            node = by_id.get(edge[endpoint], {})
+            gene = str(node.get('gene') or edge[endpoint])
+            if node.get('site'):
+                if gene not in by_id:
+                    additions.setdefault(gene, {'id': gene, 'gene': gene, 'site': '', 'type': 'ProteinContext',
+                        'state': 'missing', 'value': None, 'label': gene, 'observation_node_ids': []})
+                    additions[gene]['observation_node_ids'] = sorted(set(additions[gene]['observation_node_ids']) |
+                        set(aliases.get(node['id'], [node['id']])))
+                edge[endpoint] = gene
+        edge.update(relation_schema_version='legacy_relation_view.v1', subject_level='gene', object_level='gene',
+                    relation_type=relation_types.get(kind, 'enzyme_substrate_candidate'),
+                    direction='undirected' if kind in undirected else 'candidate_direction',
+                    effect_sign='unknown', scope_status='site_context_unverified',
+                    evidence_role='model_hypothesis' if kind == 'Kinase-Substrate-Predicted' else 'external_prior',
+                    observation_node_ids=observations, current_experiment_direct_relation=False)
+        edge['association_score'] = edge.get('confidence') if kind == 'STRING' else None
+        edge['score_semantics'] = 'source_association_score_not_causal_probability' if kind == 'STRING' else 'not_available'
+        edge['confidence'] = None
+        if edge.get('pathway_str') == 'PhosphoSitePlus (fallback)':
+            edge.update(evidence_type='unverified_legacy_candidate', evidence_role='model_hypothesis')
+        endpoints = tuple(sorted((edge['source'], edge['target']))) if kind in undirected else (edge['source'], edge['target'])
+        key = endpoints + (edge['relation_type'], edge['evidence_type'], str(edge.get('pathway_str') or ''))
+        if key in seen:
+            existing = next(e for e in result if e['_key'] == key)
+            existing['observation_node_ids'] = sorted(set(existing['observation_node_ids'] + observations))
+            continue
+        seen.add(key)
+        edge['_key'] = key
+        result.append(edge)
+    for edge in result:
+        edge.pop('_key')
+    return list(additions.values()), result
+
+
 def _classify_state(value: float, node_type: str = "PTM") -> str:
     """Classify node state based on Log2FC value and node type.
     
@@ -542,7 +610,7 @@ def _analyze_timepoint(
         state = _classify_state(fc, "PTM")
         gene = ptm.get("gene", "Unknown")
         site = ptm.get("position", "")
-        node_id = f"{gene}-{site}"
+        node_id = _observation_node_id(ptm)
 
         node = {
             "id": node_id,
@@ -553,7 +621,7 @@ def _analyze_timepoint(
             "state": state,
             "trend": "up" if fc > 0 else ("down" if fc < 0 else "neutral"),
             "protein_log2fc": ptm.get("protein_log2fc", 0),
-            "label": node_id,
+            "label": f"{gene}-{site}",
             # v9.27: activity classification
             "activity_class": ptm.get("activity_class", "minor"),
             "q_value": ptm.get("q_value"),
@@ -585,9 +653,9 @@ def _analyze_timepoint(
         gene = (ptm_data.get("gene") or ptm_data.get("Gene.Name", "")).strip()
         cond = (ptm_data.get("Condition") or ptm_data.get("condition", "")).strip()
         if cond == timepoint and gene:
-            enriched_by_gene[gene] = ptm_data
+            enriched_by_gene[(gene, len(enriched_by_gene))] = ptm_data
 
-    for gene, ptm_data in enriched_by_gene.items():
+    for (gene, _), ptm_data in enriched_by_gene.items():
         enr = ptm_data.get("rag_enrichment", {})
         pos = ptm_data.get("position") or ptm_data.get("PTM_Position", "")
         source_id = f"{gene}-{pos}"
@@ -735,7 +803,7 @@ def _analyze_timepoint(
         pathways = enr.get("pathways", [])
         pw_set = {_pw_str(p) for p in pathways}
 
-        for other_gene, other_data in enriched_by_gene.items():
+        for (other_gene, _), other_data in enriched_by_gene.items():
             if other_gene == gene:
                 continue
             other_enr = other_data.get("rag_enrichment", {})
@@ -868,32 +936,23 @@ def _analyze_timepoint(
         elif isinstance(kp, dict):
             predicted_kinases = kp.get("predicted_kinases", kp.get("predictedKinases", []))
         for pk in predicted_kinases:
-            pk_name = ""
-            pk_conf = 0.5
-            if hasattr(pk, "kinase_name"):
-                pk_name = pk.kinase_name
-                pk_conf = getattr(pk, "confidence", 0.5)
-            elif isinstance(pk, dict):
-                pk_name = pk.get("kinase_name") or pk.get("kinaseName", "")
-                pk_conf = pk.get("confidence", 0.5)
-            elif isinstance(pk, str):
-                pk_name = pk
+            if not isinstance(pk, (dict, str)):
+                pk = vars(pk)
+            pk_name = pk if isinstance(pk, str) else (pk.get("kinase") or pk.get("kinase_name") or pk.get("kinaseName") or "")
             pk_name = pk_name.strip()
             pk_upper = pk_name.upper()
+            pk_conf = pk.get("confidence", "unknown") if isinstance(pk, dict) else "unknown"
             if not pk_name or pk_upper == gene.upper():
                 continue
-            try:
-                pk_conf = float(pk_conf)
-            except (TypeError, ValueError):
-                pk_conf = 0.5
-            if pk_conf < 0.3:
-                continue  # Skip low-confidence predictions
             if pk_name not in gene_ptms:
                 edge = {
                     "source": pk_name,
                     "target": source_id,
-                    "evidence_type": "KEA3",
-                    "confidence": round(pk_conf, 2),
+                    "evidence_type": "Kinase-Substrate-Predicted",
+                    "confidence": None,
+                    "model_confidence_label": pk_conf,
+                    "evidence_role": "model_hypothesis",
+                    "source": "LLM",
                     "pathways": [],
                     "pathway_str": "LLM-predicted kinase",
                 }
@@ -946,7 +1005,7 @@ def _analyze_timepoint(
     )
     if not _has_enrichment_kinases:
         logger.info(f"[NET-TP] {timepoint}: No enrichment kinases found, applying fallback kinase prediction")
-        for gene, data in enriched_by_gene.items():
+        for (gene, _), data in enriched_by_gene.items():
             gene_upper = gene.upper()
             pos = data.get("position") or data.get("PTM_Position", "")
             substrate_id = f"{gene}-{pos}"
@@ -1000,12 +1059,15 @@ def _analyze_timepoint(
         seen = set()
         unique = []
         for e in edges:
-            key = tuple(sorted([e["source"], e["target"]])) + (e["evidence_type"],)
+            key = (e["source"], e["target"], e["evidence_type"])
             if key not in seen:
                 seen.add(key)
                 unique.append(e)
         return unique
 
+    context_nodes, all_edges = _scoped_relation_view(all_ptm_nodes + list(candidate_non_ptm.values()), all_edges)
+    _, active_edges = _scoped_relation_view(all_ptm_nodes + list(candidate_non_ptm.values()), active_edges)
+    candidate_non_ptm.update({node['id']: node for node in context_nodes})
     all_edges = _dedup_edges(all_edges)
     active_edges = _dedup_edges(active_edges)
 
@@ -1102,7 +1164,7 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
     for ptm in parsed_ptms:
         fc = ptm.get("ptm_relative_log2fc", 0)
         state = _classify_state(fc, "PTM")
-        node_id = f"{ptm['gene']}-{ptm['position']}"
+        node_id = _observation_node_id(ptm)
         nodes.append({
             "id": node_id,
             "gene": ptm["gene"],
@@ -1110,7 +1172,7 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
             "type": "PTM",
             "value": round(fc, 3),
             "state": state,
-            "label": node_id,
+            "label": f"{ptm['gene']}-{ptm['position']}",
         })
         gene_ptms[ptm["gene"]].append(node_id)
 
@@ -1321,7 +1383,7 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
             if not pred_kinases and isinstance(kinase_pred.get("result"), list):
                 pred_kinases = kinase_pred["result"]
             for pk in pred_kinases:
-                pk_name = pk if isinstance(pk, str) else (pk.get("kinase") or pk.get("name") or str(pk))
+                pk_name = pk if isinstance(pk, str) else (pk.get("kinase") or pk.get("kinase_name") or pk.get("kinaseName") or pk.get("name") or "")
                 pk_clean = pk_name.strip()
                 pk_upper = pk_clean.upper()
                 if not pk_clean or pk_upper == gene.upper():
@@ -1332,7 +1394,10 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
                             "source": pk_node_id,
                             "target": source_id,
                             "evidence_type": "Kinase-Substrate-Predicted",
-                            "confidence": 0.6,
+                            "confidence": None,
+                            "model_confidence_label": pk.get("confidence", "unknown") if isinstance(pk, dict) else "unknown",
+                            "evidence_role": "model_hypothesis",
+                            "source": "LLM",
                             "pathways": [],
                             "pathway_str": "",
                         })
@@ -1341,7 +1406,10 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
                         "source": pk_clean,
                         "target": source_id,
                         "evidence_type": "Kinase-Substrate-Predicted",
-                        "confidence": 0.6,
+                        "confidence": None,
+                            "model_confidence_label": pk.get("confidence", "unknown") if isinstance(pk, dict) else "unknown",
+                            "evidence_role": "model_hypothesis",
+                            "source": "LLM",
                         "pathways": [],
                         "pathway_str": "",
                     })
@@ -1424,11 +1492,14 @@ def _build_network_data(parsed_ptms: list, enriched_data: list, output_dir: str 
                         "pathway_str": f"via {kinase_name}",
                     })
 
+    context_nodes, edges = _scoped_relation_view(nodes + list(candidate_non_ptm.values()), edges)
+    candidate_non_ptm.update({node['id']: node for node in context_nodes})
+
     # Deduplicate edgess
     seen = set()
     unique_edges = []
     for e in edges:
-        key = tuple(sorted([e["source"], e["target"]])) + (e["evidence_type"],)
+        key = (e["source"], e["target"], e["evidence_type"])
         if key not in seen:
             seen.add(key)
             unique_edges.append(e)

@@ -178,7 +178,9 @@ services:
     container_name: ptm-mcp-server
     volumes:
       - ./mcp-server/app:/app/app
+      - ./ptm_shared:/opt/ptm_shared:ro
     environment:
+      PYTHONPATH: /app:/opt
       REDIS_URL: redis://redis:6379/3
       NCBI_EMAIL: ${NCBI_EMAIL:-user@example.com}
       NCBI_API_KEY: ${NCBI_API_KEY:-}
@@ -332,8 +334,8 @@ services:
       - ./storage/logs:/app/storage/logs
       # Immutable P1/P2 reference snapshots (host sibling of this repo).
       # Read-only; not an Order/RAG/LLM payload. RAG worker only.
-      - /Users/ken_studio/Documents/Work/PTM/ptm-reference/rat-human-ensembl-116-strict-tree-20260831:/opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831:ro
-      - /Users/ken_studio/Documents/Work/PTM/ptm-reference/iptmnet-release-6.2:/opt/ptm-reference/iptmnet-release-6.2:ro
+      - ${PTM_MAPPING_SNAPSHOT_HOST_PATH:-../ptm-reference/rat-human-ensembl-116-strict-tree-20260831}:/opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831:ro
+      - ${PTM_RELATION_SNAPSHOT_HOST_PATH:-../ptm-reference/iptmnet-release-6.2}:/opt/ptm-reference/iptmnet-release-6.2:ro
     environment:
       TZ: Asia/Seoul
       PYTHONDONTWRITEBYTECODE: "1"

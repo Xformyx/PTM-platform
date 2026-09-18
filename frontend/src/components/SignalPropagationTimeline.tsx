@@ -92,6 +92,7 @@ interface TFInferenceData {
   n_late_changed: number;
   all_inferred_tfs: TFInference[];
   cross_validated_tfs: TFInference[];
+  ptm_coobserved_tfs?: TFInference[];
   nonptm_only_tfs: TFInference[];
   temporal_inference: {
     early: TFInference[];
@@ -299,7 +300,8 @@ export default function SignalPropagationTimeline({ data, orderId }: Props) {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {/* Summary Stats */}
+        <p className="text-xs text-muted-foreground">Target set enrichment does not establish TF activation, inhibition, or independent biological validation.</p>
+                {/* Summary Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-center">
             <p className="text-2xl font-bold text-emerald-700">{data.summary?.responsive_effectors ?? 0}</p>
@@ -385,7 +387,7 @@ export default function SignalPropagationTimeline({ data, orderId }: Props) {
             </TabsTrigger>
             <TabsTrigger value="tf_activity" className="text-xs" disabled={!data.tf_inferences}>
               <Dna className="h-3 w-3 mr-1" />
-              TF Activity
+              TF Enrichment
             </TabsTrigger>
           </TabsList>
 
@@ -825,7 +827,7 @@ export default function SignalPropagationTimeline({ data, orderId }: Props) {
             )}
           </TabsContent>
 
-          {/* ── TF Activity Tab ── */}
+          {/* ── TF Enrichment Tab ── */}
           <TabsContent value="tf_activity">
             {data.tf_inferences ? (
               <div className="space-y-4">
@@ -836,8 +838,8 @@ export default function SignalPropagationTimeline({ data, orderId }: Props) {
                     <p className="text-xs text-muted-foreground">Changed Proteins</p>
                   </div>
                   <div className="bg-muted/50 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-green-500">{data.tf_inferences.cross_validated_tfs.length}</p>
-                    <p className="text-xs text-muted-foreground">Cross-Validated TFs</p>
+                    <p className="text-2xl font-bold text-green-500">{(data.tf_inferences.ptm_coobserved_tfs ?? []).length}</p>
+                    <p className="text-xs text-muted-foreground">PTM coobservations</p>
                   </div>
                   <div className="bg-muted/50 rounded-lg p-3 text-center">
                     <p className="text-2xl font-bold text-amber-500">{data.tf_inferences.nonptm_only_tfs.length}</p>
@@ -849,15 +851,15 @@ export default function SignalPropagationTimeline({ data, orderId }: Props) {
                   </div>
                 </div>
 
-                {/* Cross-Validated TFs (High Confidence) */}
-                {data.tf_inferences.cross_validated_tfs.length > 0 && (
+                {/* PTM coobservations (High Confidence) */}
+                {(data.tf_inferences.ptm_coobserved_tfs ?? []).length > 0 && (
                   <div>
                     <h4 className="text-sm font-semibold flex items-center gap-1 mb-2">
                       <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      Cross-Validated TFs (PTM + Target Gene Convergent)
+                      TFs with PTM and target abundance observations
                     </h4>
                     <div className="space-y-2">
-                      {data.tf_inferences.cross_validated_tfs.map((tf, i) => (
+                      {(data.tf_inferences.ptm_coobserved_tfs ?? []).map((tf, i) => (
                         <div key={i} className="border rounded-lg p-3 bg-green-500/5">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -868,7 +870,7 @@ export default function SignalPropagationTimeline({ data, orderId }: Props) {
                             </div>
                             <div className="flex items-center gap-1">
                               <Badge variant="outline" className="text-xs">
-                                {tf.dominant_mode === 'activation' ? '↑' : tf.dominant_mode === 'repression' ? '↓' : '↕'} {tf.dominant_mode}
+                                Curated target relation: {tf.dominant_mode}
                               </Badge>
                               <Badge variant="outline" className="text-xs">
                                 FDR={tf.fdr < 0.001 ? tf.fdr.toExponential(1) : tf.fdr.toFixed(3)}
@@ -958,7 +960,7 @@ export default function SignalPropagationTimeline({ data, orderId }: Props) {
             ) : (
               <div className="text-center py-8 text-muted-foreground">
                 <Dna className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm font-medium">TF Activity Inference not available</p>
+                <p className="text-sm font-medium">TF target set enrichment unavailable</p>
                 <p className="text-xs mt-1">리포트 생성 시 자동으로 계산됩니다 (DoRothEA + TRRUST)</p>
               </div>
             )}

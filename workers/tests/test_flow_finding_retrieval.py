@@ -42,13 +42,16 @@ def test_retrieved_comparison_reaches_packet_and_condition_aware_prose(relation)
     packet = build_authoring_packet({**state, "finding_literature_retrieval": retrieved}, references=refs)
     finding = deterministic_authoring_plan(packet)["key_findings"][0]
     comparison = finding["literature_comparison"]
-    assert comparison["status"] == relation
+    assert comparison["status"] == "context_available"
+    assert comparison["comparisons"][0]["proposed_relationship"] == relation
+    assert comparison["comparisons"][0]["claim_support_status"] == "not_verified"
     assert comparison["comparisons"][0]["source_offset"] == 0
     assert not comparison["comparisons"][0]["measured_relation"]
     assert comparison["comparisons"][0]["reference_scope"] == "site"
     prose = render_reader_section_fallback("discussion", packet)
     assert "mouse" in prose and "human" in prose
-    assert ("agreed with" if relation == "known_agreement" else "differed from") in prose
+    assert "requires review" in prose
+    assert "agreed with" not in prose and "differed from" not in prose
 
 
 @pytest.mark.parametrize("mode,status,phrase", [("off", "not_searched", "not performed"),
@@ -72,19 +75,24 @@ def test_fabricated_quote_cannot_become_a_literature_comparison():
     assert record["excluded_comparisons"][0]["reason"] == "unbound_quote_context_or_scope"
 
 
-def test_agreement_cannot_paraphrase_outside_the_source_quote():
+@pytest.mark.parametrize("finding", ["insulin directly activates this site", "An increase at S7 was reported"])
+def test_paraphrase_is_preserved_for_review_without_certifying_claim_support(finding):
     class Paraphrase(Model):
         def generate(self, prompt, **kwargs):
             return json.dumps({"comparisons": [{"source_index": 0,
                 "quote": "CANDIDATE0 S7 increased in mouse cells after insulin at 5min.",
                 "relationship": "known_agreement", "reference_scope": "site",
-                "external_finding": "insulin directly activates this site",
+                "external_finding": finding,
                 "species": "mouse", "cell_type": "mouse cells", "time": "5min",
                 "insulin_dose": "", "readout": "", "perturbation": "insulin"}]})
     result = retrieve_finding_literature(build_feature_observation_cards(finding_state()), Retriever(), {}, llm=Paraphrase())
     record = next(iter(result["records"].values()))
-    assert not record["comparisons"]
-    assert record["excluded_comparisons"][0]["reason"] == "unbound_quote_context_or_scope"
+    assert record["comparisons"]
+    comparison = result["references"][0]["feature_comparisons"][0]
+    assert comparison["proposed_external_finding"] == finding
+    assert comparison["source_faithfulness_status"] == "paraphrase_review_required"
+    assert comparison["claim_support_status"] == "not_verified"
+    assert comparison["relationship"] == "literature_background"
 
 
 def test_fenced_comparison_json_is_accepted():

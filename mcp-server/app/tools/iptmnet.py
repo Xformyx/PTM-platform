@@ -82,7 +82,7 @@ IPTMNET_SUCCESS_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 IPTMNET_RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
 # Bump whenever the entry/search parser changes semantic interpretation.  This
 # prevents an older parser's false-empty result from masking a repaired lookup.
-IPTMNET_CACHE_SCHEMA_VERSION = "v3"
+IPTMNET_CACHE_SCHEMA_VERSION = "v4"
 
 # iPTMnet's search form restricts results by NCBI taxonomy id through its
 # `selectOrg` checkboxes.  Without one the first hit for a rodent gene symbol is
@@ -496,7 +496,7 @@ def _entry_schema_status(html: str) -> str:
     return "unrecognized"
 
 
-def _parse_sites_from_html(html: str, target_position: str) -> List[IPTMnetSite]:
+def _parse_sites_from_html(html: str, target_position: str, *, target_ptm_type: str = "", all_sites: bool = False) -> List[IPTMnetSite]:
     """Parse iPTMnet PTM entry tables to find matching PTM sites.
 
     iPTMnet's live entry pages prefix each row with a checkbox column.  Column
@@ -511,9 +511,9 @@ def _parse_sites_from_html(html: str, target_position: str) -> List[IPTMnetSite]
         return sites
 
     target_site = _split_site(target_position)
-    if not target_site:
+    if not target_site and not all_sites:
         return sites
-    target_aa, target_num = target_site
+    target_aa, target_num = target_site or ("X", 0)
     aa_names = "|".join(re.escape(name) for name in AA_MAP.get(target_aa, []))
     residue_pattern = rf"(?:{target_aa}|{aa_names})\s*-?\s*{target_num}(?!\d)"
     site_pattern = re.compile(residue_pattern, re.IGNORECASE)
@@ -535,10 +535,13 @@ def _parse_sites_from_html(html: str, target_position: str) -> List[IPTMnetSite]
                 continue
 
             site_text = cols[site_index].get_text(" ", strip=True)
-            if not site_pattern.search(site_text):
+            if not all_sites and not site_pattern.search(site_text):
                 continue
 
             ptm_type = cols[ptm_type_index].get_text(" ", strip=True)
+            normalize_type = lambda value: str(value).lower().replace("ubiquitination", "ubiquitylation")
+            if target_ptm_type and normalize_type(ptm_type) != normalize_type(target_ptm_type):
+                continue
             source_cell = cols[source_index]
             sources = list(dict.fromkeys(
                 link.get_text(" ", strip=True)
@@ -575,7 +578,7 @@ def _assess_novelty(sites: List[IPTMnetSite]) -> PTMNoveltyResult:
     """Assess PTM novelty based on iPTMnet data (v3.5.2 criteria)."""
     if not sites:
         return PTMNoveltyResult(
-            status="NOVEL", score=0, source_count=0,
+            status="NOT_FOUND", score=0, source_count=0,
             sources=[], pmid_count=0, pmids=[],
         )
 
@@ -605,7 +608,7 @@ def _assess_novelty(sites: List[IPTMnetSite]) -> PTMNoveltyResult:
     elif source_count >= 1:
         status, score = "LOW", 40
     else:
-        status, score = "NOVEL", 0
+        status, score = "NOT_FOUND", 0
 
     return PTMNoveltyResult(
         status=status, score=score, source_count=source_count,
@@ -623,6 +626,8 @@ async def query_iptmnet(
     position: str,
     organism: str = "Mouse",
     redis=None,
+    ptm_type: str = "",
+    all_sites: bool = False,
 ) -> dict:
     """
     Query iPTMnet for PTM novelty assessment.
@@ -630,7 +635,10 @@ async def query_iptmnet(
     Returns dict with keys: gene, position, novelty, sites_found, error.
     """
     organism = _canonical_iptmnet_organism(organism)
-    cache_key = f"iptmnet:{IPTMNET_CACHE_SCHEMA_VERSION}:{gene}:{position}:{organism}"
+    if not position and not all_sites:
+        return {"gene": gene, "position": position, "query_status": "invalid_request", "sites_found": 0,
+                "ptm_sites": [], "novelty": None, "error": "position_required_or_explicit_all_sites"}
+    cache_key = f"iptmnet:{IPTMNET_CACHE_SCHEMA_VERSION}:{gene}:{position}:{organism}:{ptm_type}:{all_sites}"
     if redis:
         try:
             import json as _json
@@ -656,6 +664,9 @@ async def query_iptmnet(
         "organism": organism,
         "novelty": None,
         "sites_found": 0,
+        "ptm_sites": [],
+        "ptm_type": ptm_type,
+        "all_sites": all_sites,
         "query_status": "",
         "error": None,
         "failure_reasons": [],
@@ -684,10 +695,14 @@ async def query_iptmnet(
                     # species' sites must not answer this query.
                     parse_failures.append(f"direct_entry_organism_{entry_organism.lower()}")
                 else:
-                    sites = _parse_sites_from_html(html, position)
+                    sites = _parse_sites_from_html(html, position, target_ptm_type=ptm_type, all_sites=all_sites)
                     if sites:
                         novelty = _assess_novelty(sites)
                         result["novelty"] = novelty.to_dict()
+                        result["ptm_sites"] = [{"site": site.site, "ptm_type": site.ptm_type,
+                                                 "sources": site.sources, "pmids": site.pmids,
+                                                 "enzyme_id": site.enzyme_id, "enzyme_name": site.enzyme_name,
+                                                 "organism": organism} for site in sites]
                         result["sites_found"] = len(sites)
                         result["query_status"] = "hit"
 
@@ -721,10 +736,14 @@ async def query_iptmnet(
                     if entry_organism and entry_organism != organism:
                         parse_failures.append(f"search_entry_organism_{entry_organism.lower()}")
                         continue
-                    sites = _parse_sites_from_html(entry_html, position)
+                    sites = _parse_sites_from_html(entry_html, position, target_ptm_type=ptm_type, all_sites=all_sites)
                     if sites:
                         novelty = _assess_novelty(sites)
                         result["novelty"] = novelty.to_dict()
+                        result["ptm_sites"] = [{"site": site.site, "ptm_type": site.ptm_type,
+                                                 "sources": site.sources, "pmids": site.pmids,
+                                                 "enzyme_id": site.enzyme_id, "enzyme_name": site.enzyme_name,
+                                                 "organism": organism} for site in sites]
                         result["sites_found"] = len(sites)
                         result["query_status"] = "hit"
                         break
@@ -736,9 +755,9 @@ async def query_iptmnet(
         if result["novelty"] is None:
             failure_reasons = list(dict.fromkeys(request_failures + parse_failures))
             result["failure_reasons"] = failure_reasons
-            if fetched_any_page and not parse_failures:
+            if fetched_any_page and not parse_failures and not request_failures:
                 result["novelty"] = PTMNoveltyResult(
-                    status="NOVEL", score=0, source_count=0,
+                    status="NOT_FOUND", score=0, source_count=0,
                     sources=[], pmid_count=0, pmids=[],
                 ).to_dict()
                 result["query_status"] = "empty"
@@ -768,6 +787,7 @@ async def query_human_ortholog_iptmnet(
     position: str,
     organism: str = "Rat",
     redis=None,
+    ptm_type: str = "",
 ) -> dict:
     """Return human support only for an aligned conserved native rodent residue.
 
@@ -794,7 +814,7 @@ async def query_human_ortholog_iptmnet(
     if not native_ensembl_species:
         return result
 
-    cache_key = f"iptmnet:human_ortholog:{native_ensembl_species}:{gene}:{position}"
+    cache_key = f"iptmnet:{IPTMNET_CACHE_SCHEMA_VERSION}:human_ortholog:{native_ensembl_species}:{gene}:{position}:{ptm_type}"
     if redis:
         try:
             import json as _json
@@ -832,7 +852,7 @@ async def query_human_ortholog_iptmnet(
             return result
 
     human_site = str(mapping["human_site"])
-    human_result = await query_iptmnet(human_gene, human_site, organism="Human", redis=redis)
+    human_result = await query_iptmnet(human_gene, human_site, organism="Human", redis=redis, ptm_type=ptm_type)
     if human_result.get("query_status") == "error" or human_result.get("error"):
         result.update({
             **mapping,

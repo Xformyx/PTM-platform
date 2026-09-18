@@ -44,7 +44,7 @@ def _analyze_question(question: str, ptms: list, context: dict) -> dict:
     relevant_ptms = _filter_relevant_ptms(ptms, keywords)
 
     if not relevant_ptms:
-        relevant_ptms = ptms[:20]
+        relevant_ptms = []
 
     activated = [p for p in relevant_ptms if p["ptm_relative_log2fc"] > 0]
     inhibited = [p for p in relevant_ptms if p["ptm_relative_log2fc"] < 0]
@@ -57,12 +57,15 @@ def _analyze_question(question: str, ptms: list, context: dict) -> dict:
         "question": question,
         "keywords": keywords,
         "relevant_ptm_count": len(relevant_ptms),
-        "activated": [_ptm_summary(p) for p in sorted(activated, key=lambda x: -x["ptm_relative_log2fc"])[:10]],
-        "inhibited": [_ptm_summary(p) for p in sorted(inhibited, key=lambda x: x["ptm_relative_log2fc"])[:10]],
+        "increased_ptm_observations": [_ptm_summary(p) for p in sorted(activated, key=lambda x: -x["ptm_relative_log2fc"])[:10]],
+        "decreased_ptm_observations": [_ptm_summary(p) for p in sorted(inhibited, key=lambda x: x["ptm_relative_log2fc"])[:10]],
         "enriched_pathways": pathways,
         "regulatory_patterns": patterns,
         "statistics": stats,
-        "confidence": min(1.0, len(relevant_ptms) / 10),
+        "schema_version": "question_observations.v2",
+        "question_status": "partial_observational_answer" if relevant_ptms else "unresolved",
+        "confidence": None,
+        "confidence_status": "not_a_calibrated_probability",
     }
 
 

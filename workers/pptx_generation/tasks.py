@@ -10,7 +10,7 @@ logger = logging.getLogger("ptm-workers.pptx_tasks")
 
 
 @app.task(bind=True, name="pptx_generation.tasks.run_pptx_generation", max_retries=0)
-def run_pptx_generation(self, order_id: int, llm_provider: str, llm_model: str):
+def run_pptx_generation(self, order_id: int, llm_provider: str, llm_model: str, source_revision_id: str | None = None):
     """
     Generate PPTX in worker process. Returns dict on success; raises on failure
     (Celery stores exception for AsyncResult).
@@ -26,5 +26,5 @@ def run_pptx_generation(self, order_id: int, llm_provider: str, llm_model: str):
     logger.info("[PPTX task] start order_id=%s provider=%s model=%s", order_id, llm_provider, llm_model)
     report("queued", "Preparing PPTX generation…", 8)
     return generate_pptx_for_order_sync(
-        order_id, llm_provider, llm_model, on_progress=report
+        order_id, llm_provider, llm_model, source_revision_id=source_revision_id, on_progress=report
     )

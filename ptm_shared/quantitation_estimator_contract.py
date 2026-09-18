@@ -34,8 +34,8 @@ _ESTIMATOR_CLAIM_RE = re.compile(
 )
 
 
-def build_quantitation_estimator_contract() -> dict[str, Any]:
-    return {
+def build_quantitation_estimator_contract(normalization_policy=None) -> dict[str, Any]:
+    result = {
         "contract_version": CONTRACT_VERSION,
         "estimators": {
             "independent_unadjusted": {
@@ -68,6 +68,16 @@ def build_quantitation_estimator_contract() -> dict[str, Any]:
         ),
         "deterministic_methods_paragraph": DETERMINISTIC_METHODS_PARAGRAPH,
     }
+    if normalization_policy is not None:
+        if normalization_policy not in {'legacy_median.v1', 'already_normalized.v1'}:
+            raise ValueError('unsupported_normalization_policy')
+        result['contract_version'] = 'ptm_quantitation_estimators.v2'
+        result['compatibility'] = 'v1 arithmetic retained; normalization scope explicit'
+        result['normalization_policy'] = normalization_policy
+        if normalization_policy == 'already_normalized.v1':
+            result['estimators']['independent_unadjusted']['input_scale'] = 'provided_normalized_pr_intensity'
+        result['estimators']['linked_protein']['significance_status'] = 'not_tested_by_linked_protein_effect_estimator'
+    return result
 
 
 def repair_quantitation_estimator_sentence(sentence: str) -> tuple[str, bool]:

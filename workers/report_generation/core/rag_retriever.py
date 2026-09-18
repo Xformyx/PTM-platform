@@ -5,6 +5,8 @@ Ported from multi_agent_system/agents/hypothesis_validator.py and section_writer
 Provides literature evidence retrieval for hypothesis validation and section writing.
 """
 
+import hashlib
+import json
 import logging
 import os
 import re
@@ -119,6 +121,21 @@ def traceable_reference_from_rag_result(result: dict) -> dict:
         "citation_eligible": bool(title and (persistent_identity or author_year_identity)),
         "citation_identity_source": "collection_metadata" if title else "missing",
     }
+
+
+def apply_source_quota(ranked, *, n_results, purpose, background_slots=2):
+    """Select from the complete ranked pool; exact-site/negative searches reserve primary evidence."""
+    budget = max(0, int(n_results))
+    if not budget:
+        return []
+    background = [r for r in ranked if r.get("source_type") in {"textbook", "review"}]
+    primary = [r for r in ranked if r.get("source_type") == "research_article"]
+    selected = list(ranked[:budget])
+    pool = primary if purpose in {"direct_site_evidence", "counterevidence", "exact_site"} else background
+    reserve = min(budget, len(pool), 1 if pool is primary else max(0, background_slots))
+    required = pool[:reserve]
+    result = required + [r for r in ranked if r not in required][:budget - reserve]
+    return sorted(result, key=lambda r: (-r.get("relevance", 0), str(r.get("source_id", ""))))[:budget]
 
 
 class RAGRetriever:
@@ -280,10 +297,14 @@ class RAGRetriever:
         return self._resolved_names
 
     def query(
-        self, query_text: str, n_results: int = 5, relevance_threshold: float = 0.5, *, strict: bool = False
+        self, query_text: str, n_results: int = 5, relevance_threshold: float = 0.5, *, strict: bool = False, purpose: str = "literature_background"
     ) -> List[dict]:
         """Query all collections and return merged, scored results."""
-        cache_key = f"{query_text}:{n_results}:{relevance_threshold}:{strict}"
+        n_results = max(0, int(n_results))
+        if n_results == 0:
+            return []
+        cache_key = json.dumps(["retrieval_quota.v2", query_text, n_results, relevance_threshold,
+                                strict, purpose, sorted(self.collection_names)], sort_keys=True)
         with self._cache_lock:
             if cache_key in self._cache:
                 return self._cache[cache_key]
@@ -383,38 +404,13 @@ class RAGRetriever:
         seen = set()
         unique = []
         for r in sorted(all_results, key=lambda x: x["relevance"], reverse=True):
-            h = hash(r["document"][:200])
+            h = (r.get("collection"), r.get("source_id"), hashlib.sha256(r["document"].encode()).hexdigest())
             if h not in seen:
                 seen.add(h)
                 unique.append(r)
 
-        # v84: Guaranteed minimum slots for textbooks/reviews
-        textbook_review_results = [
-            r for r in unique if r["source_type"] in ("textbook", "review")
-        ]
-        top_n = unique[:n_results]
-        tr_in_top = sum(
-            1 for r in top_n if r["source_type"] in ("textbook", "review")
-        )
-
-        if (
-            tr_in_top < self.MIN_TEXTBOOK_REVIEW_SLOTS
-            and len(textbook_review_results) > tr_in_top
-        ):
-            needed = min(self.MIN_TEXTBOOK_REVIEW_SLOTS, len(textbook_review_results))
-            research_slots = n_results - needed
-            final_research = [
-                r for r in unique if r["source_type"] == "research_article"
-            ][:research_slots]
-            final_tr = textbook_review_results[:needed]
-            result = final_research + final_tr
-            result.sort(key=lambda x: x["relevance"], reverse=True)
-            logger.info(
-                "[ChromaDB] v84: Guaranteed %d textbook/review slots (was %d in top %d)",
-                needed, tr_in_top, n_results,
-            )
-        else:
-            result = unique[:n_results]
+        result = apply_source_quota(unique, n_results=n_results, purpose=purpose,
+                                    background_slots=self.MIN_TEXTBOOK_REVIEW_SLOTS)
 
         # Log source type distribution
         type_counts: dict = {}
@@ -442,6 +438,9 @@ class RAGRetriever:
         with self._cache_lock:
             self._cache[cache_key] = result
         return result
+
+    def query_for_purpose(self, query_text, *, purpose, **kwargs):
+        return self.query(query_text, purpose=purpose, **kwargs)
 
     def query_with_reranking(
         self, query_text: str, n_results: int = 5,

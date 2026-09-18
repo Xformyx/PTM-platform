@@ -1,6 +1,15 @@
 from pathlib import Path
 
 from app.core.report_output_files import list_report_output_files, merge_result_files_with_disk
+from ptm_shared.report_revision import register_revision
+
+
+def registered_report(root, name, audience):
+    revision = register_revision(root, files=[str(root / name)], manifest={}, release={
+        "report_audience": audience, "status": "draft_correctness_failed",
+        "publish_as_final": False, "review_artifact_available": True,
+    })
+    return revision["artifacts"][0]["filename"]
 
 
 def test_lists_stamped_report_trio(tmp_path: Path):
@@ -18,6 +27,7 @@ def test_lists_stamped_report_trio(tmp_path: Path):
 def test_merge_does_not_promote_stale_disk_history_to_active_report(tmp_path: Path):
     (tmp_path / "Order_report_260915_1133.md").write_text("new")
     (tmp_path / "Order_report_260915_0058.docx").write_bytes(b"PK")
+    current = registered_report(tmp_path, "Order_report_260915_1133.md", "researcher_manuscript")
     merged = merge_result_files_with_disk(
         {"report_files": ["Order_report_260915_1133.md"], "all_files": ["data.json"]},
         tmp_path,
@@ -28,13 +38,14 @@ def test_merge_does_not_promote_stale_disk_history_to_active_report(tmp_path: Pa
         }},
     )
     assert "Order_report_260915_0058.docx" not in merged["report_files"]
-    assert "Order_report_260915_1133.md" in merged["report_files"]
+    assert merged["report_files"] == [current]
     assert "data.json" in merged["all_files"]
 
 
 def test_explicit_technical_audit_is_kept_out_of_researcher_report_files(tmp_path: Path):
     name = "Order_report_260915_1133.docx"
     (tmp_path / name).write_bytes(b"PK")
+    name = registered_report(tmp_path, name, "technical_audit")
     merged = merge_result_files_with_disk(
         {"report_files": [name], "all_files": [name]},
         tmp_path,
@@ -73,6 +84,7 @@ def test_missing_contract_hides_stale_report_trio_and_sets_typed_status(tmp_path
 def test_researcher_request_hides_stored_technical_release(tmp_path: Path):
     name = "Order_report_260915_1133.docx"
     (tmp_path / name).write_bytes(b"PK")
+    name = registered_report(tmp_path, name, "technical_audit")
     merged = merge_result_files_with_disk(
         {
             "report_files": [name],
@@ -90,3 +102,15 @@ def test_researcher_request_hides_stored_technical_release(tmp_path: Path):
     assert merged["current_report_files"] == []
     assert merged["technical_audit_files"] == [name]
     assert merged["report_file_visibility"]["status"] == "blocked_stale_artifact_audience_mismatch"
+
+
+def test_legacy_completed_filename_cannot_become_registered_report(tmp_path):
+    name = "Order_report_260915_1133.md"
+    (tmp_path / name).write_text("historical bytes")
+    merged = merge_result_files_with_disk({"report_files": [name], "all_files": [name]}, tmp_path,
+        report_options={"report_config": {"report_audience": "researcher_manuscript",
+            "reader_authoring_mode": "shadow", "technical_audit_delivery": "separate_sidecar"}})
+    assert not merged["report_files"] and not merged["all_files"]
+    assert merged["legacy_report_files"] == [name]
+    assert merged["report_release"]["status"] == "legacy_not_gated"
+    assert (tmp_path / name).read_text() == "historical bytes"

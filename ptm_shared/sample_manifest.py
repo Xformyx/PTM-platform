@@ -85,3 +85,28 @@ def compare_sample_units(control, treatment, manifest=None):
         p = float(result.pvalue) if math.isfinite(float(result.pvalue)) else None
     return {**inputs, "p_value": p, "method": inputs["test"] + "; " + inputs["statistical_unit"] + "; " + inputs["aggregation_rule"],
             "status": inputs["status"] if p is not None else inputs["status"] + ":test_unavailable"}
+
+
+def biological_unit_crosswalk(primary, secondary, declared_links=None):
+    """Join modalities only through an explicitly declared biological-unit map.
+
+    Similar filenames or repeated unit labels in two independent manifests do
+    not establish pairing. All unpaired units remain in the accounting view.
+    """
+    p = validate_sample_manifest(primary)
+    s = validate_sample_manifest(secondary)
+    p_units = {str(row['biological_unit']) for row in p['samples']}
+    s_units = {str(row['biological_unit']) for row in s['samples']}
+    pairs, seen_p, seen_s = [], set(), set()
+    for link in declared_links or []:
+        left, right = str(link.get('primary_biological_unit') or ''), str(link.get('secondary_biological_unit') or '')
+        if left not in p_units or right not in s_units or left in seen_p or right in seen_s:
+            raise ValueError('invalid_or_conflicting_secondary_biological_crosswalk')
+        seen_p.add(left)
+        seen_s.add(right)
+        pairs.append({'primary_biological_unit': left, 'secondary_biological_unit': right,
+                      'primary_sample_ids': sorted(r['sample_id'] for r in p['samples'] if str(r['biological_unit']) == left),
+                      'secondary_sample_ids': sorted(r['sample_id'] for r in s['samples'] if str(r['biological_unit']) == right)})
+    return {'schema_version': 'sample_manifest_crosswalk.v1', 'status': 'validated' if pairs else 'pairing_not_declared',
+            'pairs': sorted(pairs, key=lambda row: row['primary_biological_unit']),
+            'unpaired_primary_units': sorted(p_units - seen_p), 'unpaired_secondary_units': sorted(s_units - seen_s)}

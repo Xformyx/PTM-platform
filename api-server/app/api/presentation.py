@@ -28,26 +28,6 @@ _PPTX_TASK_TTL = 24 * 3600
 router = APIRouter(prefix="/orders", tags=["presentation"])
 logger = logging.getLogger("ptm-platform.presentation")
 
-MAX_REPORT_CHARS = 12000
-
-
-def _load_report_text(output_dir: Path, file_suffix: str) -> str:
-    """Load the most recent report MD (for pre-flight check)."""
-    candidates = sorted(
-        output_dir.glob("*_report_*.md"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if candidates:
-        text = candidates[0].read_text(encoding="utf-8", errors="replace")
-        return text[:MAX_REPORT_CHARS]
-    for name in (f"comprehensive_report{file_suffix}.md", "final_report.md", "report.md"):
-        alt = output_dir / name
-        if alt.exists():
-            return alt.read_text(encoding="utf-8", errors="replace")[:MAX_REPORT_CHARS]
-    return ""
-
-
 def _celery_app() -> Celery:
     app = Celery("ptm_workers")
     app.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
@@ -58,6 +38,7 @@ def _celery_app() -> Celery:
 class GeneratePptxRequest(BaseModel):
     llm_provider: str = "ollama"
     llm_model: str = ""
+    source_revision_id: str | None = None
 
 
 @router.post("/{order_id}/generate-pptx")
@@ -86,15 +67,19 @@ async def generate_pptx(
     if not output_dir.exists():
         raise HTTPException(status_code=400, detail="No analysis output found for this order")
 
-    file_suffix = "_phospho" if (order.ptm_type or "phosphorylation") == "phosphorylation" else "_ubi"
-    report_text = _load_report_text(output_dir, file_suffix)
-    if not report_text:
-        raise HTTPException(status_code=400, detail="No report found. Run Report Generation first.")
+    from ptm_shared.report_revision import read_revision, verify_revision
+    try:
+        revision = read_revision(output_dir, body.source_revision_id)
+        if not revision or revision.get('release', {}).get('publish_as_final') is not True:
+            raise ValueError('source_revision_not_final_ready')
+        verify_revision(output_dir, revision)
+    except (ValueError, OSError, KeyError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
     celery_app = _celery_app()
     task = celery_app.send_task(
         "pptx_generation.tasks.run_pptx_generation",
-        args=[order_id, body.llm_provider, body.llm_model or ""],
+        args=[order_id, body.llm_provider, body.llm_model or "", revision['revision_id']],
         queue="report_generation",
     )
     redis = await get_redis()
@@ -110,6 +95,7 @@ async def generate_pptx(
     return {
         "status": "queued",
         "task_id": task.id,
+        "source_revision_id": revision['revision_id'],
         "message": "작업이 백그라운드에서 실행됩니다. 완료까지 페이지를 이동해도 됩니다.",
     }
 

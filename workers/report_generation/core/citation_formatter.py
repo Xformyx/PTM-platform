@@ -40,8 +40,16 @@ class Reference:
 
     @property
     def key(self) -> str:
-        """Unique key for deduplication (title-based)."""
-        return re.sub(r"[^a-z0-9]", "", self.title.lower())[:80]
+        """Persistent identity first; incomplete identities keep full metadata."""
+        import hashlib
+        import json
+        if self.pmid:
+            return 'pmid:' + str(self.pmid).strip()
+        if self.doi:
+            return 'doi:' + re.sub(r'^https?://(?:dx\.)?doi.org/', '', self.doi.strip().lower())
+        return 'unresolved:' + hashlib.sha256(json.dumps(
+            [self.title, self.authors, self.year, self.journal, self.source_collection],
+            ensure_ascii=False, default=str).encode()).hexdigest()
 
 
 @dataclass
@@ -71,7 +79,7 @@ class CitationFormatter:
     def add_reference(self, ref: Reference) -> int:
         """
         Add a reference and return its citation number.
-        Deduplicates by title.
+        Deduplicates by persistent identity or identical incomplete metadata.
         """
         key = ref.key
         if key in self._ref_map:

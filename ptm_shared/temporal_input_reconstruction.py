@@ -436,3 +436,64 @@ def load_stage1_feature_provenance_rows(
             "enriched_ptm_data_json",
         ],
     }
+
+
+def load_biological_replicate_series(output_dir, *, file_suffix, conditions, sample_manifest, feature_identities):
+    """Build an additive uncertainty input from explicit paired biological units.
+
+    Estimator paired_biological_sample_ratio_contrast.v1: technical sample
+    PR/PG ratios are averaged within unit/condition, then contrasted against the
+    same unit's control. It never replaces discovery contrasts or memberships.
+    Missing units/conditions do not get imputed or replicated from means.
+    """
+    from ptm_shared.feature_identity import canonical_feature_identity
+    from ptm_shared.sample_manifest import validate_sample_manifest
+    from ptm_shared.probabilistic_cowave import _parse_timepoint_label
+    manifest = validate_sample_manifest(sample_manifest)
+    audit = {'schema_version': 'biological_temporal_adapter.v1',
+             'estimator_id': 'paired_biological_sample_ratio_contrast.v1',
+             'status': 'not_evaluable', 'reason': 'explicit_paired_manifest_required', 'features': {}}
+    if manifest.get('status') != 'validated' or manifest.get('pairing') != 'paired':
+        return {}, audit
+    path = Path(output_dir) / f'site_level_relative_quantification_normalized{file_suffix}.tsv'
+    if not path.is_file():
+        audit['reason'] = 'raw_sample_ratio_source_unavailable'
+        return {}, audit
+    samples = {sample['sample_id']: sample for sample in manifest['samples']}
+    allowed = set(feature_identities)
+    values = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    with path.open() as stream:
+        for row in csv.DictReader(stream, delimiter='\t'):
+            feature = canonical_feature_identity(row)['feature_id']
+            sample = samples.get(row.get('Sample'))
+            if feature not in allowed or not sample:
+                continue
+            value = _optional_finite_float(row.get('PTM_Relative_Abundance'))
+            if value is not None and value > 0:
+                values[feature][str(sample['biological_unit'])][sample['condition']].append(value)
+    ordered = list(conditions)
+    try:
+        timepoints = [_parse_timepoint_label(c) for c in ordered]
+        if any(t is None for t in timepoints):
+            raise ValueError("unparseable_grid")
+    except (ValueError, TypeError):
+        audit['reason'] = 'time_grid_unavailable'
+        return {}, audit
+    result = {}
+    for feature in sorted(allowed):
+        matrix, unit_ids = [], []
+        for unit, by_condition in sorted(values[feature].items()):
+            control = by_condition.get('Control')
+            if not control or any(not by_condition.get(condition) for condition in ordered):
+                continue
+            control_mean = sum(control) / len(control)
+            matrix.append([math.log2((sum(by_condition[c]) / len(by_condition[c])) / control_mean) for c in ordered])
+            unit_ids.append(unit)
+        audit['features'][feature] = {'biological_n': len(unit_ids), 'biological_units': unit_ids,
+                                      'status': 'eligible' if len(matrix) >= 2 else 'not_evaluable_incomplete_units'}
+        if len(matrix) >= 2:
+            result[feature] = {'timepoints': timepoints, 'matrix': matrix, 'biological_units': unit_ids,
+                               'estimator_id': audit['estimator_id']}
+    audit.update(status='available' if result else 'not_evaluable', reason=None if result else 'no_complete_paired_feature_units',
+                 source_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    return result, audit

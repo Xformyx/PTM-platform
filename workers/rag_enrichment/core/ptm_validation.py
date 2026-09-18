@@ -123,6 +123,7 @@ class PTMValidationResult:
 
     # Database evidence
     iptmnet_hits: List[dict] = field(default_factory=list)
+    source_query_status: dict = field(default_factory=dict)
     uniprot_ptm_sites: List[dict] = field(default_factory=list)
 
     # Cross-site PTM search results
@@ -353,16 +354,17 @@ class PTMValidator:
         # the exact-site lookup, avoiding a duplicate MCP call.
         try:
             iptmnet_data = preloaded_iptmnet_data or self.mcp.query_iptmnet(
-                gene=gene, position=position, organism=self.iptmnet_organism,
+                gene=gene, position=position, organism=self.iptmnet_organism, ptm_type=ptm_type,
             )
-            sites_found = iptmnet_data.get("sites_found", 0)
+            result.source_query_status["iPTMnet"] = iptmnet_data.get("query_status", "unknown")
+            sites_found = iptmnet_data.get("sites_found", 0) if not iptmnet_data.get("error") else 0
             novelty_info = iptmnet_data.get("novelty") or {}
 
             if sites_found > 0:
                 result.iptmnet_hits = [{"position": position, "source": "iPTMnet"}]
                 iptmnet_status = novelty_info.get("status", "")
 
-                if iptmnet_status and iptmnet_status != "NOVEL":
+                if iptmnet_status and iptmnet_status not in {"NOVEL", "NOT_FOUND", "UNKNOWN"}:
                     result.is_known = True
                     result.evidence_sources.append("iPTMnet")
 
@@ -410,11 +412,11 @@ class PTMValidator:
             result.cross_site_results = cross_result.known_sites
 
             if cross_result.known_sites and not result.is_known:
-                result.novelty = "novel"
-                result.novelty_confidence = "medium"
+                result.novelty = "uncertain"
+                result.novelty_confidence = "low"
             elif not cross_result.known_sites and not result.is_known:
-                result.novelty = "novel"
-                result.novelty_confidence = "high"
+                result.novelty = "uncertain"
+                result.novelty_confidence = "low"
 
         except Exception as e:
             logger.warning(f"Cross-site search failed for {gene} {position}: {e}")
@@ -436,14 +438,8 @@ class PTMValidator:
                     if "PubMed(context)" not in result.evidence_sources:
                         result.evidence_sources.append("PubMed(context)")
 
-                    # If context-aware search found strong evidence, upgrade confidence
-                    if ctx_score >= 3.0 and result.novelty == "novel":
-                        result.novelty = "likely_known"
-                        result.novelty_confidence = "medium"
-                        logger.info(
-                            f"{gene} {position}: Context-aware search found strong evidence "
-                            f"(score={ctx_score:.1f}), upgrading to 'likely_known'"
-                        )
+                    # Relevance is retrieval priority, not proof that this exact
+                    # site is known or novel. Preserve the source evidence only.
 
             except Exception as e:
                 logger.warning(f"Context-aware PubMed search failed for {gene}: {e}")
@@ -455,8 +451,8 @@ class PTMValidator:
             result.evidence_count = len(result.iptmnet_hits) + len(result.uniprot_ptm_sites)
         elif not result.iptmnet_hits and not result.uniprot_ptm_sites:
             if not result.novelty:  # Don't override context-aware upgrade
-                result.novelty = "novel"
-                result.novelty_confidence = "high"
+                result.novelty = "uncertain"
+                result.novelty_confidence = "low"
             result.evidence_count = len(result.pubmed_context_articles)
         else:
             if not result.novelty:
@@ -597,7 +593,7 @@ class PTMValidator:
         # Query iPTMnet for all known sites on this gene (empty position = all sites)
         try:
             all_sites_data = self.mcp.query_iptmnet(
-                gene=gene, position="", organism=self.iptmnet_organism,
+                gene=gene, position="", organism=self.iptmnet_organism, ptm_type=ptm_type, all_sites=True,
             )
             sites_found = all_sites_data.get("sites_found", 0)
             if sites_found > 0:

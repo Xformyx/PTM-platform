@@ -19,7 +19,7 @@ async def query_stringdb(
     redis=None,
     timeout: float = 15.0,
 ) -> dict:
-    cache_key = f"stringdb:{gene_name}:{species}"
+    cache_key = f"stringdb:query_status.v2:{gene_name}:{species}"
 
     if redis:
         cached = await redis.get(cache_key)
@@ -29,9 +29,14 @@ async def query_stringdb(
 
     result = await _fetch_string_info(gene_name, species, timeout)
 
-    if redis:
+    result.setdefault("query_status", "hit" if result.get("interactions") else "unknown")
+    from ptm_shared.evidence_contracts import source_query_record
+    result["source_record"] = source_query_record("stringdb", result["query_status"],
+        query={"gene": gene_name, "scope": species}, payload=result,
+        snapshot="live_query_status.v2")
+    if redis and result["query_status"] in {"hit", "no_hit"}:
         import json
-        await redis.set(cache_key, json.dumps(result))  # permanent cache
+        await redis.set(cache_key, json.dumps(result), ex=604800 if result["query_status"] == "hit" else 3600)  # permanent cache
 
     return result
 
@@ -62,11 +67,11 @@ async def _fetch_string_info(
                 params=params,
             )
             if resp.status_code != 200:
-                return empty
+                return {**empty, "query_status": "rate_limited" if resp.status_code == 429 else "api_error", "http_status": resp.status_code}
 
             data = resp.json()
             if not data:
-                return empty
+                return {**empty, "query_status": "no_hit"}
 
             interactions = []
             total_score = 0.0
@@ -86,4 +91,5 @@ async def _fetch_string_info(
 
     except Exception as e:
         logger.warning(f"STRING-DB fetch failed for {gene_name}: {e}")
-        return empty
+        status = "timeout" if isinstance(e, httpx.TimeoutException) else "parse_failure" if isinstance(e, (ValueError, TypeError, AttributeError)) else "api_error"
+        return {**empty, "query_status": status}

@@ -1910,6 +1910,10 @@ def compute_weighted_kinase_scores(
             }
 
         results[canonical] = {
+            "metric_semantics_version": "tmm_footprint_display.v1",
+            "metric_role": "weighted_substrate_ptm_footprint",
+            "activity_direction": "not_evaluable_without_site_effect_context",
+            "causal_claim_allowed": False,
             "weighted_up_sums": {c: round(v, 4) for c, v in w_up_sums.items()},
             "weighted_down_sums": {c: round(v, 4) for c, v in w_dn_sums.items()},
             "weighted_up_counts": {c: round(v, 3) for c, v in w_up_cnts.items()},

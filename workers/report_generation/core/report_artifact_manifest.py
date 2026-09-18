@@ -11,6 +11,41 @@ from typing import Any, Mapping
 MANIFEST_VERSION = "reader_report_artifact_manifest.v1"
 
 
+def pin_figure_assets(markdown_paths, figure_manifest, output_dir):
+    """Bind markdown figures to content-addressed bytes before sealing/export."""
+    from copy import deepcopy
+    from tempfile import NamedTemporaryFile
+    import os
+    result = deepcopy(figure_manifest or {})
+    replacements = {}
+    for figure in result.get('figures') or []:
+        source = Path(figure.get('image_path') or '')
+        if not source.is_file() or not figure.get('insertion_verified'):
+            continue
+        payload = source.read_bytes()
+        digest = hashlib.sha256(payload).hexdigest()
+        target = Path(output_dir) / ('asset_' + digest + source.suffix)
+        if target.exists() and _sha256(target) != digest:
+            raise ValueError('immutable_figure_asset_integrity_mismatch')
+        if not target.exists():
+            with NamedTemporaryFile(dir=output_dir, delete=False) as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(stream.name, target)
+        replacements[str(source)] = str(target)
+        replacements[source.name] = target.name
+        figure['image_path'] = str(target)
+        figure['sha256'] = digest
+    for path in markdown_paths:
+        path = Path(path)
+        content = path.read_text(encoding='utf-8')
+        for source, target in sorted(replacements.items(), key=lambda item: -len(item[0])):
+            content = content.replace(source, target)
+        path.write_text(content, encoding='utf-8')
+    return result
+
+
 def report_runtime_provenance():
     """Read allowlisted runtime identifiers; never serialize environment secrets."""
     import os
@@ -27,7 +62,15 @@ def report_runtime_provenance():
         dirty = bool(subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root, text=True, stderr=subprocess.DEVNULL, timeout=3).strip())
     except (OSError, subprocess.SubprocessError):
         pass
+    import sys
+    code_hashes = {}
+    for name, module in list(sys.modules.items()):
+        if name.startswith(('ptm_shared.', 'report_generation.', 'preprocessing.', 'rag_enrichment.', 'common.')):
+            path = Path(getattr(module, '__file__', '') or '')
+            if path.is_file() and path.suffix == '.py':
+                code_hashes[name] = _sha256(path)
     return {"git_commit_sha": commit, "tracked_worktree_dirty": dirty,
+            "loaded_python_source_sha256": code_hashes,
             "worker_git_revision": commit or "unknown",
             "worker_image_or_mount_revision": os.getenv("PTM_CONTAINER_DIGEST") or os.getenv("PTM_WORKER_VERSION") or "unknown",
             "container_digest": os.getenv("PTM_CONTAINER_DIGEST"),
@@ -39,7 +82,7 @@ def report_runtime_provenance():
 
 def persist_report_packets(state, output_dir):
     """Snapshot only current-state derived evidence, without discovering old files."""
-    keys = ("authoring_packet", "reader_authoring_plan", "biological_synthesis_packet",
+    keys = ("copilot_review", "drug_repositioning_results", "cross_talk_data", "cascade_context_snapshot", "biological_unit_crosswalk", "source_run_manifest", "source_observation_inventory", "resolved_references", "authoring_packet", "reader_authoring_plan", "biological_synthesis_packet",
             "finding_literature_retrieval", "figure_manifest", "pathway_expansion",
             "ptm_representation_benchmark", "temporal_report_evidence_packet",
             "report_evidence_utilization")
@@ -55,6 +98,8 @@ def persist_report_packets(state, output_dir):
         path = Path(output_dir) / ("report_" + key + ".json")
         path.write_text(json.dumps(value, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         paths[key] = str(path)
+    for condition, path in ((state.get('cascade_context_snapshot') or {}).get('cascade_diagrams') or {}).items():
+        paths['figure:cascade_context:' + str(condition)] = path
     return paths
 
 

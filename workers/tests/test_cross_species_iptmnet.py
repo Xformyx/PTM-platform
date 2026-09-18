@@ -78,7 +78,8 @@ def test_gene_search_entry_urls_preserve_the_live_iptmnet_path_once():
 
 
 def test_live_entry_schema_uses_a_versioned_success_cache_namespace():
-    assert cache_schema_version == "v3"
+    # v4 adds explicit PTM type/all-sites scope; v3 success caches are incompatible.
+    assert cache_schema_version == "v4"
 
 
 def test_entry_urls_drop_in_page_fragments_so_top_hits_are_distinct_proteins():

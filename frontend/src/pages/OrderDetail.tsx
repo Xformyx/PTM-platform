@@ -5309,6 +5309,10 @@ export default function OrderDetail() {
         </TabsContent>
 
         <TabsContent value="results" className="mt-4">
+          <div className="mb-3 rounded border p-3 text-sm">
+            Report: {(order.result_files as any)?.report_release?.status || "legacy_not_gated"}
+            <p className="text-xs text-muted-foreground">{((order.result_files as any)?.report_release?.reason_codes || []).join(", ")}</p>
+          </div>
           {order.result_files && (order.result_files as any)?.all_files?.length > 0 ? (
             <div className="space-y-4">
               {!isRunning && order.status !== "registered" && !isReadOnlyShared && (

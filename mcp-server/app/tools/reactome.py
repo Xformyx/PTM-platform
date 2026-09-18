@@ -32,7 +32,7 @@ async def query_reactome(
       2. Query Reactome /data/mapping/UniProt/{id}/pathways
       3. Return pathway list with signaling relevance tags
     """
-    cache_key = f"reactome:{gene_name}:{organism}"
+    cache_key = f"reactome:query_status.v2:{gene_name}:{organism}"
 
     if redis:
         cached = await redis.get(cache_key)
@@ -42,9 +42,14 @@ async def query_reactome(
 
     result = await _fetch_reactome_pathways(gene_name, organism, timeout)
 
-    if redis:
+    result.setdefault("query_status", "hit" if result.get("pathways") else "unknown")
+    from ptm_shared.evidence_contracts import source_query_record
+    result["source_record"] = source_query_record("reactome", result["query_status"],
+        query={"gene": gene_name, "scope": organism}, payload=result,
+        snapshot="live_query_status.v2")
+    if redis and result["query_status"] in {"hit", "no_hit"}:
         import json
-        await redis.set(cache_key, json.dumps(result))
+        await redis.set(cache_key, json.dumps(result), ex=604800 if result["query_status"] == "hit" else 3600)
 
     return result
 
@@ -75,11 +80,11 @@ async def _fetch_reactome_pathways(
             )
             if resp.status_code != 200:
                 logger.debug(f"Reactome returned {resp.status_code} for {uniprot_id}")
-                return empty
+                return {**empty, "query_status": "rate_limited" if resp.status_code == 429 else "api_error", "http_status": resp.status_code}
 
             raw_pathways = resp.json()
             if not isinstance(raw_pathways, list):
-                return empty
+                return {**empty, "query_status": "parse_failure"}
 
             # Step 3: Parse and classify pathways
             pathways = []
@@ -147,7 +152,7 @@ async def _fetch_reactome_pathways(
 
     except Exception as e:
         logger.warning(f"Reactome fetch failed for {gene_name}: {e}")
-        return empty
+        return {**empty, "query_status": "timeout" if isinstance(e, httpx.TimeoutException) else "parse_failure" if isinstance(e, ValueError) else "api_error"}
 
 
 # Organism → NCBI taxonomy ID mapping for UniProt queries
@@ -164,7 +169,7 @@ def _resolve_organism_id(organism: str) -> str:
     for key, tax_id in _ORGANISM_TAX_MAP.items():
         if key in org_lower:
             return tax_id
-    return "9606"
+    return ""
 
 
 async def _resolve_uniprot_id(
@@ -173,6 +178,8 @@ async def _resolve_uniprot_id(
 ) -> Optional[str]:
     """Resolve a gene name to a UniProt ID for the given organism (reviewed/Swiss-Prot preferred)."""
     tax_id = _resolve_organism_id(organism)
+    if not tax_id:
+        return None
     try:
         # Search UniProt for protein with this gene name in the target organism
         params = {
@@ -205,19 +212,7 @@ async def _resolve_uniprot_id(
             if results:
                 return results[0].get("primaryAccession", "")
 
-        # Fallback 2: If non-human organism, try human ortholog (Reactome is human-centric)
-        if tax_id != "9606":
-            params["query"] = f"gene_exact:{gene_name} AND organism_id:9606 AND reviewed:true"
-            resp = await client.get(
-                f"{UNIPROT_ID_MAP_URL}/uniprotkb/search",
-                params=params,
-                timeout=timeout,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                results = data.get("results", [])
-                if results:
-                    return results[0].get("primaryAccession", "")
+        # Cross-species transfer requires an explicit orthology assertion.
 
     except Exception as e:
         logger.debug(f"UniProt ID resolution failed for {gene_name}: {e}")

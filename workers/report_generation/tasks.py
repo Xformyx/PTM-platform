@@ -34,40 +34,10 @@ _REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
 
 def _resolve_enriched_json_path(order_id: int, rag_dir: Path, explicit: str | None) -> str:
-    """
-    Prefer config path if the file exists; otherwise pick newest enriched_ptm_data*.json
-    under rag_dir. Avoids FileNotFoundError when RAG chained path is stale or volume reset.
-    """
-    if explicit:
-        p = Path(explicit)
-        if p.is_file():
-            return str(p.resolve())
-        logger.warning(
-            "[Order %s] enriched_json_path not found (%s), searching %s",
-            order_id,
-            explicit,
-            rag_dir,
-        )
-    rag_dir = Path(rag_dir)
-    if not rag_dir.is_dir():
-        raise FileNotFoundError(
-            f"[Order {order_id}] RAG output directory missing: {rag_dir}. "
-            "Run preprocessing and RAG Enrichment so the order output folder exists."
-        )
-    candidates = sorted(
-        rag_dir.glob("enriched_ptm_data*.json"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True,
-    )
-    if not candidates:
-        raise FileNotFoundError(
-            f"[Order {order_id}] No enriched_ptm_data*.json under {rag_dir}. "
-            "Run RAG Enrichment to completion (order must reach the JSON save step). "
-            f"Expected file was: {explicit or f'enriched_ptm_data_*.json in {rag_dir}'}"
-        )
-    chosen = candidates[0]
-    logger.info("[Order %s] Using enriched JSON: %s", order_id, chosen)
-    return str(chosen.resolve())
+    """Use the producer's explicit input; never recover a stale task via mtime."""
+    if not explicit or not Path(explicit).is_file():
+        raise FileNotFoundError(f"Order {order_id}: explicit enriched_json_path is missing; rerun RAG enrichment.")
+    return str(Path(explicit).resolve())
 
 
 def _emit_kinase_phase(order_id: int, status: str, detail: str, pct: float = 0):
@@ -442,6 +412,9 @@ def run_report_generation(self, order_id: int, config: dict):
             order_id, rag_dir, config.get("enriched_json_path")
         )
 
+        # Pin bytes before parsing; recheck after generation before any export.
+        from ptm_shared.report_revision import file_sha256
+        input_source_hashes = {str(enriched_path): file_sha256(enriched_path)}
         # Load enriched data
         enriched_data = load_json_first_value(enriched_path)
         logger.info(f"[Order {order_id}] Loaded {len(enriched_data)} enriched PTMs from {enriched_path}")
@@ -485,6 +458,7 @@ def run_report_generation(self, order_id: int, config: dict):
             _vp_path = order_output / _vp_name
             if _vp_path.exists():
                 vector_source_path = str(_vp_path)
+                input_source_hashes[str(_vp_path)] = file_sha256(_vp_path)
                 import csv as _csv
                 with open(_vp_path, "r", encoding="utf-8") as _vf:
                     _reader = _csv.DictReader(_vf, delimiter="\t")
@@ -618,7 +592,51 @@ def run_report_generation(self, order_id: int, config: dict):
                     f"from report_config (auto-pipeline fallback)"
                 )
 
+        source_observation_inventory = None
+        inventory_pointer = order_output / 'observation_inventory_current.json'
+        if inventory_pointer.is_file():
+            inventory_ref = json.loads(inventory_pointer.read_text())
+            inventory_path = order_output / inventory_ref['filename']
+            if not inventory_path.resolve().is_relative_to(order_output.resolve()) or file_sha256(inventory_path) != inventory_ref['sha256']:
+                raise ValueError('source_observation_inventory_integrity_mismatch')
+            source_observation_inventory = json.loads(inventory_path.read_text())
+            input_source_hashes[str(inventory_path)] = inventory_ref['sha256']
+        import hashlib
+        recorded_policies = {row['normalization_policy'] for row in vector_plot_raw_data if row.get('normalization_policy')}
+        if len(recorded_policies) > 1:
+            raise ValueError('mixed_vector_normalization_policies')
+        source_policy = next(iter(recorded_policies), None)
+        if source_policy and config.get('normalization_policy') and source_policy != config['normalization_policy']:
+            raise ValueError('report_config_normalization_differs_from_source')
+        source_design = (source_observation_inventory or {}).get('sample_manifest')
+        configured_design = config.get('sample_manifest') or experimental_context.get('sample_manifest') or {}
+        if source_design and configured_design and source_design.get('samples') != configured_design.get('samples'):
+            raise ValueError('report_design_differs_from_quantified_source')
+        source_run_manifest = {
+            'schema_version': 'report_input_snapshot.v1',
+            'species': experimental_context.get('species') or config.get('species'),
+            'ptm_type': experimental_context.get('ptm_type') or config.get('ptm_type'),
+            'study_context': experimental_context,
+            'sources': {Path(p).name: digest for p, digest in input_source_hashes.items()},
+            'sample_manifest': source_design if source_design is not None else configured_design,
+            'model': config.get('llm_model'), 'provider': config.get('llm_provider'),
+            'collections': config.get('chromadb_collections') or [],
+            'collection_snapshot_status': 'not_recorded',
+            'temporal_payload_sha256': hashlib.sha256(json.dumps(temporal_ptm_protein_analysis_from_db, sort_keys=True, default=str).encode()).hexdigest() if 'temporal_ptm_protein_analysis_from_db' in locals() else None,
+            'normalization_policy': source_policy,
+            'normalization_provenance_status': 'recorded_in_vector' if source_policy else 'legacy_unrecorded',
+            'generation_attempt_id': str(self.request.id),
+        }
+        from ptm_shared.sample_manifest import biological_unit_crosswalk
+        crosswalk = biological_unit_crosswalk(
+            config.get('sample_manifest') or experimental_context.get('sample_manifest'),
+            config.get('secondary_sample_manifest') or experimental_context.get('secondary_sample_manifest'),
+            experimental_context.get('secondary_biological_crosswalk'),
+        )
         initial_state = {
+            "biological_unit_crosswalk": crosswalk,
+            "source_run_manifest": source_run_manifest,
+            "source_observation_inventory": source_observation_inventory,
             "order_id": order_id,
             "enriched_ptm_data": enriched_data,
             "enriched_json_path": enriched_path,
@@ -673,55 +691,29 @@ def run_report_generation(self, order_id: int, config: dict):
         if analysis_mode == "cross_talk":
             logger.info(f"[Order {order_id}] Cross-Talk mode: loading secondary PTM data")
             secondary_ptm_type = config.get("secondary_ptm_type", "ubiquitylation")
-            secondary_output_dir = config.get("secondary_output_dir")
             secondary_enriched_json = config.get("secondary_enriched_json_path")
             secondary_md_path = config.get("secondary_md_report_path", "")
             secondary_tsv_path = config.get("secondary_tsv_data_path", "")
-
-            # Try to find secondary enriched JSON if not explicitly provided
-            if not secondary_enriched_json and secondary_output_dir:
-                sec_dir = Path(secondary_output_dir)
-                sec_candidates = list(sec_dir.glob("enriched_ptm_data_*.json"))
-                if sec_candidates:
-                    secondary_enriched_json = str(sec_candidates[0])
-                    logger.info(f"[Order {order_id}] Found secondary enriched JSON: {secondary_enriched_json}")
-
-            # Also check in the main order output's secondary_ptm subdirectory
-            if not secondary_enriched_json:
-                sec_subdir = order_output / "secondary_ptm"
-                if sec_subdir.exists():
-                    sec_candidates = list(sec_subdir.glob("enriched_ptm_data_*.json"))
-                    if sec_candidates:
-                        secondary_enriched_json = str(sec_candidates[0])
-                        logger.info(f"[Order {order_id}] Found secondary enriched JSON in secondary_ptm/: {secondary_enriched_json}")
 
             # Load secondary enriched data
             secondary_enriched_data = []
             if secondary_enriched_json and Path(secondary_enriched_json).exists():
                 try:
+                    input_source_hashes[str(secondary_enriched_json)] = file_sha256(secondary_enriched_json)
                     secondary_enriched_data = load_json_first_value(secondary_enriched_json)
                     logger.info(f"[Order {order_id}] Loaded {len(secondary_enriched_data)} secondary enriched PTMs")
                 except Exception as sec_err:
                     logger.warning(f"[Order {order_id}] Failed to load secondary enriched JSON: {sec_err}")
 
-            # Find secondary TSV path if not provided
-            if not secondary_tsv_path and secondary_output_dir:
-                sec_dir = Path(secondary_output_dir)
-                sec_suffix = "_ubi" if secondary_ptm_type.startswith("ubiquit") else "_phospho"
-                sec_bio_tsv = sec_dir / f"unified_protein_data_enriched_bio_enriched{sec_suffix}.tsv"
-                if sec_bio_tsv.exists():
-                    secondary_tsv_path = str(sec_bio_tsv)
-                else:
-                    sec_tsv_candidates = list(sec_dir.glob("*bio_enriched*.tsv"))
-                    if sec_tsv_candidates:
-                        secondary_tsv_path = str(sec_tsv_candidates[0])
-
-            # Find secondary MD report if not provided
-            if not secondary_md_path and secondary_output_dir:
-                sec_dir = Path(secondary_output_dir)
-                sec_md_candidates = list(sec_dir.glob("comprehensive_report*.md"))
-                if sec_md_candidates:
-                    secondary_md_path = str(sec_md_candidates[0])
+            # Paths come from the RAG producer or regeneration API. Hash both
+            # inventories before invoking the graph and verify them before export.
+            for role, path in (("secondary_enrichment", secondary_enriched_json),
+                               ("secondary_vector", secondary_tsv_path)):
+                if path:
+                    if not Path(path).is_file():
+                        raise FileNotFoundError("cross_talk_source_unavailable:" + role)
+                    input_source_hashes.setdefault(str(path), file_sha256(path))
+            source_run_manifest['sources'] = {Path(p).name: digest for p, digest in input_source_hashes.items()}
 
             # Build secondary_results dict (mimicking network_results structure)
             secondary_results = {}
@@ -756,7 +748,7 @@ def run_report_generation(self, order_id: int, config: dict):
                 "secondary_ptm_type": secondary_ptm_type,
                 "secondary_md_content": secondary_md_path,
                 "secondary_tsv_path": secondary_tsv_path,
-                "primary_tsv_path": config.get("tsv_data_path", ""),
+                "primary_tsv_path": vector_source_path,
             })
             logger.info(f"[Order {order_id}] Cross-Talk state prepared: secondary_ptm_type={secondary_ptm_type}")
 
@@ -843,6 +835,8 @@ def run_report_generation(self, order_id: int, config: dict):
         graph = build_report_graph()
         final_state = graph.invoke(initial_state)
         abort_if_superseded(order_id)
+        if any(not Path(path).is_file() or file_sha256(path) != digest for path, digest in input_source_hashes.items()):
+            raise ValueError('input_snapshot_changed_during_generation')
 
         # Shadow reports distinguish a retained diagnostic draft from a
         # user-facing final artifact. Re-check after task-level formatting.
@@ -923,6 +917,9 @@ def run_report_generation(self, order_id: int, config: dict):
             if path and Path(path).exists() and str(path).endswith(".md")
         ]
         if reader_authoring_shadow and report_markdown:
+            from report_generation.core.report_artifact_manifest import pin_figure_assets
+            final_state['figure_manifest'] = pin_figure_assets(report_markdown, final_state.get('figure_manifest'), order_output)
+        if reader_authoring_shadow and report_markdown:
             try:
                 prose_trace_path = order_output / "report_prose_trace.json"
                 prose_trace_path.write_text(
@@ -964,6 +961,7 @@ def run_report_generation(self, order_id: int, config: dict):
                     metadata_contract,
                     reader_cards,
                     authoring_plan=final_state.get("reader_authoring_plan"),
+                    required_module_status=(final_state.get("authoring_packet") or {}).get("required_module_status"),
                     generation_failures=list(final_state.get("reader_authoring_fallback_sections") or []) + list(final_state.get("reader_authoring_final_fallback_sections") or []),
                 )
                 for path in report_markdown
@@ -973,7 +971,7 @@ def run_report_generation(self, order_id: int, config: dict):
             })
             postprocess_review_reasons = sorted({
                 code for audit in postprocessed_audits for code in audit.get("review_reason_codes") or []
-            })
+            } | set((final_state.get("report_output_correctness") or {}).get("review_reason_codes") or []))
             if postprocess_reasons:
                 final_state["report_output_correctness"] = {
                     **dict(final_state.get("report_output_correctness") or {}),
@@ -1039,7 +1037,10 @@ def run_report_generation(self, order_id: int, config: dict):
                         "ptm_mode": config.get("ptm_mode"),
                     },
                     temporal_required=not bool(config.get("single_time_point", False)),
-                    derived_packet_paths=persist_report_packets(final_state, order_output),
+                    derived_packet_paths={**persist_report_packets(final_state, order_output),
+                        **{role: initial_state[key] for role, key in (
+                            ("secondary_vector", "secondary_tsv_path"),)
+                           if initial_state.get(key)}},
                     report_mode_contract=report_mode_contract,
                     requested_report_config=requested_report_config,
                     effective_report_config=effective_report_config,
@@ -1060,11 +1061,12 @@ def run_report_generation(self, order_id: int, config: dict):
 
         from report_generation.core.report_finalization import finalize_report_revision
         finalization = finalize_report_revision(
+            register_immutable=True,
             source_paths=final_state.get("report_files") or [], output_dir=order_output,
             correctness=final_state.get("report_output_correctness"), manifest=artifact_manifest,
             figure_manifest=final_state.get("figure_manifest") or {}, reader_mode=reader_authoring_shadow,
             requested_formats=(config.get("report_config") or {}).get("requested_formats", ["docx", "html"]),
-            references=final_state.get("collected_references") or [],
+            references=final_state.get("resolved_references") or [],
             report_mode_contract=report_mode_contract,
             writer_effective_mode=final_state.get("writer_effective_mode"),
             graph_effective_mode=final_state.get("graph_effective_mode"),

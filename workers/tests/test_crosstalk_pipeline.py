@@ -134,28 +134,32 @@ def test_build_crosstalk_data():
     logger.info("TEST 1: build_crosstalk_data")
     logger.info("=" * 60)
 
-    try:
-        from report_generation.core.nodes.crosstalk_node import build_crosstalk_data
-    except ImportError:
-        logger.warning("Cannot import build_crosstalk_data — testing with mock")
-        logger.info("SKIP: build_crosstalk_data not importable in test environment")
-        return None
+    from report_generation.core.nodes.crosstalk_node import build_crosstalk_data
 
     primary = generate_mock_primary_results()
     secondary = generate_mock_secondary_results()
-
-    crosstalk_data = build_crosstalk_data(
-        primary_results=primary,
-        secondary_results=secondary,
-        primary_ptm_type="phosphorylation",
-        secondary_ptm_type="ubiquitylation",
-    )
+    # Exercise the actual worker TSV/network boundary, not the unused tsv_data
+    # field that previously sat behind a swallowed import failure.
+    for results in (primary, secondary):
+        results["networks"] = {"5min": {"non_ptm_nodes": [
+            node for node in results["network"]["nodes"] if node["type"] == "non_ptm"]}}
+    with tempfile.TemporaryDirectory() as directory:
+        primary_path = Path(directory) / "primary.tsv"
+        secondary_path = Path(directory) / "secondary.tsv"
+        primary_path.write_text(primary["tsv_data"])
+        secondary_path.write_text(secondary["tsv_data"])
+        crosstalk_data = build_crosstalk_data(
+            primary_results=primary, secondary_results=secondary,
+            primary_ptm_type="phosphorylation", secondary_ptm_type="ubiquitylation",
+            primary_md_content="", secondary_md_content="",
+            primary_tsv_path=str(primary_path), secondary_tsv_path=str(secondary_path),
+        )
 
     # Validate structure
     assert "dual_ptm_proteins" in crosstalk_data, "Missing dual_ptm_proteins"
     assert "sequential_gating" in crosstalk_data, "Missing sequential_gating"
     assert "shared_nonptm" in crosstalk_data, "Missing shared_nonptm"
-    assert "non_ptm_interactors" in crosstalk_data, "Missing non_ptm_interactors"
+    assert crosstalk_data["source_status"] == {"primary": "processed", "secondary": "processed"}
 
     dual = crosstalk_data["dual_ptm_proteins"]
     logger.info(f"  Dual-PTM proteins found: {len(dual)}")
@@ -164,24 +168,23 @@ def test_build_crosstalk_data():
 
     # Expected: Mapk3, Akt1, Gsk3b, Rps6 should be dual-PTM
     dual_genes = {p["gene"] for p in dual}
-    assert "Mapk3" in dual_genes, "Mapk3 should be dual-PTM"
-    assert "Akt1" in dual_genes, "Akt1 should be dual-PTM"
+    assert "MAPK3" in dual_genes, "Mapk3 should be dual-PTM"
+    assert "AKT1" in dual_genes, "Akt1 should be dual-PTM"
 
     # Mapk3: both up → concordant
-    mapk3 = next(p for p in dual if p["gene"] == "Mapk3")
+    mapk3 = next(p for p in dual if p["gene"] == "MAPK3")
     assert mapk3["pattern"] == "concordant", f"Mapk3 should be concordant, got {mapk3['pattern']}"
 
     # Akt1: phospho up, ubi down → discordant
-    akt1 = next(p for p in dual if p["gene"] == "Akt1")
+    akt1 = next(p for p in dual if p["gene"] == "AKT1")
     assert akt1["pattern"] == "discordant", f"Akt1 should be discordant, got {akt1['pattern']}"
 
     # Shared non-PTM: Hsp90ab1 should be shared
     shared = crosstalk_data["shared_nonptm"]
     logger.info(f"  Shared non-PTM interactors: {shared}")
-    assert "Hsp90ab1" in shared, "Hsp90ab1 should be shared non-PTM interactor"
+    assert "HSP90AB1" in shared, "Hsp90ab1 should be shared non-PTM interactor"
 
     logger.info("  ✓ build_crosstalk_data PASSED")
-    return crosstalk_data
 
 
 # ============================================================================

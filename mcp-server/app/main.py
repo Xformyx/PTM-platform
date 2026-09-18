@@ -283,13 +283,15 @@ class IPTMnetRequest(BaseModel):
     gene: str
     position: str = ""
     organism: str = "Mouse"
+    ptm_type: str = ""
+    all_sites: bool = False
 
 
 @app.post("/tools/iptmnet/search")
 async def tool_iptmnet_search(req: IPTMnetRequest):
     return await query_iptmnet(
         gene=req.gene, position=req.position,
-        organism=req.organism, redis=app.state.redis,
+        organism=req.organism, redis=app.state.redis, ptm_type=req.ptm_type, all_sites=req.all_sites,
     )
 
 
@@ -298,10 +300,12 @@ async def tool_iptmnet_get(
     gene: str,
     position: str = Query("", description="PTM position e.g. S79"),
     organism: str = Query("Mouse", description="Organism name"),
+    ptm_type: str = Query(""),
+    all_sites: bool = Query(False),
 ):
     return await query_iptmnet(
         gene=gene, position=position,
-        organism=organism, redis=app.state.redis,
+        organism=organism, redis=app.state.redis, ptm_type=ptm_type, all_sites=all_sites,
     )
 
 
@@ -310,11 +314,12 @@ async def tool_iptmnet_human_ortholog(
     gene: str,
     position: str = Query("", description="Rat PTM position e.g. S79"),
     organism: str = Query("Rat", description="Source organism name"),
+    ptm_type: str = Query(""),
 ):
     """Human iPTMnet support only when a rat residue aligns in a one-to-one ortholog."""
     return await query_human_ortholog_iptmnet(
         gene=gene, position=position,
-        organism=organism, redis=app.state.redis,
+        organism=organism, redis=app.state.redis, ptm_type=ptm_type,
     )
 
 

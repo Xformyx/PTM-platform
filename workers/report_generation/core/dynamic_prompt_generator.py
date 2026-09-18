@@ -2397,8 +2397,9 @@ def build_tf_activity_inference(
     for tf_entry in inferred_tfs:
         tf_name = tf_entry.get("tf", "")
         if tf_name.upper() in ptm_modified_tfs:
-            tf_entry["cross_validated"] = True
-            tf_entry["validation_type"] = "PTM+NonPTM_convergent"
+            tf_entry["cross_validated"] = False
+            tf_entry["ptm_coobserved"] = True
+            tf_entry["validation_type"] = "PTM_and_target_abundance_coobserved_not_independent_validation"
             cross_validated.append(tf_entry)
         else:
             tf_entry["cross_validated"] = False
@@ -2408,15 +2409,15 @@ def build_tf_activity_inference(
     # --- Step 4: Build LLM context string ---
     lines = [
         "",
-        "## TF ACTIVITY INFERENCE FROM NON-PTM PROTEIN DYNAMICS",
+        "## TF TARGET SET ENRICHMENT FROM NON-PTM PROTEIN DYNAMICS",
         f"(DoRothEA + TRRUST | species={species} | {len(all_changed)} changed proteins analyzed)",
         "",
     ]
 
     if cross_validated:
-        lines.append("### CROSS-VALIDATED TFs (PTM modification + target gene expression convergent)")
+        lines.append("### TFs WITH COOBSERVED PTM AND TARGET PROTEIN ABUNDANCE CHANGES")
         lines.append("These TFs are BOTH post-translationally modified in the PTM data AND their")
-        lines.append("known target genes show coordinated abundance changes - HIGH CONFIDENCE axes.")
+        lines.append("known target proteins show abundance changes; this is not independent validation or activity direction.")
         lines.append("")
         for tf in cross_validated[:8]:
             pval_str = f"{tf['pvalue']:.2e}" if tf.get('pvalue', 1) < 0.05 else f"{tf.get('pvalue', 1):.2e}"
@@ -2435,9 +2436,9 @@ def build_tf_activity_inference(
         sig_nonptm = [t for t in nonptm_only_tfs if t.get("fdr", 1) < 0.1]
         if sig_nonptm:
             lines.append("### NON-PTM INFERRED TFs (target gene evidence only, no PTM on TF detected)")
-            lines.append("These TFs show target gene activation but NO detectable PTM modification.")
-            lines.append("Possible explanations: (1) PTM below detection limit, (2) non-PTM activation,")
-            lines.append("(3) constitutively active TF with newly synthesized targets.")
+            lines.append("These target sets are enriched among changed proteins; the TF itself lacks a matched PTM observation.")
+            lines.append("Possible explanations include detection limits and changes in protein abundance.")
+            lines.append("The enrichment test does not identify the responsible regulatory mechanism.")
             lines.append("")
             for tf in sig_nonptm[:5]:
                 pval_str = f"{tf['pvalue']:.2e}"
@@ -2450,26 +2451,26 @@ def build_tf_activity_inference(
 
     # Temporal resolution
     if tf_result_temporal:
-        lines.append("### TEMPORAL RESOLUTION OF TF ACTIVITY")
+        lines.append("### TEMPORAL DISTRIBUTION OF TARGET SET ENRICHMENT")
         if "early" in tf_result_temporal:
             early_tfs = tf_result_temporal["early"].get("inferred_tfs", [])
             sig_early = [t for t in early_tfs if t.get("fdr", 1) < 0.1]
             if sig_early:
                 lines.append(f"  Early responders (<=15min): {', '.join(t['tf'] for t in sig_early[:5])}")
-                lines.append("  -> Likely post-translational activation (no time for transcription)")
+                lines.append("  -> Timing alone does not distinguish transcription, translation, or protein turnover.")
         if "late" in tf_result_temporal:
             late_tfs = tf_result_temporal["late"].get("inferred_tfs", [])
             sig_late = [t for t in late_tfs if t.get("fdr", 1) < 0.1]
             if sig_late:
                 lines.append(f"  Late responders (>15min): {', '.join(t['tf'] for t in sig_late[:5])}")
-                lines.append("  -> Likely transcriptional program activation")
+                lines.append("  -> Later abundance changes do not establish transcriptional activation.")
         lines.append("")
 
     lines.append("### INTERPRETATION GUIDANCE")
-    lines.append("- Cross-validated TFs represent HIGH-CONFIDENCE signaling axes")
-    lines.append("- Use temporal resolution to distinguish post-translational vs transcriptional mechanisms")
-    lines.append("- Discuss PTM->TF->target gene cascades as complete signaling narratives")
-    lines.append("- Discordant cases (PTM present but no target activation) suggest non-transcriptional PTM functions")
+    lines.append("- Coobservations are not independent perturbation evidence.")
+    lines.append("- Treat temporal enrichment as a descriptive association.")
+    lines.append("- TF activity direction and causal edges require separate site-function and perturbation evidence.")
+    lines.append("- Missing enrichment is not evidence of absent TF function.")
     lines.append("")
 
     llm_context = "\n".join(lines)
@@ -2480,9 +2481,13 @@ def build_tf_activity_inference(
         "n_changed_proteins": len(all_changed),
         "n_early_changed": len(early_changed),
         "n_late_changed": len(late_changed),
-        "all_inferred_tfs": inferred_tfs[:15],
-        "cross_validated_tfs": cross_validated[:10],
-        "nonptm_only_tfs": [t for t in nonptm_only_tfs if t.get("fdr", 1) < 0.1][:10],
+        "all_inferred_tfs": tf_result_all.get("full_enrichment_results", inferred_tfs),
+        "cross_validated_tfs": [],
+        "ptm_coobserved_tfs": cross_validated,
+        "schema_version": "tf_target_report_context.v2",
+        "metric_role": "target_set_overrepresentation",
+        "activity_direction": "not_evaluable",
+        "nonptm_only_tfs": nonptm_only_tfs,
         "temporal_inference": {
             "early": tf_result_temporal.get("early", {}).get("inferred_tfs", [])[:10],
             "late": tf_result_temporal.get("late", {}).get("inferred_tfs", [])[:10],

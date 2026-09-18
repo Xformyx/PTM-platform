@@ -16,8 +16,7 @@ from common.llm_client import LLMClient
 from common.temporal_utils import tp_to_minutes, format_condition_display_name
 from report_generation.core.rag_retriever import RAGRetriever
 from report_generation.core.temporal_analysis import (
-    build_nonptm_temporal_analysis,
-    build_ptm_protein_timelag_analysis,
+    observed_time_minutes,
     build_signal_propagation_json_from_crosstalk,
 )
 from report_generation.core.report_utils import (
@@ -59,24 +58,8 @@ def _parse_timepoint(tp_str: str) -> float:
 # ---------------------------------------------------------------------------
 
 def _infer_gating_mechanism(leading_ptm: str, lagging_ptm: str, time_lag: float) -> str:
-    """Infer the likely mechanism behind sequential PTM gating."""
-    leading = leading_ptm.lower()
-    lagging = lagging_ptm.lower()
-    if leading in ("phosphorylation", "phos") and lagging in ("ubiquitylation", "ubiquitination", "ub"):
-        if time_lag <= 5:
-            return "Phosphodegron (rapid phosphorylation-triggered ubiquitylation)"
-        elif time_lag <= 30:
-            return "Kinase-E3 ligase relay (phosphorylation primes E3 ligase recognition)"
-        else:
-            return "Transcriptional reprogramming (phosphorylation activates TF → new E3 expression)"
-    elif leading in ("ubiquitylation", "ubiquitination", "ub") and lagging in ("phosphorylation", "phos"):
-        if time_lag <= 5:
-            return "Ubiquitin-dependent kinase activation (rapid ubiquitin signaling)"
-        elif time_lag <= 30:
-            return "Proteasomal processing activates kinase cascade"
-        else:
-            return "Ubiquitin-mediated protein turnover alters kinase substrate availability"
-    return f"Sequential {leading}→{lagging} regulation (time lag: {time_lag:.0f} min)"
+    """Compatibility label; temporal order does not identify a mechanism."""
+    return "Mechanism unknown; observed timing alone does not establish causal gating."
 
 
 # ---------------------------------------------------------------------------
@@ -114,87 +97,87 @@ def build_crosstalk_data(
         "secondary_summary": {},
     }
 
-    # ── Parse TSV files ──────────────────────────────────────────────────
-    def _parse_tsv_proteins(tsv_path: Optional[str]) -> dict:
+    crosstalk.update(schema_version="cross_ptm_observation.v2",
+                     analysis_policy="unambiguous_form_descriptive_comparison.v1",
+                     source_inventory={}, source_status={},
+                     score_semantics="display_priority_not_statistical_significance")
+
+    def _parse_tsv_proteins(tsv_path, source_label):
+        import csv
+        from ptm_shared.vector_projection import project_report_vector_row
+        from ptm_shared.de_novo_representation import is_de_novo_representation
         proteins = {}
+        inventory = crosstalk["source_inventory"][source_label] = []
         if not tsv_path or not os.path.exists(tsv_path):
+            crosstalk["source_status"][source_label] = "unavailable"
             return proteins
         try:
-            import csv
-            with open(tsv_path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f, delimiter="\t")
-                for row in reader:
-                    gene = row.get("Gene", row.get("gene", "")).strip()
+            with open(tsv_path, "r", encoding="utf-8") as stream:
+                for row_number, raw in enumerate(csv.DictReader(stream, delimiter="\t"), 2):
+                    row = dict(raw)
+                    row.setdefault("Gene.Name", row.get("Gene", row.get("gene", "")))
+                    row.setdefault("PTM_Position", row.get("Site", row.get("site", "")))
+                    row.setdefault("Condition", row.get("Timepoint", row.get("timepoint", "")))
+                    projected = project_report_vector_row(row)
+                    value = projected.get("ptm_protein_adjusted_log2fc")
+                    reason = None
+                    if is_de_novo_representation(row):
+                        value, reason = None, "nonconventional_detection_context"
+                    elif value is None:
+                        reason = "adjusted_contrast_unavailable"
+                    # Preserve even no-call rows; do not manufacture neutral zeros.
+                    observation = {"row_number": row_number, "source_record": raw,
+                                   "projection": projected, "value": value,
+                                   "evaluation_status": "eligible" if value is not None else "not_evaluable",
+                                   "reason": reason}
+                    inventory.append(observation)
+                    gene = projected["gene"].strip()
                     if not gene:
+                        observation.update(evaluation_status="not_evaluable", reason="gene_unavailable")
                         continue
-                    gene_upper = gene.upper()
-                    site = row.get("Site", row.get("site", "")).strip()
-                    tp_str = row.get("Timepoint", row.get("timepoint", row.get("Condition", ""))).strip()
-                    ptm_relative_log2fc = _safe_float(
-                        row.get("PTM_Relative_Log2FC", row.get("ptm_relative_log2fc", 0))
-                    )
-                    protein_log2fc = _safe_float(
-                        row.get("Protein_Log2FC", row.get("protein_log2fc", 0))
-                    )
-
-                    if gene_upper not in proteins:
-                        proteins[gene_upper] = {
-                            "original_name": gene,
-                            "timepoints": {},
-                            "ptm_sites": set(),
-                            "all_sites_data": {},
-                            "node_type_history": {},
-                        }
-
+                    item = proteins.setdefault(gene.upper(), {"original_name": gene,
+                        "timepoints": {}, "ptm_sites": set(), "all_sites_data": {},
+                        "node_type_history": {}, "observations_by_condition": {}})
+                    site, condition = projected["position"], projected["condition"]
                     if site:
-                        proteins[gene_upper]["ptm_sites"].add(site)
-
-                    # Per-site temporal data
-                    if site:
-                        if site not in proteins[gene_upper]["all_sites_data"]:
-                            proteins[gene_upper]["all_sites_data"][site] = {}
-                        existing_site_val = proteins[gene_upper]["all_sites_data"][site].get(tp_str, 0)
-                        if abs(ptm_relative_log2fc) > abs(existing_site_val):
-                            proteins[gene_upper]["all_sites_data"][site][tp_str] = ptm_relative_log2fc
-
-                    # Gene-level temporal data
-                    state = "active" if ptm_relative_log2fc > 0 else "inhibited"
-                    if tp_str not in proteins[gene_upper]["timepoints"]:
-                        proteins[gene_upper]["timepoints"][tp_str] = {
-                            "ptm_log2fc": ptm_relative_log2fc,
-                            "protein_log2fc": protein_log2fc,
-                            "state": state,
-                            "site_count": 1,
-                        }
-                        proteins[gene_upper]["node_type_history"][tp_str] = state
-                    else:
-                        existing = proteins[gene_upper]["timepoints"][tp_str]
-                        if abs(ptm_relative_log2fc) > abs(existing["ptm_log2fc"]):
-                            existing["ptm_log2fc"] = ptm_relative_log2fc
-                            existing["state"] = state
-                            existing["protein_log2fc"] = protein_log2fc
-                            proteins[gene_upper]["node_type_history"][tp_str] = state
-                        existing["site_count"] = existing.get("site_count", 1) + 1
-        except Exception as e:
-            logger.error(f"Error parsing TSV file {tsv_path}: {e}")
+                        item["ptm_sites"].add(site)
+                    item["observations_by_condition"].setdefault(condition, []).append(observation)
+            for item in proteins.values():
+                for condition, observations in item["observations_by_condition"].items():
+                    # A gene is not a quantitative estimator over different forms.
+                    # Exact repeat rows do not increase biological n.
+                    unique = {json.dumps(o["source_record"], sort_keys=True): o for o in observations}
+                    eligible = [o for o in unique.values() if o["value"] is not None]
+                    if len(unique) != 1 or not eligible:
+                        for observation in observations:
+                            if observation["value"] is not None:
+                                observation.update(evaluation_status="not_evaluable",
+                                                   reason="multiple_forms_or_conflicting_rows_at_gene_condition")
+                        continue
+                    observation = eligible[0]
+                    value, projected = observation["value"], observation["projection"]
+                    item["timepoints"][condition] = {"ptm_log2fc": value,
+                        "protein_log2fc": projected.get("protein_log2fc"),
+                        "state": "up" if value > 0 else "down" if value < 0 else "neutral",
+                        "site_count": 1, "feature_id": projected.get("feature_id")}
+                    item["all_sites_data"].setdefault(projected["position"], {})[condition] = value
+            crosstalk["source_status"][source_label] = "processed"
+        except (OSError, csv.Error, ValueError, TypeError) as error:
+            crosstalk["source_status"][source_label] = "parse_error"
+            logger.error("Cross-talk source parsing failed: %s", type(error).__name__)
+            return {}
         return proteins
 
-    def _safe_float(val, default=0.0):
-        try:
-            return float(val) if val else default
-        except (ValueError, TypeError):
-            return default
-
     # ── Step 1: Parse TSV files as PRIMARY data source ────────────────────
-    primary_proteins = _parse_tsv_proteins(primary_tsv_path)
-    secondary_proteins = _parse_tsv_proteins(secondary_tsv_path)
+    primary_proteins = _parse_tsv_proteins(primary_tsv_path, "primary")
+    secondary_proteins = _parse_tsv_proteins(secondary_tsv_path, "secondary")
     logger.info(f"[TSV] Primary proteins: {len(primary_proteins)}, Secondary proteins: {len(secondary_proteins)}")
 
     # ── Step 2: Fallback to network nodes if TSV is not available ─────────
-    if not primary_proteins:
+    if not primary_proteins and crosstalk["source_status"]["primary"] == "unavailable":
         logger.warning("[TSV] Primary TSV not available, falling back to network nodes")
         primary_proteins = _extract_proteins_from_network(primary_results)
-    if not secondary_proteins:
+    if not secondary_proteins and crosstalk["source_status"]["secondary"] == "unavailable":
         logger.warning("[TSV] Secondary TSV not available, falling back to network nodes")
         secondary_proteins = _extract_proteins_from_network(secondary_results)
 
@@ -210,7 +193,7 @@ def build_crosstalk_data(
     shared_genes = set(primary_proteins.keys()) & set(secondary_proteins.keys())
     logger.info(f"[CrossTalk] Dual-PTM proteins found: {len(shared_genes)}")
 
-    threshold = 0.0  # activation threshold
+    threshold = 0.0  # descriptive sign only, not activity or significance
 
     for gene in sorted(shared_genes):
         p_data = primary_proteins[gene]
@@ -233,7 +216,7 @@ def build_crosstalk_data(
             "neutral_count": 0,
             "meaningful_comparisons": 0,
             "concordant_ratio": 0.0,
-            "pattern": "neutral",
+            "pattern": "not_evaluable" if not shared_tps else "neutral",
             "is_network_hub_primary": p_data.get("is_network_hub", False),
             "is_network_hub_secondary": s_data.get("is_network_hub", False),
         }
@@ -292,14 +275,16 @@ def build_crosstalk_data(
         p_first_active = None
         for tp in sorted(p_tps, key=_parse_timepoint):
             tp_data = p_data.get("timepoints", {}).get(tp, {})
-            if abs(tp_data.get("ptm_log2fc", 0)) >= threshold:
+            if (observed_time_minutes({"condition": tp}) is not None
+                    and abs(tp_data.get("ptm_log2fc", 0)) > threshold):
                 p_first_active = tp
                 break
 
         s_first_active = None
         for tp in sorted(s_tps, key=_parse_timepoint):
             tp_data = s_data.get("timepoints", {}).get(tp, {})
-            if abs(tp_data.get("ptm_log2fc", 0)) >= threshold:
+            if (observed_time_minutes({"condition": tp}) is not None
+                    and abs(tp_data.get("ptm_log2fc", 0)) > threshold):
                 s_first_active = tp
                 break
 
@@ -312,6 +297,9 @@ def build_crosstalk_data(
                 lagging_ptm = secondary_ptm_type if p_first_min < s_first_min else primary_ptm_type
                 gating_entry = {
                     "gene": gene,
+                    "evidence_role": "temporal_observation",
+                    "causal_status": "not_evaluated",
+                    "estimator": "first_sampled_nonzero_contrast.v1",
                     "leading_ptm": leading_ptm,
                     "lagging_ptm": lagging_ptm,
                     "time_lag_minutes": time_lag,
@@ -373,17 +361,21 @@ def build_crosstalk_data(
             "secondary_protein_temporal": {},
             "max_primary_change": 0.0,
             "max_secondary_change": 0.0,
-            "response_pattern": "stable",
+            "response_pattern": "not_evaluable",
         }
         p_data = primary_proteins.get(nonptm_gene, {})
         for tp, tp_data in p_data.get("timepoints", {}).items():
-            plog2fc = tp_data.get("protein_log2fc", 0)
+            plog2fc = tp_data.get("protein_log2fc")
+            if plog2fc is None:
+                continue
             detail["primary_protein_temporal"][tp] = plog2fc
             if abs(plog2fc) > abs(detail["max_primary_change"]):
                 detail["max_primary_change"] = plog2fc
         s_data = secondary_proteins.get(nonptm_gene, {})
         for tp, tp_data in s_data.get("timepoints", {}).items():
-            plog2fc = tp_data.get("protein_log2fc", 0)
+            plog2fc = tp_data.get("protein_log2fc")
+            if plog2fc is None:
+                continue
             detail["secondary_protein_temporal"][tp] = plog2fc
             if abs(plog2fc) > abs(detail["max_secondary_change"]):
                 detail["max_secondary_change"] = plog2fc
@@ -417,9 +409,11 @@ def build_crosstalk_data(
         crosstalk["shared_nonptm_details"].append(detail)
 
     # ── Step 7c: PTM→Protein time lag analysis ────────────────────────────
-    crosstalk["ptm_protein_timelags"] = build_ptm_protein_timelag_analysis(
-        primary_proteins, secondary_proteins, primary_ptm_type, secondary_ptm_type
-    )
+    # The single-PTM legacy helper accepts networks, not these form inventories,
+    # and emits inferred causal prose. Keep this distinct analysis unavailable.
+    crosstalk["ptm_protein_timelags"] = []
+    crosstalk["ptm_protein_timelag_status"] = "not_evaluable_no_bound_replicate_analysis"
+
 
     # ── Step 8: Significance scoring and sorting ──────────────────────────
     for dp in crosstalk["dual_ptm_proteins"]:
@@ -467,32 +461,38 @@ def build_crosstalk_data(
 
 def _extract_proteins_from_network(results: dict) -> dict:
     """Fallback: Extract protein data from network analysis results."""
+    import math
+    from collections import defaultdict
+    from ptm_shared.de_novo_representation import is_de_novo_representation
+    grouped = defaultdict(list)
     proteins = {}
-    for tp, net in results.get("networks", {}).items():
-        if not isinstance(net, dict):
+    for tp, network in (results.get("networks") or {}).items():
+        if not isinstance(network, dict):
             continue
-        for node_type in ["active_nodes", "inhibited_nodes"]:
-            for node in net.get(node_type, []):
-                gene = node.get("gene", node.get("gene_name", node.get("name", node.get("id", ""))))
-                if not gene:
-                    continue
-                gene = gene.strip().upper()
-                if gene not in proteins:
-                    proteins[gene] = {
-                        "original_name": gene,
-                        "timepoints": {},
-                        "ptm_sites": set(),
-                        "node_type_history": {},
-                    }
-                site = node.get("site", "")
-                if site:
-                    proteins[gene]["ptm_sites"].add(site)
-                proteins[gene]["timepoints"][tp] = {
-                    "ptm_log2fc": node.get("value", node.get("ptm_log2fc", node.get("ub_log2fc", 0))),
-                    "protein_log2fc": node.get("protein_log2fc", 0),
-                    "state": node.get("state", node_type.replace("_nodes", "")),
-                }
-                proteins[gene]["node_type_history"][tp] = node_type.replace("_nodes", "")
+        for kind in ("active_nodes", "inhibited_nodes"):
+            for node in network.get(kind, []):
+                gene = str(node.get("gene") or node.get("gene_name") or node.get("name") or node.get("id") or "").strip().upper()
+                if gene:
+                    grouped[(gene, tp)].append(node)
+    for (gene, tp), rows in sorted(grouped.items()):
+        item = proteins.setdefault(gene, {"original_name": gene, "timepoints": {},
+            "ptm_sites": set(), "node_type_history": {}, "source_nodes": [], "all_sites_data": {}})
+        item["source_nodes"].extend(rows)
+        item["ptm_sites"].update(str(r["site"]) for r in rows if r.get("site"))
+        unique = {json.dumps(r, sort_keys=True, default=str): r for r in rows}
+        if len(unique) != 1:
+            continue
+        row = next(iter(unique.values()))
+        if is_de_novo_representation(row):
+            continue
+        try:
+            value = float(row.get("value", row.get("ptm_log2fc", row.get("ub_log2fc"))))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(value):
+            continue
+        item["timepoints"][tp] = {"ptm_log2fc": value, "protein_log2fc": None,
+                                  "state": "up" if value > 0 else "down" if value < 0 else "neutral"}
     return proteins
 
 
@@ -575,7 +575,7 @@ def _build_whitelist_text(crosstalk_data: dict) -> str:
 # Main: run_crosstalk_analysis (state-based node entry point)
 # ---------------------------------------------------------------------------
 
-def run_crosstalk_analysis(state: dict) -> dict:
+def run_crosstalk_analysis(state: dict, *, analysis_only=False) -> dict:
     """
     Run Cross-Talk analysis as a pipeline node.
     Expects state to contain primary and secondary analysis results.
@@ -602,9 +602,10 @@ def run_crosstalk_analysis(state: dict) -> dict:
     secondary_md_content = state.get("secondary_md_content", "")
     secondary_tsv_path = state.get("secondary_tsv_path")
 
-    if not secondary_results:
+    if not secondary_results and not secondary_tsv_path:
         logger.warning("No secondary results provided for Cross-Talk analysis")
-        state["crosstalk_data"] = {}
+        state["crosstalk_data"] = {"evaluation_status": "not_evaluable", "reason": "secondary_or_primary_data_unavailable"}
+        state["cross_talk_data"] = state["crosstalk_data"]
         state["crosstalk_report"] = ""
         return state
 
@@ -622,6 +623,15 @@ def run_crosstalk_analysis(state: dict) -> dict:
         primary_tsv_path=primary_tsv_path,
         secondary_tsv_path=secondary_tsv_path,
     )
+    crosstalk_data.update(evaluation_status='computed' if all(
+        status == 'processed' for status in crosstalk_data.get('source_status', {}).values()) else 'not_evaluable', evidence_role='descriptive_observation',
+        biological_unit_crosswalk=state.get('biological_unit_crosswalk') or {'status': 'pairing_not_declared'},
+        required_limitations=['Concordance and candidate temporal ordering do not establish direct cross-talk, causal gating, or enzyme activity.',
+                              'Replicate-level independence is not established by overlapping protein names.'])
+    if analysis_only:
+        # The main graph uses the common section packet and writer after this
+        # deterministic analysis; the legacy companion writer is not invoked.
+        return {'cross_talk_data': crosstalk_data}
 
     n_dual = len(crosstalk_data["dual_ptm_proteins"])
     n_conc = len(crosstalk_data["concordant_pairs"])
@@ -732,24 +742,10 @@ def run_crosstalk_analysis(state: dict) -> dict:
         else "None identified"
     )
 
-    # Non-PTM temporal analysis and PTM→Protein timelag for prompts
-    nonptm_temporal_text = ""
-    try:
-        nonptm_temporal_text = build_nonptm_temporal_analysis(crosstalk_data)
-    except Exception as e:
-        logger.warning(f"Non-PTM temporal analysis failed: {e}")
-
-    ptm_timelag_text = ""
-    try:
-        ptm_timelag_text = build_ptm_protein_timelag_analysis(
-            {}, {}, primary_ptm_type, secondary_ptm_type,
-            crosstalk_data=crosstalk_data
-        )
-        if isinstance(ptm_timelag_text, list):
-            # If it returned a list (from build function), format it
-            ptm_timelag_text = json.dumps(ptm_timelag_text[:10], indent=2)
-    except Exception as e:
-        logger.warning(f"PTM timelag analysis failed: {e}")
+    # Legacy companion prompts consume the same computed observation scope.
+    nonptm_temporal_text = json.dumps(crosstalk_data.get("shared_nonptm_details") or [], ensure_ascii=False)
+    ptm_timelag_text = json.dumps({"status": crosstalk_data.get("ptm_protein_timelag_status"),
+        "limitation": "No replicate-bound PTM-to-protein causal time-lag analysis was computed."})
 
     # MD file context
     primary_md_file_context = primary_md_content[:2000] if primary_md_content else ""

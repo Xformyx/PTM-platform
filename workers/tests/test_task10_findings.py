@@ -50,8 +50,8 @@ def test_t10_11_literature_agreement_and_opposition_keep_source_and_conditions()
     assert all(c["claim_scope"] == "literature_context" and c["citation_id"] for c in comparison["comparisons"])
     assert all(c["condition_differences"] for c in comparison["comparisons"])
     prose, audit = validate_and_repair_sections({"discussion": render_reader_section_fallback("discussion", packet)}, packet)
-    assert "agreed with" in prose["discussion"] and "differed from" in prose["discussion"]
-    assert "different cell model" in prose["discussion"]
+    assert "agreed with" not in prose["discussion"] and "differed from" not in prose["discussion"]
+    assert "different cell model" in comparison["comparisons"][0]["condition_differences"]
     assert not any("withhold_uncited_literature_sentence" in e["validator_action"] for e in audit["entries"])
     empty = build_authoring_packet({**state, "literature_retrieval_status": "completed"}, references=[])
     # A global completion flag does not prove this feature was searched.

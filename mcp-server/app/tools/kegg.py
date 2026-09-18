@@ -17,7 +17,7 @@ async def query_kegg(
     redis=None,
     timeout: float = 15.0,
 ) -> dict:
-    cache_key = f"kegg:{gene_name}:{organism}"
+    cache_key = f"kegg:query_status.v2:{gene_name}:{organism}"
 
     if redis:
         cached = await redis.get(cache_key)
@@ -27,9 +27,14 @@ async def query_kegg(
 
     result = await _fetch_kegg_info(gene_name, organism, timeout)
 
-    if redis:
+    result.setdefault("query_status", "hit" if result.get("pathways") else "unknown")
+    from ptm_shared.evidence_contracts import source_query_record
+    result["source_record"] = source_query_record("kegg", result["query_status"],
+        query={"gene": gene_name, "scope": organism}, payload=result,
+        snapshot="live_query_status.v2")
+    if redis and result["query_status"] in {"hit", "no_hit"}:
         import json
-        await redis.set(cache_key, json.dumps(result))  # permanent cache
+        await redis.set(cache_key, json.dumps(result), ex=604800 if result["query_status"] == "hit" else 3600)  # permanent cache
 
     return result
 
@@ -44,8 +49,10 @@ async def _fetch_kegg_info(
         async with httpx.AsyncClient(timeout=timeout) as client:
             # Step 1: Find KEGG gene ID
             resp = await client.get(f"{BASE_URL}/find/{organism}/{gene_lower}")
-            if resp.status_code != 200 or not resp.text.strip():
-                return empty
+            if resp.status_code != 200:
+                return {**empty, "query_status": "rate_limited" if resp.status_code == 429 else "api_error", "http_status": resp.status_code}
+            if not resp.text.strip():
+                return {**empty, "query_status": "no_hit"}
 
             kegg_id = None
             for line in resp.text.strip().split("\n"):
@@ -65,8 +72,10 @@ async def _fetch_kegg_info(
 
             # Step 2: Get pathway links
             resp2 = await client.get(f"{BASE_URL}/link/pathway/{kegg_id}")
-            if resp2.status_code != 200 or not resp2.text.strip():
-                return empty
+            if resp2.status_code != 200:
+                return {**empty, "query_status": "rate_limited" if resp2.status_code == 429 else "api_error", "http_status": resp2.status_code}
+            if not resp2.text.strip():
+                return {**empty, "query_status": "no_hit"}
 
             pathway_ids = []
             for line in resp2.text.strip().split("\n"):
@@ -87,7 +96,7 @@ async def _fetch_kegg_info(
             # Chemokine signaling, etc. in Figure 1.
             MAX_PATHWAYS_PER_GENE = 15
             pathways = []
-            for pid in pathway_ids[:MAX_PATHWAYS_PER_GENE]:
+            for pid in pathway_ids:
                 resp3 = await client.get(f"{BASE_URL}/get/{pid}")
                 if resp3.status_code == 200:
                     name = ""
@@ -130,4 +139,4 @@ async def _fetch_kegg_info(
 
     except Exception as e:
         logger.warning(f"KEGG fetch failed for {gene_name}: {e}")
-        return empty
+        return {**empty, "query_status": "timeout" if isinstance(e, httpx.TimeoutException) else "api_error"}

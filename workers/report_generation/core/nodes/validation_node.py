@@ -54,12 +54,13 @@ def run_validation(state: dict) -> dict:
         hyp["validation"] = {
             "supporting_evidence": supporting,
             "contradicting_evidence": contradicting,
-            "validity_score": round(validity, 2),
+            "validity_score": None,
+            "source_faithfulness_status": "requires_verification",
+            "independent_scientific_validation": "not_performed",
             "evidence_count": len(evidence),
             "rag_available": rag_available,
         }
-        hyp["confidence"] = round(hyp.get("confidence", 0.5) * validity, 2)
-        hyp["status"] = "validated"
+        hyp["status"] = "literature_review_pending" if evidence else "not_evaluable"
         return idx, hyp
 
     workers = min(_LLM_WORKERS, n)
@@ -76,11 +77,11 @@ def run_validation(state: dict) -> dict:
                 cb(pct, f"Validated {done}/{n} hypotheses")
 
     validated = [results_map[i] for i in range(n)]
-    validated.sort(key=lambda h: h.get("confidence", 0), reverse=True)
+    validated.sort(key=lambda h: str(h.get("id") or ""))
 
     if cb:
-        high = sum(1 for h in validated if h["confidence"] >= 0.5)
-        cb(55, f"Validation complete: {high}/{len(validated)} high-confidence")
+        reviewed = sum(1 for h in validated if h.get("source_faithfulness_status") == "requires_verification")
+        cb(55, f"Literature review complete: {reviewed}/{len(validated)} require source verification")
 
     return {"validated_hypotheses": validated}
 
@@ -124,16 +125,5 @@ Reply with exactly one word: SUPPORTING, CONTRADICTING, or NEUTRAL"""
 
 
 def _classify_rule_based(evidence_text: str, condition: str, prediction: str) -> str:
-    """Simple keyword-based classification fallback."""
-    text = evidence_text.lower()
-    positive_words = ["activates", "promotes", "enhances", "increases", "upregulates", "induces", "phosphorylates"]
-    negative_words = ["inhibits", "suppresses", "decreases", "reduces", "blocks", "attenuates"]
-
-    pos_score = sum(1 for w in positive_words if w in text)
-    neg_score = sum(1 for w in negative_words if w in text)
-
-    if pos_score > neg_score:
-        return "supporting"
-    elif neg_score > pos_score:
-        return "contradicting"
+    """Word counts cannot test whether a source supports a particular hypothesis."""
     return "neutral"

@@ -75,7 +75,10 @@ async def query_kea3(
 
     # Cache key
     sorted_genes = sorted(normalized_genes)
-    cache_key = f"kea3:{':'.join(sorted_genes[:20])}"
+    from ptm_shared.evidence_contracts import source_cache_key
+    top_n = max(0, int(top_n))
+    cache_key = source_cache_key("kea3", genes=sorted_genes, top_n=top_n,
+                                 parser="kea3_response.v2", endpoint=KEA3_API_URL)
     if redis:
         try:
             import json
@@ -106,11 +109,15 @@ async def query_kea3(
                 timeout=aiohttp.ClientTimeout(total=60),
             ) as resp:
                 if resp.status != 200:
+                    result['query_status'] = 'rate_limited' if resp.status == 429 else 'api_error'
                     result["error"] = f"KEA3 returned {resp.status}"
                     return result
 
                 import json
                 data = await resp.json(content_type=None)
+                result['full_source_response'] = data
+                result['available_libraries'] = sorted(data) if isinstance(data, dict) else []
+                result['species_scope'] = 'library_gene_symbols_orthology_not_verified'
 
                 # Parse integrated ranking (MeanRank)
                 integrated = data.get("Integrated--meanRank", [])
@@ -149,12 +156,18 @@ async def query_kea3(
 
     except Exception as e:
         logger.warning(f"KEA3 query failed: {e}")
+        import asyncio
+        result['query_status'] = 'timeout' if isinstance(e, asyncio.TimeoutError) else 'parse_failure' if isinstance(e, (ValueError, TypeError, AttributeError)) else 'api_error'
         result["error"] = str(e)
 
+    result.setdefault('query_status', 'hit' if result['top_kinases'] else 'no_hit')
+    from ptm_shared.evidence_contracts import source_query_record
+    result['source_record'] = source_query_record('kea3', result['query_status'],
+        query={'genes': sorted_genes, 'top_n': top_n}, payload=result)
     if redis and not result["error"]:
         try:
             import json
-            await redis.set(cache_key, json.dumps(result))  # permanent cache
+            await redis.set(cache_key, json.dumps(result), ex=7 * 24 * 60 * 60)
         except Exception:
             pass
 

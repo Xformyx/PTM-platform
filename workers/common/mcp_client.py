@@ -226,13 +226,13 @@ class MCPClient:
     # ------------------------------------------------------------------
 
     def query_iptmnet(
-        self, gene: str, position: str = "", organism: str = "Mouse",
+        self, gene: str, position: str = "", organism: str = "Mouse", *, ptm_type: str = "", all_sites: bool = False,
     ) -> dict:
         """Query iPTMnet for PTM novelty assessment."""
         try:
             r = self.session.get(
                 f"{self.base_url}/tools/iptmnet/{gene}",
-                params={"position": position, "organism": organism},
+                params={"position": position, "organism": organism, "ptm_type": ptm_type, "all_sites": all_sites},
                 timeout=self.timeout,
             )
             r.raise_for_status()
@@ -246,13 +246,13 @@ class MCPClient:
             }
 
     def query_iptmnet_human_ortholog(
-        self, gene: str, position: str, organism: str = "Rat",
+        self, gene: str, position: str, organism: str = "Rat", ptm_type: str = "",
     ) -> dict:
         """Fetch additive human evidence only for an Ensembl-aligned rat residue."""
         try:
             response = self.session.get(
                 f"{self.base_url}/tools/iptmnet/ortholog/{gene}",
-                params={"position": position, "organism": organism},
+                params={"position": position, "organism": organism, "ptm_type": ptm_type},
                 timeout=self.timeout * 2,
             )
             response.raise_for_status()
@@ -361,7 +361,11 @@ class MCPClient:
                 timeout=self.timeout * 2,
             )
             r.raise_for_status()
-            return r.json()
+            result = r.json()
+            ranking = result.get("top_kinases") or result.get("integrated_ranking") or result.get("kinases") or []
+            result["kinases"] = ranking  # Explicit legacy adapter, same records/identities.
+            result["response_schema"] = "kea3_response.v2"
+            return result
         except Exception as e:
             logger.warning(f"MCP KEA3 failed: {e}")
             return {"gene_list": gene_list, "kinases": [], "error": str(e)}

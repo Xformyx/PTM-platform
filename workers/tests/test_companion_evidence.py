@@ -154,7 +154,7 @@ def test_fallback_results_include_kinase_cards():
     assert "supplementary figure 2" in results.lower()
 
 
-def test_identical_family_scores_emit_one_card():
+def test_identical_scores_do_not_establish_family_equivalence():
     heatmap = _stale_heatmap()
     row = dict(heatmap["kinase_scores"][0])
     heatmap["kinase_scores"] = [
@@ -165,9 +165,9 @@ def test_identical_family_scores_emit_one_card():
     attach_missing_trajectory_evidence(heatmap, _vector_rows())
     cards = _kinase_context_cards({"kinase_activity_heatmap": heatmap})
     candidates = [card for card in cards if str(card.get("card_id")).startswith("kinase.") and card.get("card_id") != "kinase.context_availability"]
-    assert len(candidates) == 1
-    assert "CDK" in candidates[0]["reader_summary"]
-    assert "MAPK" in candidates[0]["reader_summary"]
+    assert len(candidates) == 3
+    assert sum("CDK" in c["reader_summary"] for c in candidates) == 1
+    assert sum("MAPK14" in c["reader_summary"] for c in candidates) == 1
 
 
 def test_truncated_live_prose_regains_interval_numbers_after_validation():

@@ -16,7 +16,7 @@ async def query_uniprot(
     timeout: float = 15.0,
 ) -> dict:
     clean_id = _clean_protein_id(protein_id)
-    cache_key = f"uniprot:function-v2:{clean_id}"
+    cache_key = f"uniprot:source-v3:{clean_id}"
 
     if redis:
         cached = await redis.get(cache_key)
@@ -26,17 +26,14 @@ async def query_uniprot(
 
     result = await _fetch_uniprot_info(clean_id, timeout)
 
-    if redis:
+    from ptm_shared.evidence_contracts import source_query_record
+    result.setdefault("query_status", "unknown")
+    result["source_record"] = source_query_record("uniprot", result["query_status"],
+        query={"accession": clean_id}, payload=result,
+        snapshot=result.get("source_release") or "live_source.v3")
+    if redis and result["query_status"] in {"hit", "no_hit"}:
         import json
-        # Empty results (404 or transient network error) get a short TTL so
-        # temporary outages don't permanently mask a real protein entry.
-        is_empty = (
-            not result.get("function_summary")
-            and not result.get("subcellular_location")
-            and not result.get("go_terms_bp")
-        )
-        ttl = 3_600 if is_empty else 7 * 24 * 3_600  # 1 h vs 7 d
-        await redis.set(cache_key, json.dumps(result), ex=ttl)
+        await redis.set(cache_key, json.dumps(result), ex=3600 if result["query_status"] == "no_hit" else 604800)
 
     return result
 
@@ -67,13 +64,17 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(f"{BASE_URL}/{protein_id}.json")
             if resp.status_code == 404:
-                return empty
+                return {**empty, "query_status": "no_hit"}
+            if resp.status_code != 200:
+                return {**empty, "query_status": "rate_limited" if resp.status_code == 429 else "api_error"}
             resp.raise_for_status()
             data = resp.json()
     except Exception as e:
         logger.warning(f"UniProt fetch failed for {protein_id}: {e}")
-        return empty
+        return {**empty, "query_status": "timeout" if isinstance(e, httpx.TimeoutException) else "parse_failure" if isinstance(e, ValueError) else "api_error"}
 
+    if not isinstance(data, dict):
+        return {**empty, "query_status": "parse_failure"}
     result = {
         "protein_id": protein_id,
         "subcellular_location": [],
@@ -171,6 +172,14 @@ async def _fetch_uniprot_info(protein_id: str, timeout: float) -> dict:
     result["function_summary_status"] = "general_function" if result["function_summary"] else "general_function_unavailable"
     result["organism"] = data.get("organism")
     result["entry_audit"] = data.get("entryAudit")
+    result["query_status"] = "hit"
+    result["source_release"] = resp.headers.get("X-UniProt-Release")
+    result["source_payload_sha256"] = __import__('hashlib').sha256(resp.content).hexdigest()
+    result["features"] = data.get("features") or []
+    result["ptm_features"] = [feature for feature in result["features"]
+                              if feature.get("type") in {"Modified residue", "Cross-link", "Lipidation", "Glycosylation"}]
+    result["full_source_evidence"] = {key: data.get(key) for key in ("comments", "features", "uniProtKBCrossReferences", "references", "sequence")}
+    result["feature_schema_version"] = "uniprot_features.v1"
     result["function_schema_version"] = "uniprot_function.v2"
     # No limit on GO terms — return all available for comprehensive analysis
     return result

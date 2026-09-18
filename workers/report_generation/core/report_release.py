@@ -43,6 +43,9 @@ def resolve_report_release(
     audit, manifest = dict(output_correctness or {}), dict(artifact_manifest or {})
     contract = dict(report_mode_contract or manifest.get("report_mode_contract") or {})
     reasons = set(audit.get("reason_codes") or []) | set(audit.get("review_reason_codes") or [])
+    if any(issue.get("severity") in {"high", "major", "critical"} and issue.get("state") != "verified_resolved"
+           for issue in audit.get("review_issue_ledger") or []):
+        reasons.add("major_review_issue_unresolved")
     reasons.update(manifest.get("reason_codes") or [])
     reasons.update(contract.get("reason_codes") or [])
     reasons.difference_update({

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import math
 import re
+import json
+import hashlib
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
@@ -20,6 +22,25 @@ from typing import Any, Mapping, Sequence
 EVIDENCE_ENVELOPE_CONTRACT_VERSION = "ptm_evidence_envelope.v1"
 MEASUREMENT_PROVENANCE_CONTRACT_VERSION = "ptm_measurement_provenance.v1"
 CLASS_I_LOCALIZATION_THRESHOLD = 0.75
+SOURCE_QUERY_VERSION = "source_query.v1"
+SOURCE_QUERY_STATUSES = {"hit", "no_hit", "timeout", "rate_limited", "api_error", "parse_failure",
+                         "unsupported", "unavailable", "not_requested", "unknown"}
+
+
+def source_cache_key(source: str, **scope) -> str:
+    """Versioned, order-stable key over the complete caller-declared scope."""
+    return source + ":v1:" + hashlib.sha256(json.dumps(scope, sort_keys=True, separators=(",", ":"),
+                                                     default=str).encode()).hexdigest()
+
+
+def source_query_record(source, status, *, query=None, payload=None, snapshot=None, reason=None):
+    if status not in SOURCE_QUERY_STATUSES:
+        raise ValueError("Unknown source query status: " + str(status))
+    return {"schema_version": SOURCE_QUERY_VERSION, "source": source, "status": status,
+            "query": dict(query or {}), "snapshot": snapshot, "reason": reason,
+            "fetched_at": __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+            "payload_sha256": hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest(),
+            "evidence_eligible": status == "hit", "novelty_established": False}
 
 
 class ObservationStatus(str, Enum):
@@ -258,6 +279,14 @@ def build_measurement_provenance(
 
     return {
         "contract_version": MEASUREMENT_PROVENANCE_CONTRACT_VERSION,
+        "site_mapping_assertion": (
+            json.loads(record["Site_Mapping_Assertion"])
+            if isinstance(record.get("Site_Mapping_Assertion"), str)
+            else record.get("site_mapping_assertion") or record.get("Site_Mapping_Assertion")
+        ),
+        "source_qc": {key: _finite(record.get(key)) for key in (
+            "Q.Value", "Global.Q.Value", "PG.Q.Value", "Localization.Probability", "PTM_Probability"
+        )},
         "feature_entity": "modified_precursor_feature",
         "source_feature_id": source_feature_id or None,
         "reader_measurement_unit": reader_unit,

@@ -32,6 +32,11 @@ class KinasePrediction:
     known_substrates: List[str] = field(default_factory=list)
     biological_context: str = ""
     score: float = 0.0
+    source: str = "LLM"
+    evidence_role: str = "model_hypothesis"
+    source_assertion_status: str = "not_verified"
+    score_semantics: str = "model_relevance_not_biological_probability"
+    proposed_evidence_type: str = ""
 
 
 @dataclass
@@ -77,7 +82,7 @@ def _build_kinase_prompt(
         for a in pubmed_evidence[:8]:
             lines.append(
                 f"- PMID {a.get('pmid', '?')}: {a.get('title', '')[:120]}\n"
-                f"  Abstract: {(a.get('abstract') or '')[:200]}..."
+                f"  Abstract: {a.get('abstract') or ''}"
             )
         evidence_text = "\n".join(lines)
 
@@ -204,17 +209,29 @@ class LLMKinasePredictor:
     def _build_result(self, gene: str, position: str, ptm_type: str, data: dict) -> KinasePredictionResult:
         result = KinasePredictionResult(gene=gene, position=position, ptm_type=ptm_type)
 
-        for k in data.get("predictedKinases", []):
+        for k in data.get("predictedKinases", data.get('predicted_kinases', [])):
+            if not isinstance(k, dict):
+                continue
+            name = str(k.get('kinase') or k.get('kinase_name') or '').strip()
+            if not name:
+                continue
+            try:
+                score = float(k.get('score') or 0)
+                if not __import__('math').isfinite(score):
+                    score = 0.0
+            except (TypeError, ValueError):
+                score = 0.0
             pred = KinasePrediction(
-                kinase=k.get("kinase", ""),
-                confidence=k.get("confidence", "low"),
-                evidence_type=k.get("evidenceType", "predicted"),
+                kinase=name,
+                confidence=k.get("confidence") if k.get("confidence") in {'high', 'medium', 'low'} else 'unknown',
+                evidence_type="model_hypothesis",
+                proposed_evidence_type=k.get("evidenceType", "predicted"),
                 mechanism=k.get("mechanism", ""),
                 evidence_sources=k.get("evidenceSources", []),
                 consensus_motif=k.get("consensusMotif", ""),
                 known_substrates=k.get("knownSubstrates", []),
                 biological_context=k.get("biologicalContext", ""),
-                score=float(k.get("score", 0)),
+                score=score,
             )
             result.predicted_kinases.append(pred)
 

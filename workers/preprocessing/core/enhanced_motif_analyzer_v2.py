@@ -81,98 +81,98 @@ class EnhancedMotifAnalyzerV2:
         return {
             # ═══ Phosphorylation motifs (expanded ~50 kinase families) ═══
             # --- Proline-directed kinases ---
-            "CDK1/CDK2 (Pro-directed)": r"[ST]P.[KR]",
-            "CDK/MAPK (Pro-directed)": r"[ST]P",
-            "ERK1/ERK2 (Pro-directed)": r"P.[ST]P",
-            "JNK (Pro-directed)": r"[ST]P",
-            "p38 (Pro-directed)": r"[ST]P",
-            "DYRK1A/DYRK1B": r"R..[ST]P",
+            "CDK1/CDK2 (Pro-directed)": {"pattern": r"(?P<ptm>[ST])P.[KR]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "CDK/MAPK (Pro-directed)": {"pattern": r"(?P<ptm>[ST])P", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "ERK1/ERK2 (Pro-directed)": {"pattern": r"P.(?P<ptm>[ST])P", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "JNK (Pro-directed)": {"pattern": r"(?P<ptm>[ST])P", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "p38 (Pro-directed)": {"pattern": r"(?P<ptm>[ST])P", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "DYRK1A/DYRK1B": {"pattern": r"R..(?P<ptm>[ST])P", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
             # --- Basophilic kinases ---
-            "PKA (Basophilic)": r"[RK][RK].[ST]",
-            "PKC (Basophilic)": r"[RK].[ST][RK]",
-            "AKT/PKB (Basophilic)": r"R.R..[ST]",
-            "RSK (Basophilic)": r"[RK].[RK]..[ST]",
-            "SGK (Basophilic)": r"R.R..[ST]",
-            "PIM1/PIM2 (Basophilic)": r"[RK].[RK].[ST]",
-            "PKD (Basophilic)": r"[LI].[RK]..[ST]",
-            "MARK/PAR1 (Basophilic)": r"[LI].[RK]..[ST]",
-            "CAMK2 (Basophilic)": r"[RK]..[ST]..[RK]",
-            "CAMK (Calcium/Calmodulin)": r"[ST].[RK]",
-            "AMPK (Basophilic)": r"[LMVIF].[RK]..[ST]",
-            "CHK1/CHK2 (Basophilic)": r"[LM].[RK]..[ST]",
-            "PAK1/PAK2 (Basophilic)": r"[KR].[ST]",
+            "PKA (Basophilic)": {"pattern": r"[RK][RK].(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "PKC (Basophilic)": {"pattern": r"[RK].(?P<ptm>[ST])[RK]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "AKT/PKB (Basophilic)": {"pattern": r"R.R..(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "RSK (Basophilic)": {"pattern": r"[RK].[RK]..(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "SGK (Basophilic)": {"pattern": r"R.R..(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "PIM1/PIM2 (Basophilic)": {"pattern": r"[RK].[RK].(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "PKD (Basophilic)": {"pattern": r"[LI].[RK]..(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "MARK/PAR1 (Basophilic)": {"pattern": r"[LI].[RK]..(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "CAMK2 (Basophilic)": {"pattern": r"[RK]..(?P<ptm>[ST])..[RK]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "CAMK (Calcium/Calmodulin)": {"pattern": r"(?P<ptm>[ST]).[RK]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "AMPK (Basophilic)": {"pattern": r"[LMVIF].[RK]..(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "CHK1/CHK2 (Basophilic)": {"pattern": r"[LM].[RK]..(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "PAK1/PAK2 (Basophilic)": {"pattern": r"[KR].(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
             # --- Acidophilic kinases ---
-            "CK2 (Acidophilic)": r"[ST].{1,2}[ED]",
-            "CK2_extended (Acidophilic)": r"[ST]..E.E",
-            "CK1 (Acidophilic)": r"[ST]..[ST]",
-            "CK1_canonical (Acidophilic)": r"[ST].[DE]",
-            "GSK3 (Primed)": r"[ST]...[ST]P",
-            "GSK3_minimal (Primed)": r"[ST].[ST]P",
-            "GRK (Acidophilic)": r"[DE].[ST]...[DE]",
-            "PLK1 (Acidophilic)": r"[DE].[ST][ILVM]",
-            "PLK1_extended": r"[DNE].{1,2}[ST][FLIVMYW]",
+            "CK2 (Acidophilic)": {"pattern": r"(?P<ptm>[ST]).{1,2}[ED]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "CK2_extended (Acidophilic)": {"pattern": r"(?P<ptm>[ST])..E.E", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "CK1 (Acidophilic)": {"pattern": r"(?P<ptm>[ST])..[ST]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "CK1_canonical (Acidophilic)": {"pattern": r"(?P<ptm>[ST]).[DE]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "GSK3 (Primed)": {"pattern": r"(?P<ptm>[ST])...[ST]P", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "GSK3_minimal (Primed)": {"pattern": r"(?P<ptm>[ST]).[ST]P", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "GRK (Acidophilic)": {"pattern": r"[DE].(?P<ptm>[ST])...[DE]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "PLK1 (Acidophilic)": {"pattern": r"[DE].(?P<ptm>[ST])[ILVM]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "PLK1_extended": {"pattern": r"[DNE].{1,2}(?P<ptm>[ST])[FLIVMYW]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
             # --- Mitotic/cell cycle kinases ---
-            "Aurora_A/B (Mitotic)": r"[RK].[ST][ILVM]",
-            "NEK2/NEK6 (Mitotic)": r"[LM].[ST]",
-            "LATS1/LATS2 (Hippo)": r"H.[RK]...[ST]",
-            "MST1/MST2 (Hippo)": r"[MVLI]..T",
-            "BUB1 (Mitotic)": r"[ST].[DE].[DE]",
+            "Aurora_A/B (Mitotic)": {"pattern": r"[RK].(?P<ptm>[ST])[ILVM]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "NEK2/NEK6 (Mitotic)": {"pattern": r"[LM].(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "LATS1/LATS2 (Hippo)": {"pattern": r"H.[RK]...(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "MST1/MST2 (Hippo)": {"pattern": r"[MVLI]..(?P<ptm>T)", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "BUB1 (Mitotic)": {"pattern": r"(?P<ptm>[ST]).[DE].[DE]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
             # --- DNA damage response ---
-            "ATM/ATR (DNA damage)": r"[ST]Q",
-            "DNA-PK (DNA damage)": r"[ST]Q..",
-            "HIPK2 (DNA damage)": r"[ST]Y",
+            "ATM/ATR (DNA damage)": {"pattern": r"(?P<ptm>[ST])Q", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "DNA-PK (DNA damage)": {"pattern": r"(?P<ptm>[ST])Q..", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "HIPK2 (DNA damage)": {"pattern": r"(?P<ptm>[ST])Y", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
             # --- Tyrosine kinases (receptor) ---
-            "EGFR-family TK": r"[DE].[Y]",
-            "PDGFR/FGFR TK": r"Y..[DE]",
-            "INSR/IGF1R TK": r"Y...[YF]",
-            "VEGFR TK": r"Y..[ILVM]",
+            "EGFR-family TK": {"pattern": r"[DE].(?P<ptm>[Y])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "PDGFR/FGFR TK": {"pattern": r"(?P<ptm>Y)..[DE]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "INSR/IGF1R TK": {"pattern": r"(?P<ptm>Y)...[YF]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "VEGFR TK": {"pattern": r"(?P<ptm>Y)..[ILVM]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
             # --- Tyrosine kinases (non-receptor) ---
-            "Src/Fyn/Yes TK": r"[EDAY].[YF].{1,3}[PGAS]",
-            "Src-family TK": r"Y.{1,2}[DE]",
-            "ABL TK": r"[IVLA]Y..[PG]",
-            "JAK1/JAK2 TK": r"Y..[LIV]",
-            "SYK/ZAP70 TK": r"Y..[LMIV]",
-            "BTK TK": r"Y..[LIVM]",
-            "FAK TK": r"Y...[DEST]",
-            "FLT3 TK": r"Y..[LIVM]",
+            "Src/Fyn/Yes TK": {"pattern": r"[EDAY].(?P<ptm>[YF]).{1,3}[PGAS]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "Src-family TK": {"pattern": r"(?P<ptm>Y).{1,2}[DE]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "ABL TK": {"pattern": r"[IVLA](?P<ptm>Y)..[PG]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "JAK1/JAK2 TK": {"pattern": r"(?P<ptm>Y)..[LIV]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "SYK/ZAP70 TK": {"pattern": r"(?P<ptm>Y)..[LMIV]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "BTK TK": {"pattern": r"(?P<ptm>Y)..[LIVM]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "FAK TK": {"pattern": r"(?P<ptm>Y)...[DEST]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "FLT3 TK": {"pattern": r"(?P<ptm>Y)..[LIVM]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
             # --- Splicing/RNA-related kinases ---
-            "CLK1-4 (Splicing)": r"[RS].[ST]",
-            "SRPK1/SRPK2 (Splicing)": r"[RS].[ST]",
+            "CLK1-4 (Splicing)": {"pattern": r"[RS].(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "SRPK1/SRPK2 (Splicing)": {"pattern": r"[RS].(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
             # --- AGC kinases ---
-            "mTOR (AGC)": r"[ST]F",
-            "S6K (AGC)": r"[RK].[RK]..[ST]",
-            "ROCK1/ROCK2 (AGC)": r"[RK]...[ST]",
+            "mTOR (AGC)": {"pattern": r"(?P<ptm>[ST])F", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "S6K (AGC)": {"pattern": r"[RK].[RK]..(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "ROCK1/ROCK2 (AGC)": {"pattern": r"[RK]...(?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
             # --- Other kinases ---
-            "CKII_like": r"[ST][DE][DE]",
-            "TBK1/IKKe": r"[ST]...[DE][DE]",
-            "IKKa/IKKb": r"DS[GLIVMF][ST]",
+            "CKII_like": {"pattern": r"(?P<ptm>[ST])[DE][DE]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "TBK1/IKKe": {"pattern": r"(?P<ptm>[ST])...[DE][DE]", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
+            "IKKa/IKKb": {"pattern": r"DS[GLIVMF](?P<ptm>[ST])", "ptm_type": "Phosphorylation", "evidence_role": "site_motif"},
             
             # ═══ Acetylation motifs ═══
-            "N-terminal_acetylation": r"^[ASGM]",
-            "Lysine_acetylation_basic": r"K[GAVS]",
-            "p300/CBP_motif": r"[RK]K[KR]",
-            "PCAF_motif": r"[KR].K",
-            "Histone_acetylation": r"K[STAG]",
-            "Transcription_factor_acetylation": r"[KR]K[KR]",
-            "Metabolic_enzyme_acetylation": r"K[AVILM]",
+            "N-terminal_acetylation": {"pattern": r"^[ASGM]", "ptm_type": "Acetylation", "evidence_role": "protein_binding_context"},
+            "Lysine_acetylation_basic": {"pattern": r"(?P<ptm>K)[GAVS]", "ptm_type": "Acetylation", "evidence_role": "site_motif"},
+            "p300/CBP_motif": {"pattern": r"[RK](?P<ptm>K)[KR]", "ptm_type": "Acetylation", "evidence_role": "site_motif"},
+            "PCAF_motif": {"pattern": r"[KR].(?P<ptm>K)", "ptm_type": "Acetylation", "evidence_role": "site_motif"},
+            "Histone_acetylation": {"pattern": r"(?P<ptm>K)[STAG]", "ptm_type": "Acetylation", "evidence_role": "site_motif"},
+            "Transcription_factor_acetylation": {"pattern": r"[KR](?P<ptm>K)[KR]", "ptm_type": "Acetylation", "evidence_role": "site_motif"},
+            "Metabolic_enzyme_acetylation": {"pattern": r"(?P<ptm>K)[AVILM]", "ptm_type": "Acetylation", "evidence_role": "site_motif"},
             
             # ═══ Ubiquitylation motifs (expanded) ═══
-            "SCF_complex_degron": r"[DE].{0,2}[ST].[DE]",
-            "APC/C_D-box_degron": r"R..L.{2,4}[ILVM]",
-            "APC/C_KEN-box_degron": r"KEN",
-            "HECT_E3_PY_motif": r"[LP]P.Y",
-            "VHL_oxygen_degron": r"LA.{1,2}[ILVM]P",
-            "MDM2_binding_motif": r"F..W..L",
-            "CHIP/STUB1_motif": r"[ILVM].{1,2}[ILVM]",
-            "NEDD4/ITCH_PY_motif": r"[LP]P.Y",
-            "TRAF6_motif": r"P.E..[AQEG]",
-            "KEAP1/CUL3_motif": r"[DE][ST]GE",
-            "BTRC/FBXW_degron": r"DS[GS][ILVM][ST]",
-            "SMURF1/2_PY_motif": r"[LP]P.Y",
-            "K48_polyubiquitin_linkage": r"K.{1,3}[ED]",
-            "K63_polyubiquitin_linkage": r"K.{1,3}[KR]",
-            "Lysine_ubiquitylation_general": r"K[AVILM]",
-            "SUMO_consensus_motif": r"[VILMF]K.E",
+            "SCF_complex_degron": {"pattern": r"[DE].{0,2}[ST].[DE]", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "APC/C_D-box_degron": {"pattern": r"R..L.{2,4}[ILVM]", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "APC/C_KEN-box_degron": {"pattern": r"KEN", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "HECT_E3_PY_motif": {"pattern": r"[LP]P.Y", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "VHL_oxygen_degron": {"pattern": r"LA.{1,2}[ILVM]P", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "MDM2_binding_motif": {"pattern": r"F..W..L", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "CHIP/STUB1_motif": {"pattern": r"[ILVM].{1,2}[ILVM]", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "NEDD4/ITCH_PY_motif": {"pattern": r"[LP]P.Y", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "TRAF6_motif": {"pattern": r"P.E..[AQEG]", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "KEAP1/CUL3_motif": {"pattern": r"[DE][ST]GE", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "BTRC/FBXW_degron": {"pattern": r"DS[GS][ILVM][ST]", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "SMURF1/2_PY_motif": {"pattern": r"[LP]P.Y", "ptm_type": "Ubiquitylation", "evidence_role": "protein_binding_context"},
+            "K48_polyubiquitin_linkage": {"pattern": r"(?P<ptm>K).{1,3}[ED]", "ptm_type": "Ubiquitylation", "evidence_role": "site_motif"},
+            "K63_polyubiquitin_linkage": {"pattern": r"(?P<ptm>K).{1,3}[KR]", "ptm_type": "Ubiquitylation", "evidence_role": "site_motif"},
+            "Lysine_ubiquitylation_general": {"pattern": r"(?P<ptm>K)[AVILM]", "ptm_type": "Ubiquitylation", "evidence_role": "site_motif"},
+            "SUMO_consensus_motif": {"pattern": r"[VILMF](?P<ptm>K).E", "ptm_type": "Ubiquitylation", "evidence_role": "site_motif"},
         }
     
     def extract_ptm_window(self, seq_window: str, ptm_position: str, protein_id: str = None, modified_sequence: str = None) -> Optional[str]:
@@ -191,7 +191,7 @@ class EnhancedMotifAnalyzerV2:
         # 1. Modified sequence에서 깨끗한 서열 추출 시도
         if modified_sequence and not pd.isna(modified_sequence):
             clean_seq = self._clean_modified_sequence(modified_sequence)
-            if clean_seq and len(clean_seq) > 5:  # 충분한 길이
+            if clean_seq:  # Anchor indices are in this exact peptide coordinate system
                 return clean_seq
         
         # 2. FASTA에서 서열 윈도우 추출 시도
@@ -254,7 +254,7 @@ class EnhancedMotifAnalyzerV2:
             self.logger.warning(f"FASTA에서 서열 추출 실패 ({protein_id}, {ptm_position}): {e}")
             return None
     
-    def predict_regulator(self, seq_window: str, ptm_type: str = "Phosphorylation") -> Tuple[str, str]:
+    def predict_regulator(self, seq_window: str, ptm_type: str = "Phosphorylation", *, ptm_indices=None) -> Tuple[str, str]:
         """
         간단하고 효과적인 regulator 예측 (PTM 타입별 최적화)
         
@@ -271,50 +271,37 @@ class EnhancedMotifAnalyzerV2:
         if pd.isna(seq_window) or seq_window.strip() == "":
             return "No sequence", "Unknown"
 
-        # PTM 타입별 motif 필터링 및 매칭
-        for name, pattern in self.motif_db.items():
-            try:
-                # PTM 타입별 motif 필터링
-                is_phospho_motif = any(keyword in name.lower() for keyword in 
-                                     ['cdk', 'mapk', 'gsk3', 'pka', 'pkc', 'akt', 'ck2', 'casein', 'src', 'egfr', 'atm', 'atr', 'camk'])
-                is_acetyl_motif = any(keyword in name.lower() for keyword in 
-                                    ['acetylation', 'p300', 'cbp', 'pcaf', 'histone', 'transcription', 'metabolic'])
-                is_ubiquitin_motif = any(keyword in name.lower() for keyword in 
-                                        ['scf', 'apc', 'hect', 'vhl', 'mdm2', 'ring', 'ubiquitin', 'degron', 'linkage', 'lysine', 'sumo'])
-                
-                # PTM 타입에 맞는 motif만 검사
-                if ptm_type == "Phosphorylation" and not is_phospho_motif:
-                    continue
-                elif ptm_type == "Acetylation" and not is_acetyl_motif:
-                    continue
-                elif ptm_type == "Ubiquitylation" and not is_ubiquitin_motif:
-                    continue
-                
-                if re.search(pattern, seq_window):
-                    matched_motifs.append(name)
-                    # Regulator 이름 추출
-                    if "/" in name:
-                        regulator_name = name.split(" ")[0]  # "CDK/MAPK (Pro-directed)" -> "CDK/MAPK"
-                    else:
-                        regulator_name = name.split("_")[0]  # "p300/CBP_motif" -> "p300/CBP"
-                    regulators.append(regulator_name)
-            except re.error:
+        # Only explicit modified residues may anchor a site motif. A nearby
+        # motif or a generic regulator list is not site-specific evidence.
+        anchors = set(ptm_indices or [])
+        for name, metadata in self.motif_db.items():
+            if metadata["ptm_type"] != ptm_type or metadata["evidence_role"] != "site_motif":
                 continue
-
-        # PTM 타입별 추가 regulator (항상 포함)
-        if ptm_type == "Phosphorylation":
-            regulators.extend(self.phosphatases)
-        elif ptm_type == "Acetylation":
-            regulators.extend(self.deacetylases)
-        elif ptm_type == "Ubiquitylation":
-            regulators.extend(self.deubiquitinases)
-            regulators.extend(self.e3_ligases)
+            pattern = metadata["pattern"]
+            for offset in range(len(seq_window)):
+                match = re.compile(pattern).match(seq_window, offset)
+                if match and match.start("ptm") in anchors:
+                    matched_motifs.append(name)
+                    regulators.append(name.split(" ")[0].split("_")[0])
+                    break
 
         matched_str = "; ".join(matched_motifs) if matched_motifs else "No motif match"
         regulator_str = "; ".join(sorted(set(regulators))) if regulators else "Unknown"
         
         return matched_str, regulator_str
     
+    @staticmethod
+    def _ptm_indices(modified_sequence, ptm_type):
+        uid = {"Phosphorylation": "21", "Acetylation": "1", "Ubiquitylation": "121"}.get(ptm_type)
+        sequence = str(modified_sequence or "")
+        indices = []
+        for match in re.finditer(r"\(UniMod:(\d+)\)", sequence):
+            if match.group(1) == uid:
+                prefix = re.sub(r"\([^)]*\)", "", sequence[:match.start()])
+                if prefix:
+                    indices.append(len(prefix) - 1)
+        return indices
+
     def analyze_motifs_simple(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         간단한 motif 분석 수행 (FASTA 기반 개선)
@@ -342,13 +329,21 @@ class EnhancedMotifAnalyzerV2:
         motif_results = df.apply(
             lambda row: pd.Series(self.predict_regulator(
                 str(row["Motifs_Sequence_Window"]) if row["Motifs_Sequence_Window"] else "", 
-                row.get("PTM_Type", "Phosphorylation")
+                row.get("PTM_Type", "Phosphorylation"),
+                ptm_indices=self._ptm_indices(row.get("Modified.Sequence"), row.get("PTM_Type", "Phosphorylation"))
             )),
             axis=1
         )
         
         df["Matched_Motifs"] = motif_results[0]
         df["Predicted_Regulator"] = motif_results[1]
+        df["Motif_Evidence_Policy"] = "modified_residue_anchor.v1"
+        df["Motif_Evidence_Role"] = "sequence_candidate_not_direct_relation"
+        df["Generic_Regulator_Context"] = df.get("PTM_Type", pd.Series(index=df.index, dtype=str)).map({
+            "Phosphorylation": "; ".join(self.phosphatases),
+            "Acetylation": "; ".join(self.deacetylases),
+            "Ubiquitylation": "; ".join(self.deubiquitinases + self.e3_ligases),
+        })
         
         # 통계 출력
         valid_windows = df["Motifs_Sequence_Window"].notna().sum()

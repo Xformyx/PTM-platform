@@ -608,8 +608,8 @@ def _generate_hypotheses(research: dict, context: dict, llm: LLMClient, ptm_type
 
 def _generate_with_llm(research: dict, context: dict, llm: LLMClient) -> list:
     """Use LLM to generate structured hypotheses."""
-    activated = research.get("activated", [])
-    inhibited = research.get("inhibited", [])
+    activated = research.get("increased_ptm_observations", research.get("activated", []))
+    inhibited = research.get("decreased_ptm_observations", research.get("inhibited", []))
     pathways = research.get("enriched_pathways", [])
 
     activated_str = ", ".join(f"{p['gene']}-{p['position']} (Log2FC={p['ptm_relative_log2fc']})" for p in activated[:5])
@@ -707,8 +707,8 @@ def _parse_llm_hypotheses(response: str, research: dict) -> list:
 def _generate_rule_based(research: dict, context: dict, ptm_type: str = "phosphorylation") -> list:
     """Fallback: generate hypotheses from rules."""
     hypotheses = []
-    activated = research.get("activated", [])
-    inhibited = research.get("inhibited", [])
+    activated = research.get("increased_ptm_observations", research.get("activated", []))
+    inhibited = research.get("decreased_ptm_observations", research.get("inhibited", []))
     pathways = research.get("enriched_pathways", [])
     ptm_label = ptm_type.capitalize() if ptm_type else "Phosphorylation"
 
@@ -723,7 +723,7 @@ def _generate_rule_based(research: dict, context: dict, ptm_type: str = "phospho
             "mechanism": f"{top['gene']} {top['position']} {ptm_label.lower()} activates downstream signaling through {pw}",
             "supporting_ptms": [f"{top['gene']}-{top['position']}"],
             "testable_prediction": f"Inhibition of {top['gene']} {ptm_label.lower()} should reduce {pw} pathway activity",
-            "confidence": min(0.7, research.get("confidence", 0.5)),
+            "confidence": None, "evidence_role": "model_hypothesis",
             "status": "generated",
         })
 

@@ -5,9 +5,7 @@ when report_type is 'extended'.
 Integrates DrugRepositioningPipeline into the LangGraph report flow.
 """
 
-import json
 import logging
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +19,7 @@ def run_drug_repositioning(state: dict) -> dict:
         logger.info("Report type is not 'extended', skipping drug repositioning")
         if cb:
             cb(92, "Drug repositioning: skipped (standard report)")
-        return {"drug_repositioning_results": {}}
+        return {"drug_repositioning_results": {"evaluation_status": "not_requested"}}
 
     if cb:
         cb(91, "Running drug repositioning pipeline")
@@ -77,25 +75,41 @@ def run_drug_repositioning(state: dict) -> dict:
             logger.debug(f"[Singularity] save_analysis_results skipped: {sing_e}")
         # ─────────────────────────────────────────────────────────────────────────
 
+        dr_results.update(evaluation_status="computed" if dr_results.get("success") else "not_evaluable",
+            evidence_role="model_hypothesis", independent_validation="not_performed",
+            output_scope="companion_review", source_assertion_status="requires_verification",
+            input_inventory=analysis_results["input_inventory"],
+            required_limitations=["Candidate rankings and LLM evaluations do not establish drug efficacy or a direct relation in this experiment."])
         return {"drug_repositioning_results": dr_results}
 
     except Exception as e:
         logger.error(f"Drug repositioning failed: {e}", exc_info=True)
         if cb:
             cb(95, f"Drug repositioning error: {str(e)[:100]}")
-        return {"drug_repositioning_results": {"success": False, "error": str(e)}}
+        return {"drug_repositioning_results": {"success": False, "error": str(e), "evaluation_status": "not_evaluable"}}
 
 
 def _build_analysis_results(ptms: list, network: dict, state: dict) -> dict:
     """Build analysis_results dict expected by DrugRepositioningPipeline."""
-    nodes = []
+    import math
+    from ptm_shared.de_novo_representation import is_de_novo_representation
+    nodes, inventory = [], []
     for p in ptms:
+        try:
+            value = float(p.get("ptm_relative_log2fc"))
+        except (TypeError, ValueError):
+            value = None
+        eligible = value is not None and math.isfinite(value) and not is_de_novo_representation(p)
+        inventory.append({"gene": p.get("gene"), "site": p.get("position"), "condition": p.get("condition"),
+                          "status": "eligible" if eligible else "not_evaluable", "reason": None if eligible else "conventional_adjusted_contrast_unavailable"})
+        if not eligible:
+            continue
         node = {
             "gene": p.get("gene", ""),
             "site": p.get("position", ""),
             "ptm_type": p.get("ptm_type", "Phosphorylation"),
-            "log2fc": p.get("ptm_relative_log2fc", 0),
-            "protein_log2fc": p.get("protein_log2fc", 0),
+            "log2fc": value,
+            "protein_log2fc": p.get("protein_log2fc"),
             "condition": p.get("condition", ""),
         }
         enr = p.get("rag_enrichment", {})
@@ -115,11 +129,13 @@ def _build_analysis_results(ptms: list, network: dict, state: dict) -> dict:
 
     return {
         "networks": {"combined": {"nodes": nodes, "edges": network.get("edges", [])}},
+        "input_inventory": inventory,
         "summary": {
             "total_ptms": len(ptms),
+            "eligible_quantitative_nodes": len(nodes),
             "ptm_type": ptm_type,
-            "significant_up": len([p for p in ptms if p.get("ptm_relative_log2fc", 0) > 0.5]),
-            "significant_down": len([p for p in ptms if p.get("ptm_relative_log2fc", 0) < -0.5]),
+            "positive_magnitude_count": len([p for p in nodes if p["log2fc"] > 0.5]),
+            "negative_magnitude_count": len([p for p in nodes if p["log2fc"] < -0.5]),
         },
         "timepoints": [],
         "legends": network.get("legends", {}),

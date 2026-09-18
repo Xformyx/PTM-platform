@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import math
 import re
+import hashlib
+import json
 from collections import defaultdict
 from collections import Counter
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
@@ -24,6 +26,53 @@ from ptm_shared.directed_temporal_relationship import timepoint_to_minutes
 
 
 CONTRACT_VERSION = "site_form_provenance.v2"
+MAPPING_ASSERTION_VERSION = "peptide_mapping_assertion.v1"
+
+
+def peptide_mapping_assertion(protein_group, modified_sequence, references, target_unimod_ids):
+    """Enumerate mappings without multiplying one molecular form into site observations.
+
+    This is an additive crosswalk, not a replacement for precursor_identity.v2
+    or site_form_provenance.v2. Reference hashes belong to assertions, not raw IDs.
+    """
+    sequence, modifications = "", []
+    for match in re.finditer(r"([A-Z])|\(UniMod:(\d+)\)", str(modified_sequence)):
+        residue, unimod = match.groups()
+        if residue:
+            sequence += residue
+        else:
+            modifications.append({"unimod_id": unimod, "peptide_position": len(sequence),
+                                  "residue": sequence[-1:] or "N-term"})
+    accessions = sorted({p.split("|")[1] if p.startswith(("sp|", "tr|")) else p
+                         for p in re.split(r"[;,]", str(protein_group)) if p})
+    candidates, unavailable, reference_conflicts = [], [], {}
+    for accession in accessions:
+        value = references.get(accession)
+        variants = sorted(set(map(str, value))) if isinstance(value, (list, tuple, set)) else [str(value or "")]
+        variants = [reference for reference in variants if reference]
+        if not variants:
+            unavailable.append(accession)
+            continue
+        if len(variants) > 1:
+            reference_conflicts[accession] = [hashlib.sha256(v.encode()).hexdigest() for v in variants]
+        for reference in variants:
+            start = reference.find(sequence) if sequence else -1
+            while start >= 0:
+                candidates.append({"accession": accession, "peptide_start": start + 1,
+                                   "reference_sha256": hashlib.sha256(reference.encode()).hexdigest(),
+                                   "modifications": [{**m, "protein_position": start + m["peptide_position"]}
+                                                     for m in modifications]})
+                start = reference.find(sequence, start + 1)
+    target = {str(v) for v in target_unimod_ids}
+    positions = sorted({f"{m['residue']}{m['protein_position']}" for c in candidates
+                        for m in c["modifications"] if m["unimod_id"] in target and m["peptide_position"]})
+    payload = {"schema_version": MAPPING_ASSERTION_VERSION, "modified_sequence": str(modified_sequence),
+               "peptide_sequence": sequence, "modifications": modifications, "candidates": candidates,
+               "unavailable_accessions": unavailable, "reference_sequence_conflicts": reference_conflicts, "candidate_positions": positions,
+               "status": "unique" if len(candidates) == 1 and len(accessions) == 1 and not reference_conflicts else "ambiguous" if candidates else "unknown",
+               "measurement_unit": "molecular_form", "independent_site_observations": False}
+    payload["assertion_id"] = "MAP-" + hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:20]
+    return payload
 FORM_SEQUENCE_KEYS = ("Modified.Sequence", "modified_sequence", "ModifiedSequence")
 FORM_CHARGE_KEYS = ("Precursor.Charge", "precursor_charge", "PrecursorCharge")
 FORM_PRECURSOR_KEYS = ("Precursor.Id", "precursor_id", "PrecursorId")

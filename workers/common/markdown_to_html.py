@@ -53,9 +53,11 @@ def _parse_references_section(md: str) -> tuple[str, List[Dict[str, Any]]]:
         rest = m.group(2).strip()
         pmid_match = re.search(r'PMID:\s*(?:\[)?(\d+)(?:\]\([^)]+\))?', rest)
         pmid = pmid_match.group(1) if pmid_match else ""
+        doi_match = re.search(r'DOI:\s*(?:\[)?(10\.\d{4,9}/[^\s\]]+)', rest)
+        doi = doi_match.group(1).rstrip('.') if doi_match else ''
         title_match = re.match(r'^(.+?)(?:\s+\*[^*]+\*|\s+\([^)]+\)\.)', rest)
         title = title_match.group(1).strip() if title_match else rest[:150]
-        refs.append({"num": num, "pmid": pmid, "title": title, "raw": rest})
+        refs.append({"num": num, "pmid": pmid, "doi": doi, "title": title, "raw": rest})
     return md, refs
 
 
@@ -423,6 +425,7 @@ function showArticle(num) {{
     if (data.authors) html += '<p><em>' + (Array.isArray(data.authors) ? data.authors.join(', ') : data.authors) + '</em></p>';
     if (data.journal) html += '<p>' + data.journal + (data.pub_date ? ' (' + data.pub_date + ')' : '') + '</p>';
     if (data.pmid) html += '<p><a href="https://pubmed.ncbi.nlm.nih.gov/' + data.pmid + '/" target="_blank">PMID: ' + data.pmid + '</a></p>';
+    if (data.doi) html += '<p><a href="https://doi.org/' + data.doi.replace('https://doi.org/', '').replace('http://doi.org/', '') + '/" target="_blank">DOI: ' + data.doi + '</a></p>';
     const summary = data.abstract || data.abstract_excerpt || data.summary || '';
     if (summary) html += '<div class="abstract"><strong>Summary:</strong><br>' + summary + '</div>';
     body.innerHTML = html;
@@ -555,16 +558,28 @@ def convert_report_to_html(
         md_body, parsed_refs = _parse_references_section(md_content)
         toc = _build_toc(md_content)
 
-        # Build refs_data from references param (indexed by 1-based num)
+        # Join each printed bibliography entry by identity, never collection order.
         refs_data = {}
         if references:
-            for idx, ref in enumerate(references, 1):
+            for entry in parsed_refs:
+                matches = [ref for ref in references if
+                    (entry.get('pmid') and str(ref.get('pmid') or '') == entry['pmid']) or
+                    (entry.get('doi') and str(ref.get('doi') or '').lower().removeprefix('https://doi.org/') == entry['doi'].lower())]
+                if not matches:
+                    matches = [ref for ref in references if ref.get('display_number') == entry['num']
+                               and not entry.get('pmid') and not entry.get('doi')]
+                if len(matches) != 1:
+                    continue
+                ref = matches[0]
+                idx = entry['num']
                 refs_data[idx] = {
                     "pmid": ref.get("pmid", ""),
+                    "doi": ref.get("doi", ""),
+                    "reference_id": ref.get("reference_id", ""),
                     "title": ref.get("title", ""),
                     "authors": ref.get("authors", []),
                     "journal": ref.get("journal", ""),
-                    "pub_date": ref.get("pub_date", ""),
+                    "pub_date": ref.get("pub_date", ref.get('year', '')),
                     "abstract": ref.get("abstract", ""),
                     "abstract_excerpt": ref.get("abstract_excerpt", ""),
                 }

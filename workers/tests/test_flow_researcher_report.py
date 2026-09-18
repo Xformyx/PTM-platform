@@ -26,7 +26,7 @@ def uniprot_parse(comments):
         async def __aenter__(self): return self
         async def __aexit__(self, *args): pass
         async def get(self, url):
-            return SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+            return SimpleNamespace(status_code=200, headers={}, content=__import__("json").dumps(comments).encode(), raise_for_status=lambda: None,
                                    json=lambda: {"comments": comments, "organism": {"taxonId": 10116}})
     env = {"httpx": SimpleNamespace(AsyncClient=Client), "BASE_URL": "mock", "logger": logging.getLogger(__name__)}
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), "exec"), env)

@@ -105,7 +105,7 @@ async def query_tf_targets(
         Dict with TF info and list of target genes with regulation mode.
     """
     # Cache check
-    cache_key = f"tf_targets:{tf_name.upper()}:{species}:{min_confidence}"
+    cache_key = f"tf_targets:scope.v2:{tf_name.upper()}:{species}:{min_confidence}"
     if redis:
         cached = await redis.get(cache_key)
         if cached:
@@ -140,7 +140,7 @@ async def query_tf_targets(
         if t_idx <= min_idx:
             filtered.append(t)
 
-    # Deduplicate targets (same target from multiple sources = higher confidence)
+    # Preserve independent source paths; database count is not experimental replication.
     target_map = {}
     for t in filtered:
         tgt = t["target"]
@@ -150,13 +150,14 @@ async def query_tf_targets(
                 "mode": t["mode"],
                 "sources": [t["source"]],
                 "confidence": t["confidence"],
+                "assertions": [dict(t)],
             }
         else:
             if t["source"] not in target_map[tgt]["sources"]:
                 target_map[tgt]["sources"].append(t["source"])
-            # Upgrade confidence if confirmed by multiple sources
-            if len(target_map[tgt]["sources"]) > 1:
-                target_map[tgt]["confidence"] = "very_high"
+            target_map[tgt]["assertions"].append(dict(t))
+            if target_map[tgt]["mode"] != t.get("mode"):
+                target_map[tgt]["mode"] = "conflicting_or_unknown"
 
     result = {
         "tf": tf_upper,
@@ -192,7 +193,7 @@ async def infer_tf_activity(
     redis=None,
 ) -> dict:
     """
-    Infer active transcription factors from a list of changed genes.
+    Identify TF target-set over-representation among changed genes.
     Uses Fisher's exact test (over-representation analysis).
 
     Args:
@@ -204,7 +205,7 @@ async def infer_tf_activity(
         background_size: Total number of genes in background (default: all target genes in DB)
 
     Returns:
-        Dict with ranked TF activity predictions.
+        Ranked target-set enrichment; no directional activity estimate.
     """
     if not gene_list:
         return {"gene_list": [], "inferred_tfs": [], "error": "Empty gene list"}
@@ -212,7 +213,8 @@ async def infer_tf_activity(
     # Cache check
     gene_key = ",".join(sorted(set(g.upper() for g in gene_list)))
     _gene_hash = hashlib.md5(gene_key.encode()).hexdigest()[:16]
-    cache_key = f"tf_infer:{_gene_hash}:{species}:{min_confidence}:{min_targets_overlap}"
+    top_n = max(0, int(top_n))
+    cache_key = f"tf_infer:ora.v2:{_gene_hash}:{species}:{min_confidence}:{min_targets_overlap}:{top_n}:{background_size}"
     if redis:
         cached = await redis.get(cache_key)
         if cached:
@@ -236,6 +238,9 @@ async def infer_tf_activity(
     # Background: all unique target genes in the DB
     all_target_genes = set(target_to_tfs.keys())
     bg_size = background_size or len(all_target_genes)
+    if bg_size < len(all_target_genes):
+        return {"query_status": "unsupported", "inferred_tfs": [],
+                "error": "background_smaller_than_reference_gene_universe"}
 
     # Filter gene_set to only genes present in the DB background for a valid contingency table
     effective_gene_set = gene_set & all_target_genes
@@ -296,6 +301,9 @@ async def infer_tf_activity(
 
         tf_results.append({
             "tf": tf,
+            "metric_role": "target_set_overrepresentation",
+            "activity_direction": "not_evaluable",
+            "causal_claim_allowed": False,
             "n_targets_in_db": len(tf_target_genes),
             "n_overlap": n_overlap,
             "overlap_genes": sorted(overlap),
@@ -335,6 +343,12 @@ async def infer_tf_activity(
         "total_tfs_tested": n_tests,
         "significant_tfs": len([r for r in tf_results if r["fdr"] < 0.05]),
         "inferred_tfs": top_results,
+        "full_enrichment_results": tf_results,
+        "schema_version": "tf_target_enrichment.v2",
+        "metric_role": "target_set_overrepresentation",
+        "activity_direction": "not_evaluable",
+        "display_top_n": top_n,
+        "independent_experiment_count": None,
         "sources": ["DoRothEA (A/B/C)", "TRRUST v2"],
     }
     # Surface fallback info when rat data is absent

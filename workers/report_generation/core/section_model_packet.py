@@ -22,7 +22,7 @@ from report_generation.core.reader_authoring import (
     format_authoring_packet_for_llm,
 )
 
-SECTION_MODEL_PACKET_VERSION = "section_model_packet.v1"
+SECTION_MODEL_PACKET_VERSION = "section_model_packet.v2"
 MODEL_CARD_FIELDS = (
     "card_id",
     "category",
@@ -77,6 +77,9 @@ def _card_identity(card: Mapping[str, Any]) -> dict:
         "reader_display_identity": display,
         "reader_disambiguator": disambiguator,
         "gene": identity.get("gene"),
+        "species": identity.get("species") or identity.get("fasta_taxonomy_id"),
+        "isoform": identity.get("isoform"),
+        "measurement_provenance": card.get("measurement_provenance"),
         "candidate_residue_annotation": identity.get("candidate_residue_annotation"),
         "main_named_finding_eligible": identity.get("main_named_finding_eligible", True),
     }
@@ -98,7 +101,9 @@ def _public_records(card: Mapping[str, Any]) -> list[dict]:
                 "metric_id",
                 "interval",
                 "unit",
-                "time_minutes",
+                "time_minutes", "estimator", "method", "support", "support_status", "test_status",
+                "numerator", "denominator", "control_n", "treatment_n", "uncertainty", "missingness",
+                "p", "q", "source", "measurement_unit", "localization", "support_sets_differ",
             )
             if record.get(key) is not None or key in {"value", "axis", "condition", "display_identity"}
         }
@@ -107,51 +112,22 @@ def _public_records(card: Mapping[str, Any]) -> list[dict]:
 
 
 def _compact_trajectory(card: Mapping[str, Any], *, stage: int) -> list[dict] | dict | None:
-    points = [dict(point) for point in card.get("trajectory") or [] if isinstance(point, Mapping)]
-    if stage < 3 or not points:
-        return points or None
-    numeric = []
-    for point in points:
-        value = point.get("ptm_protein_adjusted_log2fc")
-        if value is None:
-            value = point.get("ptm_relative_log2fc")
-        if isinstance(value, (int, float)):
-            numeric.append((abs(float(value)), point))
-    selected = [points[0]]
-    if numeric:
-        peak = max(numeric, key=lambda item: item[0])[1]
-        if peak not in selected:
-            selected.append(peak)
-    if points[-1] not in selected:
-        selected.append(points[-1])
-    missing = [
-        str(point.get("condition") or "")
-        for point in points
-        if point.get("detection_context_only") or (
-            point.get("ptm_protein_adjusted_log2fc") is None
-            and point.get("ptm_unadjusted_log2fc") is None
-        )
-    ]
-    shape = _as_mapping(card.get("trajectory_shape_fact")).get("reader_summary")
-    return {
-        "first": selected[0],
-        "peak": selected[1] if len(selected) > 1 else selected[0],
-        "last": selected[-1],
-        "explicit_missing_gaps": [item for item in missing if item],
-        "shape_summary": shape,
-    }
+    # Contradictory middle points and missing gaps constrain claims. Keep the
+    # complete structured trajectory; duplicate prose is compacted elsewhere.
+    result = []
+    for point in card.get("trajectory") or []:
+        if not isinstance(point, Mapping):
+            continue
+        # Axis records own values and test support; omit duplicate scalar/quality
+        # projections, retaining full missingness and measurement scope per point.
+        result.append({k: v for k, v in point.items() if k not in {
+            "ptm_unadjusted_log2fc", "ptm_protein_adjusted_log2fc", "protein_log2fc", "quality"
+        }} | {"axis_support": _as_mapping(point.get("quality")).get("axis_support")})
+    return result or None
 
 
 def _limit_literature(card: Mapping[str, Any], *, stage: int) -> dict:
-    context = _as_mapping(card.get("literature_comparison"))
-    if stage < 4:
-        return context
-    comparisons = list(context.get("comparisons") or [])[:2]
-    return {
-        "status": context.get("status"),
-        "comparisons": comparisons,
-        "source_anchored_excerpt_limit": 2,
-    }
+    return _as_mapping(card.get("literature_comparison"))
 
 
 def _assigned_ids(plan: Mapping[str, Any] | None, section_type: str) -> tuple[set[str], set[str], set[str]]:
@@ -194,31 +170,31 @@ def _card_is_assigned(card: Mapping[str, Any], feature_ids: set[str], evidence_i
 
 
 def _group_family_cards(cards: list[dict], *, stage: int) -> list[dict]:
-    if stage < 5:
-        return cards
-    grouped: list[dict] = []
-    family_summaries: list[str] = []
-    family_evidence: list[str] = []
-    for card in cards:
-        if card.get("category") != "kinase_context":
-            grouped.append(card)
-            continue
-        family_summaries.append(str(card.get("reader_summary") or ""))
-        family_evidence.extend(str(item) for item in card.get("evidence_ids") or [])
-    if family_summaries:
-        grouped.append({
-            "card_id": "kinase.family_group",
-            "category": "kinase_context",
-            "reader_summary": "Equivalent family candidate context: " + " ".join(family_summaries[:3]),
-            "claim_tier": "C1",
-            "evidence_ids": family_evidence[:8] or ["kinase.family_group"],
-            "citation_ids": [],
-            "allowed_verbs": ["provided candidate context"],
-            "forbidden_interpretations": ["direct kinase-substrate assignment", "catalytic activation"],
-            "counterevidence": "Grouped family context remains observational candidate context.",
-            "feature_identity": {"reader_display_identity": "candidate-family context"},
-        })
-    return grouped
+    return cards  # Compaction cannot manufacture kinase equivalence.
+
+
+def _module_context_for_model(audit):
+    """Project module scope only; observations are resolved as bound reader cards.
+
+    Full source rows remain in the immutable audit packet, never repeated in
+    every section prompt outside the token/partition accounting.
+    """
+    modules = _as_mapping(audit.get("module_evidence"))
+    cross = _as_mapping(modules.get("cross_talk"))
+    drug = _as_mapping(modules.get("drug_repositioning"))
+    return {
+        "cross_talk": {key: cross.get(key) for key in (
+            "evaluation_status", "primary_ptm_type", "secondary_ptm_type", "evidence_role",
+            "schema_version", "analysis_policy", "source_status", "required_limitations") if key in cross},
+        "biological_unit_crosswalk": {key: _as_mapping(modules.get("biological_unit_crosswalk")).get(key)
+                                      for key in ("schema_version", "status", "reason")},
+        "cascade_context": modules.get("cascade_context"),
+        "drug_repositioning": {"evidence_role": drug.get("evidence_role"),
+            "analysis": {"evaluation_status": _as_mapping(drug.get("analysis")).get("evaluation_status", "not_evaluable")},
+            "independent_validation": drug.get("independent_validation"),
+            "scope": "Only supplied evidence-bound reader cards permit claims; unprojected candidate analysis is audit context."},
+        "source_projection": "raw_rows_in_immutable_audit; quantitative_observations_resolved_in_reader_cards",
+    }
 
 
 def build_section_model_packet(
@@ -289,18 +265,24 @@ def build_section_model_packet(
     questions = []
     question_map = _as_mapping(audit.get("research_question_evidence_map") or _as_mapping(plan).get("research_question_evidence_map"))
     for question in question_map.get("questions") or []:
-        if compaction_stage >= 2 and section_type in {"results", "discussion"}:
-            if question.get("coverage_status") == "missing" and not question.get("feature_ids"):
-                omitted.append({"question_id": question.get("question_id"), "reason": "unrelated_question"})
-                continue
         questions.append({
             "question_id": question.get("question_id"),
             "normalized_question": question.get("normalized_question") or question.get("original_text"),
             "display_identities": question.get("display_identities") or [],
             "evidence_ids": question.get("evidence_ids") or [],
             "answerability": question.get("answerability"),
+            "coverage_status": question.get('coverage_status'),
         })
     retained_ids = [eid for card in retained_cards for eid in card.get("evidence_ids") or []]
+    included_cards = {card.get('card_id'): card for card in retained_cards}
+    bundles = []
+    for bundle in (audit.get('module_evidence_index') or {}).get('bundles') or []:
+        members = [included_cards[key] for key in bundle['member_card_ids'] if key in included_cards]
+        if members:
+            bundles.append({**bundle, 'resolved_members': members,
+                'resolved_member_count': len(members),
+                'unresolved_member_ids': [key for key in bundle['member_card_ids'] if key not in included_cards],
+                'scope': 'included_members_only; full group remains in immutable authoring packet'})
     return {
         "contract_version": SECTION_MODEL_PACKET_VERSION,
         "packet_role": "section_model",
@@ -313,6 +295,8 @@ def build_section_model_packet(
         "research_question_evidence_map": {"questions": questions},
         "quantitation_estimator_contract": audit.get("quantitation_estimator_contract"),
         "study_design": audit.get("study_design"),
+        "module_evidence": _module_context_for_model(audit),
+        "resolved_module_bundles": bundles,
         "prompt_compaction_stage": compaction_stage,
         "retained_evidence_ids": retained_ids,
         "omitted_evidence_ids_and_reason": omitted,
@@ -500,3 +484,51 @@ def compose_compacted_narrative_prompt(
         "generation_degraded": True,
         "fallback_reason": None,
     }
+
+
+def partition_section_prompts(audit_packet, section_type, plan, *, extra_suffix='', max_chars=PROMPT_CHAR_BUDGET,
+                              token_counter=None, input_token_budget=None, output_reserve=0, max_parts=32):
+    """Split at card boundaries; never truncate a source span or value record.
+
+    A provider tokenizer may be supplied. Without one the UTF-8 byte count is a
+    conservative fallback, explicitly recorded rather than called actual tokens.
+    Oversized indivisible cards fail with a review reason instead of silent loss.
+    """
+    import hashlib
+    counter = token_counter if callable(token_counter) else lambda text: len(text.encode('utf-8'))
+    method = 'provider_tokenizer' if callable(token_counter) else 'utf8_byte_upper_bound_fallback'
+    budget = max(0, int(input_token_budget) - int(output_reserve)) if input_token_budget is not None else None
+    shared, candidates = [], []
+    for card in audit_packet.get('reader_cards') or []:
+        (shared if card.get('category') in {'study_frame', 'quantitation_provenance'} else candidates).append(card)
+    batches, current = [], []
+
+    def compose(cards):
+        packet = {**audit_packet, 'reader_cards': shared + cards}
+        prompt, trace = compose_compacted_narrative_prompt(packet, section_type, plan,
+            extra_suffix=extra_suffix, max_chars=max_chars, start_compaction_stage=5)
+        count = int(counter(prompt))
+        trace.update(token_count=count, token_count_method=method, input_token_budget=budget,
+                     output_reserve=output_reserve, resolved_prompt=prompt,
+                     resolved_prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest())
+        fits = len(prompt) <= max_chars and (budget is None or count <= budget)
+        return prompt, trace, fits
+
+    for card in candidates:
+        _, _, fits = compose(current + [card])
+        if fits:
+            current.append(card)
+            continue
+        if current:
+            prompt, trace, _ = compose(current)
+            batches.append((prompt, trace))
+        current = [card]
+        if not compose(current)[2]:
+            raise ValueError('indivisible_evidence_exceeds_section_budget')
+    prompt, trace, fits = compose(current)
+    if not fits:
+        raise ValueError('study_frame_exceeds_section_budget')
+    batches.append((prompt, trace))
+    if len(batches) > max_parts:
+        raise ValueError('section_review_partition_budget_exhausted')
+    return batches

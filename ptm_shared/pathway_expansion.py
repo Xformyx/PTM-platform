@@ -568,7 +568,7 @@ def score_pathways(
         if site.E is not None:
             by_time_gene.setdefault(site.timepoint, {}).setdefault(site.gene, []).append(site.E)
             abs_e = abs(site.E)
-            if abs_e >= peak_abs_by_gene.get(site.gene, -1.0):
+            if abs_e > peak_abs_by_gene.get(site.gene, -1.0) or (abs_e == peak_abs_by_gene.get(site.gene) and _time_key(site.timepoint) < _time_key(peak_time_by_gene[site.gene])):
                 peak_abs_by_gene[site.gene] = abs_e
                 peak_time_by_gene[site.gene] = site.timepoint
         if site.is_denovo:
@@ -597,7 +597,14 @@ def score_pathways(
             dn_high = len({(s.gene, s.position) for s in dn_sites if s.high_confidence_denovo})
             coverage = _coverage(direct_here, hits, set(scores))
             connected = _connectedness(direct_here, kegg_pairs)
-            temporal = _temporal_order(direct_here, kegg_pairs, peak_time_by_gene, timepoints)
+            directed_pairs = [
+                (str(e.get("subject_gene") or e.get("source") or "").upper(),
+                 str(e.get("object_gene") or e.get("target") or "").upper())
+                for e in (network_data or {}).get("edges", [])
+                if e.get("direction_status") == "source_verified" and e.get("relation_type") in {
+                    "kinase_site_reaction", "phosphatase_site_reaction", "directed_reaction"}
+            ]
+            temporal = _temporal_order(direct_here, directed_pairs, peak_time_by_gene, timepoints)
             dcons, n_ann = _direction_consistency(sites, hits, tp)
             nes = stats.get("nes")
             term = classify_term(
@@ -690,7 +697,7 @@ def score_pathways(
 
 
 def _coverage(direct: Set[str], pathway_genes: Set[str], universe: Set[str]) -> Optional[float]:
-    in_u = pathway_genes & universe
+    in_u = pathway_genes
     if not in_u:
         return None
     return float(len(direct & in_u) / len(in_u))

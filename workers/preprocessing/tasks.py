@@ -17,6 +17,10 @@ import os
 import time
 import traceback
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from celery_app import app
 from common.db_update import get_order_status, update_order_status
@@ -278,7 +282,15 @@ def run_preprocessing(self, order_id: int, config: dict):
         quant_output = f"ptm_vector_data_normalized{file_suffix}.tsv"
         all_protein_output = f"all_protein_level_changes_normalized{file_suffix}.tsv"
 
-        if _has_output(order_output, quant_output, all_protein_output):
+        from common.phase_b_cache import stage_fingerprint, stage_cache_valid, record_stage_completion, preserve_stage_outputs
+        code_root = Path(__file__).parent / 'core'
+        quant_policy = {"conditions": condition_map, "sample_manifest": config.get('sample_manifest'),
+                        "normalization_policy": config.get('normalization_policy', 'legacy_median.v1'),
+                        "ptm_mode": ptm_mode}
+        quant_key = stage_fingerprint({'pr': pr_path, 'pg': pg_path, 'reference': fasta_path}, quant_policy,
+                                     [code_root / 'ptm_quantification.py', code_root / 'enhanced_motif_analyzer_v2.py'])
+        quant_cached = stage_cache_valid(order_output, 'quantification', quant_key, [quant_output, all_protein_output])
+        if quant_cached and _has_output(order_output, quant_output, all_protein_output):
             logger.info(f"[Order {order_id}] Step 1 skipped — quantification outputs already exist")
             publish_progress(order_id, "preprocessing", "ptm_quantification", "completed", 50, "PTM quantification skipped (cached)")
             _emit_prep_phase(order_id, "ptm_quantification", "done", "cached", 50)
@@ -297,11 +309,14 @@ def run_preprocessing(self, order_id: int, config: dict):
                 condition_map=condition_map,
                 progress_callback=quant_cb,
                 sample_manifest=config.get("sample_manifest") or (config.get("experimental_context") or {}).get("sample_manifest"),
+                normalization_policy=config.get("normalization_policy", "legacy_median.v1"),
             )
 
+            preserve_stage_outputs(order_output, [path.name for path in order_output.glob(f'*normalized{file_suffix}.tsv')])
             success = analyzer.run_analysis(pr_path, pg_path)
             if not success:
                 raise RuntimeError("PTM quantification failed")
+            record_stage_completion(order_output, 'quantification', quant_key, [quant_output, all_protein_output])
 
             publish_progress(order_id, "preprocessing", "ptm_quantification", "completed", 50, "PTM quantification complete")
             _emit_prep_phase(order_id, "ptm_quantification", "done", "PTM quantification complete", 50)
@@ -435,7 +450,7 @@ def run_preprocessing(self, order_id: int, config: dict):
             f.name.startswith("ptm_vector_report_") or f.name.startswith("ptm_vector_summary_report")
             for f in order_output.glob("*.png")
         )
-        if has_vector_reports:
+        if has_vector_reports and quant_cached:
             publish_progress(order_id, "preprocessing", "vector_report", "completed", 55, "PTM vector plots skipped (cached)")
             _emit_prep_phase(order_id, "vector_report", "done", "cached", 55)
         else:
@@ -514,7 +529,9 @@ def run_preprocessing(self, order_id: int, config: dict):
         # ================================================================
         enriched_output = f"unified_protein_data_enriched{file_suffix}.tsv"
 
-        if _has_output(order_output, enriched_output):
+        enrichment_key = stage_fingerprint({'vector': order_output / quant_output, 'protein': order_output / all_protein_output, 'reference': fasta_path},
+            {'species': species, 'snapshot': config.get('reference_snapshot'), 'mode': ptm_mode}, [code_root / 'unified_enricher.py'])
+        if stage_cache_valid(order_output, 'unified_enrichment', enrichment_key, [enriched_output]) and _has_output(order_output, enriched_output):
             logger.info(f"[Order {order_id}] Step 2 skipped — unified enrichment output already exists")
             publish_progress(order_id, "preprocessing", "unified_enrichment", "completed", 70, "Domain/motif enrichment skipped (cached)")
             _emit_prep_phase(order_id, "unified_enrichment", "done", "cached", 70)
@@ -540,8 +557,10 @@ def run_preprocessing(self, order_id: int, config: dict):
                     mcp_client=mcp,
                     progress_callback=enrichment_cb,
                 )
+                preserve_stage_outputs(order_output, [enriched_output])
                 enricher.run_unified_enrichment(ptm_vector_file, all_protein_file)
                 if _has_output(order_output, enriched_output):
+                    record_stage_completion(order_output, 'unified_enrichment', enrichment_key, [enriched_output])
                     enrichment_detail = "Domain/motif enrichment complete"
                 else:
                     logger.warning(
@@ -565,7 +584,10 @@ def run_preprocessing(self, order_id: int, config: dict):
         # ================================================================
         bio_output = f"unified_protein_data_enriched_bio_enriched{file_suffix}.tsv"
 
-        if _has_output(order_output, bio_output):
+        bio_key = stage_fingerprint({'enriched': order_output / enriched_output},
+            {'species': species, 'kegg': kegg_org, 'snapshot': config.get('reference_snapshot'), 'options': config.get('analysis_options')},
+            [code_root / 'biological_enricher.py'])
+        if stage_cache_valid(order_output, 'biological_enrichment', bio_key, [bio_output]) and _has_output(order_output, bio_output):
             logger.info(f"[Order {order_id}] Step 3 skipped — biological enrichment output already exists")
             publish_progress(order_id, "preprocessing", "biological_enrichment", "completed", 90, "Biological enrichment skipped (cached)")
             _emit_prep_phase(order_id, "biological_enrichment", "done", "cached", 90)
@@ -604,7 +626,9 @@ def run_preprocessing(self, order_id: int, config: dict):
                 enriched_df = bio_enricher.enrich_dataframe(df, species_tax_id=species, kegg_organism=kegg_org)
 
                 bio_out = order_output / bio_output
+                preserve_stage_outputs(order_output, [bio_output])
                 enriched_df.to_csv(bio_out, sep="\t", index=False)
+                record_stage_completion(order_output, 'biological_enrichment', bio_key, [bio_output])
                 logger.info(f"[Order {order_id}] Biological enrichment saved: {bio_out.name}")
             else:
                 logger.warning(f"[Order {order_id}] Skipping biological enrichment — {enriched_file.name} not found")
@@ -712,11 +736,15 @@ def run_preprocessing(self, order_id: int, config: dict):
                             secondary_condition_map[fname] = cond
                         logger.info(f"[Order {order_id}] Built secondary_condition_map from secondary_sample_config: {len(secondary_condition_map)} entries")
                     else:
-                        # Last resort: use primary condition_map (may cause mismatches)
-                        secondary_condition_map = condition_map
-                        logger.warning(f"[Order {order_id}] No secondary_sample_config — falling back to primary condition_map")
+                        secondary_manifest = config.get('secondary_sample_manifest') or {}
+                        secondary_condition_map = {sample['sample_id']: sample['condition'] for sample in secondary_manifest.get('samples') or []}
+                        if not secondary_condition_map:
+                            raise ValueError('secondary_condition_design_unavailable')
 
-                if _has_output(secondary_output_dir, secondary_quant_output, secondary_all_protein_output):
+                secondary_quant_key = stage_fingerprint({'pr': secondary_pr_path, 'pg': secondary_pg_path, 'reference': fasta_path},
+                    {**quant_policy, 'conditions': secondary_condition_map, 'sample_manifest': config.get('secondary_sample_manifest'), 'ptm_mode': secondary_ptm_mode},
+                    [code_root / 'ptm_quantification.py', code_root / 'enhanced_motif_analyzer_v2.py'])
+                if stage_cache_valid(secondary_output_dir, 'quantification', secondary_quant_key, [secondary_quant_output, secondary_all_protein_output]) and _has_output(secondary_output_dir, secondary_quant_output, secondary_all_protein_output):
                     logger.info(f"[Order {order_id}] Secondary Step 1 skipped — outputs already exist")
                 else:
                     from preprocessing.core.ptm_quantification import PTMQuantificationAnalyzer
@@ -730,6 +758,8 @@ def run_preprocessing(self, order_id: int, config: dict):
                         ptm_mode=secondary_ptm_mode,
                         condition_map=secondary_condition_map,
                         progress_callback=secondary_quant_cb,
+                        sample_manifest=config.get("secondary_sample_manifest") or (config.get("experimental_context") or {}).get("secondary_sample_manifest"),
+                        normalization_policy=config.get("normalization_policy", "legacy_median.v1"),
                     )
                     if is_quick_analysis(config.get("analysis_options")):
                         secondary_pr_path, secondary_pg_path, sec_quick = (
@@ -745,17 +775,21 @@ def run_preprocessing(self, order_id: int, config: dict):
                             f"[Order {order_id}] Quick Analysis secondary PR "
                             f"{sec_quick['pr_rows_before']:,}→{sec_quick['pr_rows_after']:,}"
                         )
+                    preserve_stage_outputs(secondary_output_dir, [path.name for path in secondary_output_dir.glob(f'*normalized{secondary_file_suffix}.tsv')])
                     secondary_success = secondary_analyzer.run_analysis(secondary_pr_path, secondary_pg_path)
                     if not secondary_success:
                         logger.warning(f"[Order {order_id}] Secondary PTM quantification failed — continuing without")
                         secondary_output_dir = None
                     else:
+                        record_stage_completion(secondary_output_dir, 'quantification', secondary_quant_key, [secondary_quant_output, secondary_all_protein_output])
                         logger.info(f"[Order {order_id}] Secondary PTM quantification complete")
 
                 # Secondary Step 2: Unified Enrichment
                 if secondary_output_dir:
                     secondary_enriched_output = f"unified_protein_data_enriched{secondary_file_suffix}.tsv"
-                    if _has_output(secondary_output_dir, secondary_enriched_output):
+                    secondary_enrichment_key = stage_fingerprint({'vector': secondary_output_dir / secondary_quant_output, 'protein': secondary_output_dir / secondary_all_protein_output, 'reference': fasta_path},
+                        {'species': species, 'mode': secondary_ptm_mode, 'snapshot': config.get('reference_snapshot')}, [code_root / 'unified_enricher.py'])
+                    if stage_cache_valid(secondary_output_dir, 'unified_enrichment', secondary_enrichment_key, [secondary_enriched_output]) and _has_output(secondary_output_dir, secondary_enriched_output):
                         logger.info(f"[Order {order_id}] Secondary Step 2 skipped — enrichment output exists")
                     else:
                         secondary_ptm_vector_file = str(secondary_output_dir / secondary_quant_output)
@@ -772,13 +806,18 @@ def run_preprocessing(self, order_id: int, config: dict):
                                 ptm_mode=secondary_ptm_mode,
                                 mcp_client=mcp,
                             )
+                            preserve_stage_outputs(secondary_output_dir, [secondary_enriched_output])
                             secondary_enricher.run_unified_enrichment(secondary_ptm_vector_file, secondary_all_protein_file)
+                            if _has_output(secondary_output_dir, secondary_enriched_output):
+                                record_stage_completion(secondary_output_dir, 'unified_enrichment', secondary_enrichment_key, [secondary_enriched_output])
                             logger.info(f"[Order {order_id}] Secondary unified enrichment complete")
 
                 # Secondary Step 3: Biological Enrichment
                 if secondary_output_dir:
                     secondary_bio_output = f"unified_protein_data_enriched_bio_enriched{secondary_file_suffix}.tsv"
-                    if _has_output(secondary_output_dir, secondary_bio_output):
+                    secondary_bio_key = stage_fingerprint({'enriched': secondary_output_dir / secondary_enriched_output},
+                        {'species': species, 'kegg': kegg_org, 'snapshot': config.get('reference_snapshot')}, [code_root / 'biological_enricher.py'])
+                    if stage_cache_valid(secondary_output_dir, 'biological_enrichment', secondary_bio_key, [secondary_bio_output]) and _has_output(secondary_output_dir, secondary_bio_output):
                         logger.info(f"[Order {order_id}] Secondary Step 3 skipped — bio enrichment output exists")
                     else:
                         secondary_enriched_file = secondary_output_dir / secondary_enriched_output
@@ -800,7 +839,9 @@ def run_preprocessing(self, order_id: int, config: dict):
                                 secondary_df, species_tax_id=species, kegg_organism=kegg_org
                             )
                             secondary_bio_out = secondary_output_dir / secondary_bio_output
+                            preserve_stage_outputs(secondary_output_dir, [secondary_bio_output])
                             secondary_enriched_df.to_csv(secondary_bio_out, sep="\t", index=False)
+                            record_stage_completion(secondary_output_dir, 'biological_enrichment', secondary_bio_key, [secondary_bio_output])
                             logger.info(f"[Order {order_id}] Secondary biological enrichment saved: {secondary_bio_out.name}")
 
                 publish_progress(
@@ -874,6 +915,9 @@ def run_preprocessing(self, order_id: int, config: dict):
             "species_tax_id": config.get("species_tax_id", "10090"),
             "kegg_organism": config.get("kegg_organism", "mmu"),
             "experimental_context": config.get("experimental_context"),
+            "sample_manifest": config.get("sample_manifest"),
+            "secondary_sample_manifest": config.get("secondary_sample_manifest"),
+            "normalization_policy": config.get("normalization_policy", "legacy_median.v1"),
             "top_n_ptms": config.get("top_n_ptms", 50),
             "ptm_selection_mode": config.get("ptm_selection_mode", "top_n"),
             "single_time_point": config.get("single_time_point", False),

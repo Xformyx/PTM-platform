@@ -475,19 +475,20 @@ def run_section_writing(state: dict) -> dict:
         state,
         temporal_evidence_packet=temporal_evidence_packet,
         biological_synthesis_packet=biological_synthesis_packet,
-        references=[],
+        references=all_references,
     )
     authoring_plan = deterministic_authoring_plan(authoring_packet)
     finding_references = []
     if reader_authoring_shadow:
         from ..finding_literature import cards_for_selected_findings, retrieve_finding_literature
-        selected_ids = {f["reader_feature_id"] for f in authoring_plan.get("key_findings") or []}
+        selected_ids = {c["feature_identity"]["reader_feature_id"] for c in authoring_packet.get("reader_cards") or [] if (c.get("feature_identity") or {}).get("reader_feature_id")}
         selected_cards = cards_for_selected_findings(authoring_packet.get("reader_cards") or [], selected_ids)
-        retrieval = retrieve_finding_literature(selected_cards, retriever, context, llm=llm if llm_available else None)
+        retrieval = retrieve_finding_literature(selected_cards, retriever, context,
+            llm=llm if llm_available else None, policy=report_config.get("finding_review_policy"))
         finding_references = retrieval.pop("references")
         state["finding_literature_retrieval"] = retrieval
         authoring_packet = build_authoring_packet(state, temporal_evidence_packet=temporal_evidence_packet,
-            biological_synthesis_packet=biological_synthesis_packet, references=finding_references)
+            biological_synthesis_packet=biological_synthesis_packet, references=finding_references + all_references)
         authoring_plan = deterministic_authoring_plan(authoring_packet)
 
     reader_authoring_validator_audit: Dict[str, dict] = {}
@@ -942,7 +943,7 @@ def run_section_writing(state: dict) -> dict:
                 state,
                 temporal_evidence_packet=temporal_evidence_packet,
                 biological_synthesis_packet=biological_synthesis_packet,
-                references=chroma_refs + finding_references,
+                references=chroma_refs + finding_references + all_references,
             )
             section_authoring_packet = focus_authoring_packet(section_authoring_packet, authoring_plan)
             extra_suffix = ""
@@ -1201,17 +1202,49 @@ def run_section_writing(state: dict) -> dict:
                 role_issues = [f"missing_paragraph_role:{role}" for role in required_roles - present_roles]
                 return rejected + role_issues + section_content_issues(prose, section_type) + [f"missing_finding:{fid}" for fid in missing]
             generation_kwargs = {"response_format": NARRATIVE_RESPONSE_FORMAT, "content_validator": validate_draft}
-        content = llm.generate_with_retry(
-            prompt,
-            system_prompt=ptm_system_prompt,
-            temperature=llm_temperature,
-            max_tokens=max_tok,
-            min_words=min_words,
-            section_name=section_type.capitalize(),
-            max_retries=2,
-            trace_sink=generation_attempts,
-            **generation_kwargs,
-        )
+        token_budget = report_config.get('model_context_token_budget')
+        count_tokens = getattr(llm, 'count_tokens', None)
+        estimated_tokens = int(count_tokens(prompt)) if callable(count_tokens) else len(prompt.encode('utf-8'))
+        needs_partition = section_authoring_packet is not None and (
+            len(prompt) > MAX_PROMPT_CHARS or token_budget is not None and estimated_tokens + max_tok > int(token_budget))
+        if needs_partition:
+            from report_generation.core.section_model_packet import partition_section_prompts
+            from common.model_json import parse_model_json
+            try:
+                batches = partition_section_prompts(section_authoring_packet, section_type, authoring_plan,
+                    extra_suffix=extra_suffix, max_chars=MAX_PROMPT_CHARS, token_counter=count_tokens,
+                    input_token_budget=token_budget, output_reserve=max_tok,
+                    max_parts=int(report_config.get('maximum_section_review_parts', 32)))
+                paragraphs = []
+                section_compaction_trace['partitions'] = [trace for _, trace in batches]
+                for batch_index, (batch_prompt, batch_trace) in enumerate(batches):
+                    raw = llm.generate_with_retry(batch_prompt, system_prompt=ptm_system_prompt,
+                        temperature=llm_temperature, max_tokens=max_tok, min_words=0,
+                        section_name=f'{section_type} part {batch_index + 1}', max_retries=1,
+                        trace_sink=generation_attempts, response_format=NARRATIVE_RESPONSE_FORMAT)
+                    part = parse_model_json(raw)
+                    if not isinstance(part, dict) or not isinstance(part.get('paragraphs'), list):
+                        raise ValueError('section_partition_parse_failure')
+                    for paragraph in part['paragraphs']:
+                        paragraph['paragraph_id'] = f'{section_type}.part{batch_index + 1}.p{len(paragraphs) + 1}'
+                        paragraphs.append(paragraph)
+                content = json.dumps({'paragraphs': paragraphs}, ensure_ascii=False)
+            except (ValueError, TypeError, KeyError) as error:
+                content = None
+                generation_degraded = True
+                section_compaction_trace.update(fallback_reason=str(error), generation_degraded=True, prompt_compaction_stage=5)
+        else:
+            content = llm.generate_with_retry(
+                prompt,
+                system_prompt=ptm_system_prompt,
+                temperature=llm_temperature,
+                max_tokens=max_tok,
+                min_words=min_words,
+                section_name=section_type.capitalize(),
+                max_retries=2,
+                trace_sink=generation_attempts,
+                **generation_kwargs,
+            )
         # A failed first request should not immediately replace a researcher
         # manuscript with deterministic prose. Retry once with a smaller,
         # independently traceable retained-evidence packet before fallback.
@@ -1487,6 +1520,9 @@ def run_section_writing(state: dict) -> dict:
                 reader_prose_snapshots[section_type] = {
                     "contract_version": "reader_prose_section_trace.v3",
                     "prompt_characters": prompt_len,
+                    "resolved_prompt": prompt,
+                    "resolved_prompt_sha256": __import__('hashlib').sha256(prompt.encode()).hexdigest(),
+                    "prompt_partitions": section_compaction_trace.get('partitions', []),
                     "prompt_compaction_stage": section_compaction_trace.get("prompt_compaction_stage"),
                     "prompt_character_count": section_compaction_trace.get("prompt_character_count", prompt_len),
                     "retained_evidence_ids": section_compaction_trace.get("retained_evidence_ids") or [],
@@ -1604,11 +1640,12 @@ def run_section_writing(state: dict) -> dict:
                     }
                 )
 
+    from ..citation_formatter import Reference
     seen_titles = set()
     unique_chroma_refs = []
     for ref in _all_section_chroma_refs:
-        title_key = ref.get("title", "").strip().lower()
-        if title_key and title_key not in seen_titles:
+        title_key = Reference(**{key: ref.get(key, '') for key in ('title', 'authors', 'year', 'journal', 'pmid', 'doi')}).key
+        if title_key not in seen_titles:
             seen_titles.add(title_key)
             unique_chroma_refs.append(ref)
     logger.info(f"[v10.8] Collected {len(_all_section_chroma_refs)} total ChromaDB refs, "
@@ -1618,7 +1655,7 @@ def run_section_writing(state: dict) -> dict:
     # In reader-authoring shadow mode, the bibliography is limited to the
     # selected ChromaDB collection identities that entered authoring packets.
     unified_references = (
-        [ref for ref in unique_chroma_refs + finding_references if is_traceable_reference(ref)]
+        [ref for ref in unique_chroma_refs + finding_references + all_references if is_traceable_reference(ref)]
         if reader_authoring_shadow
         else unique_chroma_refs + (all_references or [])
     )
@@ -1627,7 +1664,7 @@ def run_section_writing(state: dict) -> dict:
             state,
             temporal_evidence_packet=temporal_evidence_packet,
             biological_synthesis_packet=biological_synthesis_packet,
-            references=unique_chroma_refs + finding_references,
+            references=unique_chroma_refs + finding_references + all_references,
         )
 
     # Addendum mode does not alter the LLM-written core sections. Its content is
@@ -2762,16 +2799,20 @@ def _collect_all_references(ptms: list) -> list:
     filtered_count = 0
     for ptm in ptms:
         enr = ptm.get("rag_enrichment", {})
-        for finding in enr.get("recent_findings", []):
+        for finding in (enr.get("articles") or enr.get("recent_findings") or []):
             pmid = finding.get("pmid", "")
-            if pmid and pmid not in seen_pmids:
-                seen_pmids.add(pmid)
+            reference_key = ('pmid:' + str(pmid)) if pmid else ('doi:' + str(finding.get('doi')).lower()) if finding.get('doi') else None
+            if reference_key and reference_key not in seen_pmids:
+                seen_pmids.add(reference_key)
                 ref_entry = {
+                    **finding,
                     "pmid": pmid,
+                    "source_paths": ["upstream_pubmed"],
+                    "document": finding.get("abstract") or finding.get("abstract_excerpt") or "",
                     "title": finding.get("title", ""),
                     "journal": finding.get("journal", ""),
                     "pub_date": finding.get("pub_date", ""),
-                    "abstract_excerpt": finding.get("abstract_excerpt", "")[:400],
+                    "abstract_excerpt": finding.get("abstract") or finding.get("abstract_excerpt", ""),
                     "relevance_score": finding.get("relevance_score", 0),
                     "gene": ptm.get("gene", ""),
                 }
@@ -2902,7 +2943,7 @@ def _hypothesis_summary_text(hypotheses: list) -> str:
         if ev_count > 0:
             ev_tag = f" [literature: {sup_count}/{ev_count} supporting, validity={validity:.2f}]"
         # Compose: pathway-focused one-liner + mechanism
-        line = f"  H{hid}: {prediction[:120]} (confidence={conf:.2f}){ev_tag}"
+        line = f"  H{hid}: {prediction} (hypothesis; source faithfulness and independent validation remain pending){ev_tag}"
         if mechanism:
             line += f"\n        Mechanism: {mechanism[:200]}"
         if ptm_str:

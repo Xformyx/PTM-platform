@@ -478,7 +478,7 @@ def test_authoring_packet_suppresses_kinase_names_when_all_footprints_are_non_ev
     assert "did not support a family-specific footprint interpretation under the prespecified criteria" in summaries
 
 
-def test_authoring_packet_uses_kinase_family_not_isoform_specific_activity():
+def test_authoring_packet_uses_explicit_equivalence_not_isoform_specific_activity():
     packet = build_authoring_packet(
         {
             "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
@@ -497,7 +497,7 @@ def test_authoring_packet_uses_kinase_family_not_isoform_specific_activity():
     )
     kinase_cards = [card for card in packet["reader_cards"] if card["category"] == "kinase_context"]
     assert len(kinase_cards) == 1
-    assert "KIN1 / KIN2 family" in kinase_cards[0]["reader_summary"]
+    assert "KIN1 / KIN2 candidate group" in kinase_cards[0]["reader_summary"]
     assert "isoform-specific activity" in kinase_cards[0]["counterevidence"]
 
 

@@ -738,6 +738,25 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     declared_conditions=declared_conditions,
                     study_id=f"order_{order_id}",
                 )
+                from ptm_shared.temporal_input_reconstruction import load_biological_replicate_series
+                from ptm_shared.feature_identity import canonical_feature_identity
+                replicate_identities = {canonical_feature_identity(row)['feature_id']: canonical_feature_identity(row)
+                                        for row in feature_provenance_rows}
+                replicate_series, replicate_audit = load_biological_replicate_series(
+                    temporal_output_dir, file_suffix=file_suffix, conditions=declared_conditions,
+                    sample_manifest=config.get('sample_manifest') or (config.get('experimental_context') or {}).get('sample_manifest'),
+                    feature_identities=replicate_identities,
+                )
+                # Legacy RAG temporal vectors are site projections. Attach raw
+                # uncertainty only where exactly one measured form maps to a site.
+                site_forms = {}
+                for fid, identity in replicate_identities.items():
+                    site = f"{identity.get('gene')}_{identity.get('position')}"
+                    site_forms.setdefault(site, []).append(fid)
+                replicate_series = {site: replicate_series[forms[0]] for site, forms in site_forms.items()
+                                    if len(forms) == 1 and forms[0] in replicate_series
+                                    and site in temporal_bundle['ptm_timeseries']}
+                replicate_audit['site_projection_policy'] = 'unique_form_only_no_multiform_aggregation.v1'
                 temporal_sidecar = build_production_temporal_ptm_protein_analysis(
                     output_dir=temporal_output_dir,
                     ptm_type=ptm_type,
@@ -745,7 +764,9 @@ def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, 
                     conditions=declared_conditions,
                     tmm_result=heatmap_data,
                     study_context=study_context,
+                    raw_replicate_fc_series=replicate_series,
                     temporal_input_provenance={
+                        "biological_replicate_adapter": replicate_audit,
                         **temporal_bundle["provenance"],
                         "enriched_vector_crosswalk_audit": vector_crosswalk_audit,
                         "study_context_resolution": context_provenance,
@@ -2508,14 +2529,9 @@ def run_rag_enrichment(self, order_id: int, config: dict):
                     f.write(sec_report_md)
                 logger.info(f"[Order {order_id}] Saved secondary report: {secondary_md_path_out.name}")
 
-                # Find secondary TSV path
-                sec_bio_tsv = sec_dir / f"unified_protein_data_enriched_bio_enriched{secondary_file_suffix}.tsv"
-                if sec_bio_tsv.exists():
-                    secondary_tsv_path = str(sec_bio_tsv)
-                else:
-                    sec_tsv_candidates = list(sec_dir.glob("*bio_enriched*.tsv"))
-                    if sec_tsv_candidates:
-                        secondary_tsv_path = str(sec_tsv_candidates[0])
+                # Use the complete quantified vector, not a display/enrichment
+                # subset selected by filename order.
+                secondary_tsv_path = str(sec_vector_file)
 
                 publish_progress(order_id, "rag_enrichment", "secondary_enrichment", "completed", 95,
                                 f"Secondary {secondary_ptm_type} enrichment complete ({len(sec_enriched)} PTMs)")
@@ -2526,11 +2542,14 @@ def run_rag_enrichment(self, order_id: int, config: dict):
 
         # Chain to Stage 3: Report Generation
         report_config = {
+            "sample_manifest": config.get("sample_manifest"),
+            "secondary_sample_manifest": config.get("secondary_sample_manifest"),
+            "normalization_policy": config.get("normalization_policy", "legacy_median.v1"),
             "order_code": order_code,
             "rag_output_dir": str(order_output),
             "enriched_json_path": str(enriched_json_path),
             "md_report_path": str(md_path),
-            "tsv_data_path": config.get("tsv_data_path", ""),
+            "tsv_data_path": str(vector_file),
             "experimental_context": experimental_context,
             "research_questions": config.get("research_questions", []),
             "chromadb_collections": config.get("chromadb_collections", []),

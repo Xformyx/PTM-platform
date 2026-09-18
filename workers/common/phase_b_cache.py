@@ -1,20 +1,9 @@
-"""
-Persistent cache for Phase B LLM sub-task results.
+"""Versioned persistent derived-interpretation cache.
 
-캐시 키: MD5(gene__position__ptm_type__task_name__pmid_hash)
- - pmid_hash : MD5(sorted PMID 목록을 쉼표로 이은 문자열)
- - task_name : abstract | kinase | functional | fulltext | validation | regulation
-
-Subset matching (v2):
-  논문 수 변경 시 캐시를 재활용할 수 있도록, pmid_list 컬럼에 실제 PMID 목록을 저장한다.
-  정확한 키 매치가 없을 때 get_cached_best_match()로 폴백하면, 요청 PMID의 부분집합으로
-  분석된 기존 캐시 중 가장 많은 논문을 사용한 결과를 반환한다.
-
-  예) 3편([A,B,C])으로 캐시된 결과가 있고, 5편([A,B,C,D,E])으로 요청 시
-      → 기존 3편 캐시 히트 (D,E는 새 논문으로 LLM 생략)
-
-Uses the shared SQLAlchemy engine from common.db_engine.
-캐시 실패는 항상 silently ignore — 캐시가 없어도 파이프라인은 정상 동작한다.
+Exact PMID coverage plus caller-scoped context/model/prompt keys are required.
+The historical best-match entry point now performs exact lookup only; smaller
+prior searches cannot satisfy a larger requested evidence scope. Errors are not
+stored as successful interpretations. Database failure remains a cache miss.
 """
 
 import hashlib
@@ -47,7 +36,7 @@ def _pmid_set(pmids: list) -> set:
 
 def make_cache_key(gene: str, position: str, ptm_type: str, task_name: str, pmids: list) -> str:
     ph = _pmid_hash(pmids)
-    raw = f"{gene}__{position}__{ptm_type}__{task_name}__{ph}"
+    raw = f"interpretation.v3__{gene}__{position}__{ptm_type}__{task_name}__{ph}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
@@ -82,53 +71,9 @@ def get_cached(gene: str, position: str, ptm_type: str, task_name: str, pmids: l
 def get_cached_best_match(
     gene: str, position: str, ptm_type: str, task_name: str, pmids: list
 ) -> dict | None:
-    """
-    요청 PMID의 부분집합(subset)으로 분석된 기존 캐시 중 가장 많은 논문을 사용한 결과 반환.
-
-    논문 수를 변경했을 때 기존 캐시를 재활용하기 위한 폴백 조회.
-    pmid_list 컬럼이 NULL인 구형 캐시 엔트리는 건너뛴다.
-    """
-    if not pmids:
-        return None
-    requested = _pmid_set(pmids)
-    try:
-        engine = _engine()
-        ttl_clause = ""
-        params: dict = {"gene": gene, "pos": position, "ptm_type": ptm_type, "task": task_name}
-        if CACHE_TTL_DAYS > 0:
-            ttl_clause = " AND updated_at >= DATE_SUB(NOW(), INTERVAL :ttl DAY)"
-            params["ttl"] = CACHE_TTL_DAYS
-
-        sql = text(
-            "SELECT result_json, pmid_list FROM phase_b_cache "
-            "WHERE gene = :gene AND position = :pos AND ptm_type = :ptm_type "
-            "  AND task_name = :task AND pmid_list IS NOT NULL"
-            + ttl_clause +
-            " ORDER BY updated_at DESC LIMIT 50"
-        )
-        with engine.connect() as conn:
-            rows = conn.execute(sql, params).fetchall()
-
-        best_result = None
-        best_count = 0
-        for row in rows:
-            try:
-                cached_pmids = set(json.loads(row[1]))
-            except Exception:
-                continue
-            if cached_pmids and cached_pmids == requested and len(cached_pmids) > best_count:
-                best_result = json.loads(row[0])
-                best_count = len(cached_pmids)
-
-        if best_result is not None:
-            logger.info(
-                f"[PhaseB-Cache EXACT HIT] {gene} {position} / {task_name} "
-                f"— matched {best_count} articles from cache"
-            )
-        return best_result
-    except Exception as e:
-        logger.debug(f"[PhaseB-Cache] best_match failed ({gene}/{task_name}): {e}")
-        return None
+    """Compatibility adapter requiring identical context and evidence coverage."""
+    # Compatibility entry point: no scan can bypass schema/model/context keys.
+    return get_cached(gene, position, ptm_type, task_name, pmids)
 
 
 def set_cached(
@@ -139,7 +84,7 @@ def set_cached(
     빈 결과({})는 저장하지 않는다.
     pmid_list에 실제 PMID 목록을 JSON 배열로 저장 (subset matching용).
     """
-    if not result:
+    if not result or result.get("error") or result.get("query_status") in {"error", "timeout", "rate_limited", "api_error", "parse_failure"}:
         return
     key = make_cache_key(gene, position, ptm_type, task_name, pmids)
     try:
@@ -167,3 +112,62 @@ def set_cached(
         logger.debug(f"[PhaseB-Cache WRITE] {gene} {position} / {task_name} (key={key[:8]}…)")
     except Exception as e:
         logger.debug(f"[PhaseB-Cache] set failed ({gene}/{task_name}): {e}")
+
+
+def stage_fingerprint(source_paths, policy, code_paths=()):
+    """Content-addressed preprocessing dependency key, independent of mtimes."""
+    from pathlib import Path
+    from ptm_shared.report_revision import file_sha256
+    payload = {'schema_version': 'preprocessing_stage_cache.v1', 'policy': policy,
+               'sources': {role: file_sha256(path) if Path(path).is_file() else None for role, path in source_paths.items()},
+               'code': {Path(path).name: file_sha256(path) for path in code_paths}}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def stage_cache_valid(output_dir, stage, fingerprint, filenames):
+    from pathlib import Path
+    from datetime import datetime, timezone
+    from ptm_shared.report_revision import file_sha256
+    path = Path(output_dir) / ('.stage_' + stage + '.json')
+    try:
+        record = json.loads(path.read_text())
+        if record['fingerprint'] != fingerprint:
+            return False
+        # Live source freshness cannot be inferred from a file's existence.
+        if stage != 'quantification' and (datetime.now(timezone.utc).timestamp() - record['completed_at_epoch']) > 86400:
+            return False
+        return all(record['outputs'].get(name) == file_sha256(Path(output_dir) / name) for name in filenames)
+    except (OSError, ValueError, KeyError):
+        return False
+
+
+def record_stage_completion(output_dir, stage, fingerprint, filenames):
+    from pathlib import Path
+    from datetime import datetime, timezone
+    from ptm_shared.report_revision import file_sha256, _atomic_json
+    _atomic_json(Path(output_dir) / ('.stage_' + stage + '.json'), {
+        'schema_version': 'preprocessing_stage_cache.v1', 'fingerprint': fingerprint,
+        'completed_at_epoch': datetime.now(timezone.utc).timestamp(),
+        'outputs': {name: file_sha256(Path(output_dir) / name) for name in filenames}})
+
+
+def preserve_stage_outputs(output_dir, filenames):
+    """Move superseded generated files to content-addressed history before retry.
+
+    Raw inputs and registered report revisions are never supplied to this helper.
+    A failed producer therefore cannot leave an old file masquerading as new.
+    """
+    from pathlib import Path
+    from ptm_shared.report_revision import file_sha256
+    root = Path(output_dir).resolve()
+    for filename in filenames:
+        source = root / filename
+        if not source.resolve().is_relative_to(root) or source.name.startswith('rev_'):
+            raise ValueError('invalid_preprocessing_output_path')
+        if source.is_file():
+            digest = file_sha256(source)
+            destination = root / '.preprocessing_history' / digest / source.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists() and file_sha256(destination) != digest:
+                raise ValueError('preprocessing_history_integrity_mismatch')
+            source.replace(destination)

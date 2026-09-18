@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 REGULATION_PATTERNS = {
     "phosphorylation": [
-        (r"(\w+)\s+(?:phosphorylates?|phosphorylated)\s+(\w+)", "kinase", "substrate"),
+        (r"(\w+)\s+(?:(?:does?\s+not|may|might|indirectly)\s+)?(?:phosphorylates?|phosphorylated)\s+(\w+)", "kinase", "substrate"),
         (r"phosphorylation\s+(?:of|at)\s+(\w+)\s+(?:by|via|through)\s+(\w+)", "substrate", "kinase"),
         (r"(\w+)\s+kinase\s+(?:phosphorylates?|targets?)\s+(\w+)", "kinase", "substrate"),
-        (r"(\w+)\s+(?:is|was|were)\s+phosphorylated\s+by\s+(\w+)", "substrate", "kinase"),
+        (r"(\w+)\s+(?:is|was|were)\s+(?:(?:not|indirectly)\s+)?phosphorylated\s+by\s+(\w+)", "substrate", "kinase"),
     ],
     # v8.10: Ubiquitylation-specific patterns
     "ubiquitylation": [
@@ -132,13 +132,15 @@ class RegulationExtractor:
             for reg in regs:
                 reg["pmid"] = pmid
                 evidence.append(reg)
+                if reg["polarity"] != "positive" or reg["directness"] != "direct_wording":
+                    continue
 
                 if reg["type"] == "kinase":
                     kinase_substrate.append({
                         "kinase": reg["regulator"],
                         "substrate": reg["target"],
                         "pmid": pmid,
-                        "evidence": reg["sentence"][:200],
+                        "evidence": reg["sentence"],
                     })
                     upstream.append(reg["regulator"])
                 elif reg["type"] == "e3_ligase":
@@ -146,7 +148,7 @@ class RegulationExtractor:
                         "e3_ligase": reg["regulator"],
                         "substrate": reg["target"],
                         "pmid": pmid,
-                        "evidence": reg["sentence"][:200],
+                        "evidence": reg["sentence"],
                     })
                     upstream.append(reg["regulator"])
                 elif reg["type"] == "dub":
@@ -154,7 +156,7 @@ class RegulationExtractor:
                         "dub": reg["regulator"],
                         "substrate": reg["target"],
                         "pmid": pmid,
-                        "evidence": reg["sentence"][:200],
+                        "evidence": reg["sentence"],
                     })
                 elif reg["type"] == "upstream":
                     upstream.append(reg["regulator"])
@@ -180,12 +182,12 @@ class RegulationExtractor:
         return {
             "upstream_regulators": upstream,
             "downstream_targets": downstream,
-            "kinase_substrate": kinase_substrate[:5],
-            "e3_substrate": e3_substrate[:5],
-            "dub_substrate": dub_substrate[:5],
+            "kinase_substrate": kinase_substrate,
+            "e3_substrate": e3_substrate,
+            "dub_substrate": dub_substrate,
             "chain_types": sorted(chain_types_found),
             "diseases": sorted(all_diseases),
-            "regulation_evidence": evidence[:20],
+            "regulation_evidence": evidence,
         }
 
     def _extract_regulation(self, text: str, gene: str) -> List[dict]:
@@ -193,8 +195,9 @@ class RegulationExtractor:
         sentences = re.split(r"[.!?]\s+", text)
         gene_lower = gene.lower()
 
+        seen = set()
         for sentence in sentences:
-            if gene_lower not in sentence.lower():
+            if not re.search(r"\b" + re.escape(gene_lower) + r"\b", sentence.lower()):
                 continue
 
             for category, patterns in REGULATION_PATTERNS.items():
@@ -204,18 +207,30 @@ class RegulationExtractor:
                         groups = m.groups()
                         if len(groups) >= 2:
                             role1, role2 = pattern_tuple[1], pattern_tuple[2]
-                            results.append({
-                                "type": category,
-                                "regulator": groups[0],
-                                "target": groups[1],
-                                "sentence": sentence.strip()[:300],
-                            })
+                            if any(g.lower() in {"is", "was", "were", "by", "via", "through", "of", "not", "the"} for g in groups[:2]):
+                                continue
+                            reverse = role1 in {"substrate", "target"}
+                            regulator, target = (groups[1], groups[0]) if reverse else groups[:2]
+                            polarity = "negative" if re.search(r"\b(?:not|never|neither|fails? to|no evidence)\b", sentence, re.I) else "positive"
+                            directness = "indirect_or_uncertain" if re.search(r"\b(?:indirect|indirectly|may|might|could|via|through)\b", sentence, re.I) else "direct_wording"
+                            key = (regulator.upper(), target.upper(), category, polarity, directness, sentence)
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            results.append({"type": role2 if reverse else role1, "relation_type": category,
+                                            "regulator": regulator, "target": target,
+                                            "subject_role": role2 if reverse else role1,
+                                            "object_role": role1 if reverse else role2,
+                                            "sentence": sentence.strip(), "polarity": polarity,
+                                            "directness": directness, "evidence_role": "external_text_assertion",
+                                            "scope_status": "species_site_context_unresolved"})
                         elif len(groups) == 1:
                             results.append({
                                 "type": category,
                                 "regulator": groups[0],
                                 "target": gene,
-                                "sentence": sentence.strip()[:300],
+                                "sentence": sentence.strip(),
+                                "polarity": "unknown", "directness": "unspecified",
                             })
         return results
 

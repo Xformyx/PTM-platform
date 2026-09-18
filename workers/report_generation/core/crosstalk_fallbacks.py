@@ -11,6 +11,17 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def generate_crosstalk_conclusion_fallback(n_dual, n_conc, n_disc, n_gate, n_shared_nonptm,
+                                          p_type, s_type, *args):
+    """Observation-only compatibility fallback for the legacy companion writer."""
+    return (f'The {p_type} and {s_type} datasets contain {n_dual} shared proteins, with '
+            f'{n_conc} concordant and {n_disc} discordant descriptive patterns. '
+            f'{n_gate} candidate temporal orderings and {n_shared_nonptm} shared protein contexts were recorded. '
+            'These counts do not establish modification-dependent regulation, causal gating, enzyme activity, '
+            'or independent biological validation. Matched biological units and targeted perturbations are needed '
+            'to distinguish shared abundance effects, detection limits, and regulatory mechanisms.')
+
+
 def generate_crosstalk_results_fallback(
     n_dual: int,
     n_conc: int,

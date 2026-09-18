@@ -241,6 +241,7 @@ export default function OrderCompare() {
   const [savedReportId, setSavedReportId] = useState<number | null>(null);
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const comparisonSourcesRef = useRef<Array<{ revision_id: string }>>([]);
 
   // Chat Q&A
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -289,6 +290,7 @@ export default function OrderCompare() {
       });
       await assertOk(res);
       const data = await res.json();
+      comparisonSourcesRef.current = data.source_revisions || [];
       // Map the summary response to CompareMetadata format
       setMetadata({
         order_a: data.order_a,
@@ -329,6 +331,8 @@ export default function OrderCompare() {
         body: JSON.stringify({
           order_id_a: parseInt(orderAId),
           order_id_b: parseInt(orderBId),
+          source_revision_id_a: comparisonSourcesRef.current[0]?.revision_id,
+          source_revision_id_b: comparisonSourcesRef.current[1]?.revision_id,
           llm_model: model || undefined,
           llm_provider: provider || undefined,
           user_instructions: userInstructions.trim() || undefined,
@@ -354,7 +358,9 @@ export default function OrderCompare() {
             if (payload === "[DONE]") break;
             try {
               const parsed = JSON.parse(payload);
-              if (parsed.type === "token" && parsed.content) {
+              if (parsed.type === "summary") {
+                comparisonSourcesRef.current = parsed.data?.source_revisions || [];
+              } else if (parsed.type === "token" && parsed.content) {
                 setReport((prev) => prev + parsed.content);
               } else if (parsed.type === "error") {
                 setReport((prev) => prev + `\n\n---\n**Error:** ${parsed.message}`);
@@ -384,6 +390,8 @@ export default function OrderCompare() {
               order_id_a: parseInt(orderAId),
               order_id_b: parseInt(orderBId),
               report_text: normalized,
+              source_revision_id_a: comparisonSourcesRef.current[0]?.revision_id,
+              source_revision_id_b: comparisonSourcesRef.current[1]?.revision_id,
               llm_model: model || undefined,
               user_instructions: userInstructions.trim() || undefined,
             }),
@@ -643,6 +651,7 @@ export default function OrderCompare() {
       {/* Order Info Cards */}
       {metadata && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="rounded border p-3 text-sm md:col-span-2">검토용 비교 · 고정된 source revision의 관측 요약입니다. 원고 검토와 독립 과학 검증은 미완료입니다.</div>
           <OrderInfoCard order={metadata.order_a} />
           <OrderInfoCard order={metadata.order_b} />
         </div>
@@ -651,12 +660,12 @@ export default function OrderCompare() {
       {/* Summary Statistics */}
       {metadata && (
         <div className="flex flex-wrap gap-3 justify-center">
-          <SummaryCard label="Shared Genes" value={metadata.shared_genes} />
+          <SummaryCard label="Matched observations" value={metadata.shared_genes} />
           <SummaryCard label="Unique to A" value={metadata.unique_a_genes} sub={metadata.order_a.order_code} />
           <SummaryCard label="Unique to B" value={metadata.unique_b_genes} sub={metadata.order_b.order_code} />
-          <SummaryCard label="Shared Sites" value={metadata.shared_sites} />
-          <SummaryCard label="Unique Sites A" value={metadata.unique_a_sites} sub={metadata.order_a.order_code} />
-          <SummaryCard label="Unique Sites B" value={metadata.unique_b_sites} sub={metadata.order_b.order_code} />
+          <SummaryCard label="Matched form/conditions" value={metadata.shared_sites} />
+          <SummaryCard label="Recorded only in A" value={metadata.unique_a_sites} sub={metadata.order_a.order_code} />
+          <SummaryCard label="Recorded only in B" value={metadata.unique_b_sites} sub={metadata.order_b.order_code} />
         </div>
       )}
 
