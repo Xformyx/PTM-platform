@@ -1297,6 +1297,7 @@ def attribute_shared_ptm(
                 "top_group_preserved": bool(reduced_top_members == full_top_members),
             })
     reduced_diagnosis = attribution.reduced_diagnosis
+    serialized_diagnosis = reduced_diagnosis.to_dict() if reduced_diagnosis is not None else {}
     attribution.uncertainty = {
         "contract_version": "adaptive_tmm_uncertainty.v1",
         "observed_conditions": observed_conditions,
@@ -1308,10 +1309,10 @@ def attribute_shared_ptm(
         "selection_gate": "attribution_supported_and_required_singleton_group",
         "bootstrap_repeats": repeats if bootstrap_evaluated else 0,
         "bootstrap_top1_stability": (
-            reduced_diagnosis.top1_stability if reduced_diagnosis is not None else None
+            serialized_diagnosis.get("top1_stability") if bootstrap_evaluated else None
         ),
         "bootstrap_top1_ratio_std": (
-            reduced_diagnosis.top1_ratio_std if reduced_diagnosis is not None else None
+            serialized_diagnosis.get("top1_ratio_std") if bootstrap_evaluated else None
         ),
         "full_top_group_members": full_top_members,
         "loto_enabled": bool(uncertainty_loto_enabled),
@@ -1647,25 +1648,18 @@ def compute_weighted_kinase_scores(
     ptm_identities: dict | None = None,
     ptm_is_denovo: dict | set | None = None,
     ptm_representation: dict | None = None,
+    allocation_version: str = "tmm_feature_allocation.v2",
 ) -> dict[str, dict]:
     """Compute per-kinase per-condition activity scores with TMM-weighted contributions.
 
     For exclusive substrates: contribution = 1.0 (unchanged from current logic).
     For shared substrates: contribution = deconvolved ratio from NNLS.
 
-    Each shared substrate also carries an additive ``resolution`` label saying
-    whether its attribution is separable from the competing kinases, is only
-    estimable as a group share, or is unsupported by the data.  These labels are
-    annotations: they never alter the weighted sums or the contribution ratios.
-
-    ``guard_policy`` decides whether evidence-free ratios are still published.
-    구현 대상: docs/chapter2_audit_protocol_v1.md §5 (guard), §5.5 (`group_share`)
-    사전등록: 2026-08-21 (`off`·`strict`), 2026-08-22 (`group_share`, 구현 착수 전 선언).
-              기본값 ``GUARD_GROUP_SHARE`` (2026-08-22 변경 — GUARD_OFF 에서).
-              ``GUARD_GROUP_SHARE`` 는 ``GUARD_STRICT`` 와 동일한 가중합을 생성하면서
-              ambiguity 그룹 내부의 개별 균등 분할만 None 으로 발표한다.
-              87.65% ratio 축소 효과; 점수합 불변 (chapter2_audit_protocol_v1.md §5.5.1).
-    주장 금지: 어느 정책도 예측 성능 개선으로 서술하지 않는다. 발표 범위의 축소다.
+    Allocation v2 evaluates each feature against one canonical candidate set.
+    Indistinguishable group mass is recorded once in the allocation ledger;
+    unresolved individual contributions are withheld from individual scores.
+    Explicit v1 is retained for historical replay. Guard/prior/FC/q defaults are
+    unchanged; v2 is an estimator correction, not a performance claim.
 
     Returns:
         dict[canonical → {
@@ -1689,6 +1683,20 @@ def compute_weighted_kinase_scores(
         ptm_candidate_weights = {}
     if kinase_hierarchy is None:
         kinase_hierarchy = {}
+
+    from ptm_shared.tmm_feature_allocation import (
+        ALLOCATION_VERSION, LEGACY_ALLOCATION_VERSION, RNG_POLICY_VERSION,
+        TMMScoreResults, allocation_record, feature_seed,
+    )
+    if allocation_version not in {ALLOCATION_VERSION, LEGACY_ALLOCATION_VERSION}:
+        raise ValueError("unsupported allocation version")
+    canonical_allocation = allocation_version == ALLOCATION_VERSION
+    if canonical_allocation:
+        from ptm_shared.analysis_universe import normalize_candidate_modules
+        kinase_modules = normalize_candidate_modules(kinase_modules)
+        ptm_to_kinases = {pk: sorted(set(str(k).upper() for k in names)) for pk, names in sorted(ptm_to_kinases.items())}
+    allocation_ledger = {"schema_version": allocation_version, "rng_policy": RNG_POLICY_VERSION if canonical_allocation else "legacy_iteration_order",
+                         "features": {}}
 
     # Step 1: Build kinase profiles from exclusive substrates
     kinase_profiles = build_kinase_profiles_from_data(
@@ -1714,7 +1722,8 @@ def compute_weighted_kinase_scores(
         candidate_prior_strength=candidate_prior_strength,
     )
 
-    results: dict[str, dict] = {}
+    results = TMMScoreResults(allocation_ledger=allocation_ledger)
+    fit_cache = {}
     # One attribution per site, reused across every kinase competing for it.
     attribution_cache: dict[str, object] = {}
 
@@ -1731,6 +1740,7 @@ def compute_weighted_kinase_scores(
         w_dn_cnts = {c: 0.0 for c in conditions_sorted}
         w_shared_sums = {c: 0.0 for c in conditions_sorted}
         observation_counts = {c: 0 for c in conditions_sorted}
+        scoring_evaluable_observation_counts = {c: 0 for c in conditions_sorted}
         contribution_details = []
         # Transient, endpoint-local input for footprint robustness diagnostics.
         # This is intentionally not a published per-edge attribution payload.
@@ -1760,8 +1770,10 @@ def compute_weighted_kinase_scores(
                 n_exclusive += 1
             else:
                 # Shared substrate → NNLS deconvolution
-                all_candidates = [canonical] + other_kinases
-                deconv = deconvolve_shared_ptm(
+                all_candidates = sorted(set([canonical] + other_kinases)) if canonical_allocation else [canonical] + other_kinases
+                deconv = fit_cache.get(pk) if canonical_allocation else None
+                if deconv is None:
+                    deconv = deconvolve_shared_ptm(
                     pk,
                     all_candidates,
                     kinase_profiles,
@@ -1772,6 +1784,8 @@ def compute_weighted_kinase_scores(
                     candidate_prior_weights=ptm_candidate_weights.get(pk, {}),
                     candidate_prior_strength=candidate_prior_strength,
                 )
+                    if canonical_allocation:
+                        fit_cache[pk] = deconv
                 ratio = deconv.get(canonical, 1.0 / len(all_candidates))
                 prof_info = kinase_profiles.get(canonical)
                 profile_type = prof_info["profile_type"] if prof_info else "gaussian_fallback"
@@ -1807,7 +1821,7 @@ def compute_weighted_kinase_scores(
                             target_transform=target_transform,
                             uncertainty_bootstrap_repeats=uncertainty_bootstrap_repeats,
                             uncertainty_loto_enabled=uncertainty_loto_enabled,
-                            uncertainty_seed=int(uncertainty_seed) + len(attribution_cache),
+                            uncertainty_seed=feature_seed(uncertainty_seed, pk) if canonical_allocation else int(uncertainty_seed) + len(attribution_cache),
                         )
                     except Exception as _attribution_error:
                         _log.warning(
@@ -1817,6 +1831,8 @@ def compute_weighted_kinase_scores(
                         )
                         attribution_cache[pk] = None
                 attribution = attribution_cache[pk]
+                if canonical_allocation and pk not in allocation_ledger["features"]:
+                    allocation_ledger["features"][pk] = allocation_record(pk, all_candidates, attribution, ts, deconv)
                 if attribution is not None:
                     detail["observation_support"] = attribution.uncertainty
                 entry = (
@@ -1865,8 +1881,28 @@ def compute_weighted_kinase_scores(
                 if guarded.scoring_excluded:
                     n_guard_scoring_excluded += 1
             ratio = guarded.ratio_for_scoring
+            if canonical_allocation and other_kinases:
+                detail["allocation_version"] = allocation_version
+                detail["allocation_record_id"] = pk
+                if detail["resolution"] == "unannotated":
+                    # Infrastructure failure is not a successful numerical fallback.
+                    raise RuntimeError(f"feature attribution failed: {pk}")
+                if detail["resolution"] == "unresolved_shared" and guard_policy == GUARD_GROUP_SHARE:
+                    # Group mass is retained once in the shared ledger. It does
+                    # not become an individual kinase score through NNLS ordering.
+                    ratio = 0.0
+                    n_guard_scoring_excluded += int(not detail.get("guard_scoring_excluded"))
+                    detail.update(contribution_ratio=None, guard_scoring_excluded=True,
+                                  score_status="group_allocation_only")
+                elif detail["resolution"] == "resolved" and guard_policy == GUARD_GROUP_SHARE:
+                    # Use the same reduced-design allocation as the group ledger.
+                    ratio = float(entry["group_ratio"])
+                    detail["contribution_ratio"] = round(ratio, 4)
 
             contribution_details.append(detail)
+            if detail["resolution"] in {"exclusive", "resolved"} and not detail.get("guard_scoring_excluded"):
+                for c in ts:
+                    scoring_evaluable_observation_counts[c] += 1
 
             if other_kinases:
                 for c in conditions_sorted:
@@ -1910,6 +1946,7 @@ def compute_weighted_kinase_scores(
             }
 
         results[canonical] = {
+            "allocation_version": allocation_version,
             "metric_semantics_version": "tmm_footprint_display.v1",
             "metric_role": "weighted_substrate_ptm_footprint",
             "activity_direction": "not_evaluable_without_site_effect_context",
@@ -1925,6 +1962,7 @@ def compute_weighted_kinase_scores(
             "n_shared": n_shared,
             "profile_type": _profile_type,
             "observation_counts": observation_counts,
+            "scoring_evaluable_observation_counts": scoring_evaluable_observation_counts,
             "profile_support_by_condition": (kinase_profiles.get(canonical) or {}).get("support_by_condition", {}),
             "profile_values": {
                 condition: round(float(value), 8) if np.isfinite(value) else None

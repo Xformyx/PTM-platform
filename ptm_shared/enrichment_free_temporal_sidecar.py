@@ -547,10 +547,23 @@ def build_v2_sidecar(
     else:
         from ptm_shared.dynamic_cowave_transition import analyze_dynamic_co_wave_transitions
 
-        dynamic_transition = analyze_dynamic_co_wave_transitions(
-            dict(wave_contract or {}),
-            config=dict(DYNAMIC_COWAVE_CONFIG if dynamic_transition_config is None else dynamic_transition_config),
-        )
+        # Full events are preserved independently of the display example cap.
+        import json as _event_json
+        from uuid import uuid4 as _event_uuid
+        from ptm_shared.report_revision import file_sha256 as _event_hash
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        _event_path = Path(output_dir) / (".dynamic_events_" + _event_uuid().hex + ".jsonl")
+        from ptm_shared.temporal_event_spool import TemporalEventSpool
+        with TemporalEventSpool(output_dir) as _event_store, _event_path.open("w", encoding="utf-8") as _event_stream:
+            dynamic_transition = analyze_dynamic_co_wave_transitions(
+                dict(wave_contract or {}),
+                config=dict(DYNAMIC_COWAVE_CONFIG if dynamic_transition_config is None else dynamic_transition_config),
+                event_store=_event_store,
+                event_sink=lambda record: _event_stream.write(_event_json.dumps(record, sort_keys=True, allow_nan=False) + "\n"),
+            )
+        _event_final = Path(output_dir) / ("dynamic_cowave_events_" + _event_hash(_event_path) + ".jsonl")
+        _event_path.replace(_event_final)
+        dynamic_transition["full_events_artifact"] = _event_final.name
         dynamic_transition["status"] = "computed"
 
     # A distinct event-time layer prevents Dynamic Co-Wave's descriptive

@@ -292,13 +292,14 @@ class PTMQuantificationAnalyzer:
             if not os.path.exists(self.pr_matrix_path):
                 logger.error(f"PR Matrix not found: {self.pr_matrix_path}")
                 return False
-            self.pr_matrix = pd.read_csv(self.pr_matrix_path, sep="\t", on_bad_lines="warn", low_memory=False)
+            from ptm_shared.tabular_import import read_quantitative_tsv
+            self.pr_matrix = read_quantitative_tsv(self.pr_matrix_path, self.output_dir)
             logger.info(f"PR Matrix loaded: {len(self.pr_matrix):,} precursors")
 
             if not os.path.exists(self.pg_matrix_path):
                 logger.error(f"PG Matrix not found: {self.pg_matrix_path}")
                 return False
-            self.pg_matrix = pd.read_csv(self.pg_matrix_path, sep="\t", on_bad_lines="warn", low_memory=False)
+            self.pg_matrix = read_quantitative_tsv(self.pg_matrix_path, self.output_dir)
             logger.info(f"PG Matrix loaded: {len(self.pg_matrix):,} protein groups")
             # Conflicting denominator rows are not resolved by file order.
             self.pg_matrix = self.pg_matrix.drop_duplicates()
@@ -356,7 +357,9 @@ class PTMQuantificationAnalyzer:
         def logical_key(row):
             return tuple("" if pd.isna(row.get(c)) else str(row.get(c)) for c in identity_cols)
         processed_keys = {logical_key(row) for row in (analysis_records or [])}
-        for row_number, row in enumerate(self.pr_matrix.to_dict('records'), start=2):
+        source_locators = self.pr_matrix.attrs.get("source_row_locators", [])
+        for row_index, row in enumerate(self.pr_matrix.to_dict('records')):
+            row_number = source_locators[row_index]["start_line"] if row_index < len(source_locators) else row_index + 2
             safe = {k: None if pd.isna(v) else v for k, v in row.items()}
             content_id = hashlib.sha256(json.dumps(safe, sort_keys=True, default=str).encode()).hexdigest()
             key = tuple(str(row[c]) for c in identity_cols)
@@ -376,6 +379,7 @@ class PTMQuantificationAnalyzer:
         inventory = {'schema_version': 'source_observation_inventory.v1', 'source_dataset_sha256': source_hash,
                      'input_rows': len(records), 'input_sample_observations': len(records) * len(self.sample_columns),
                      'normalization_policy': self.normalization_policy, 'records': records}
+        inventory['import_accounting'] = self.pr_matrix.attrs.get('import_accounting', {})
         inventory['analysis_completed'] = analysis_records is not None
         inventory['condition_map'] = self.condition_map
         inventory['sample_manifest'] = self.sample_manifest

@@ -102,3 +102,9 @@ docs/implementation/*
 !docs/implementation/ptm-report-contract-map.md
 !docs/implementation/ptm-report-validation.md
 !docs/implementation/ptm-report-validation-summary.json
+!docs/vector_view_contract_v2.md
+!docs/analysis_universe_contract.md
+!docs/tmm_execution_and_revision_contract.md
+!docs/tmm_allocation_change.md
+!docs/implementation/vector-tmm-validation.md
+!docs/implementation/vector-tmm-validation.json

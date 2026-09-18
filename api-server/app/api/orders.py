@@ -2551,11 +2551,55 @@ def _predict_protein_class(ptm: dict, ptm_type: str) -> dict:
     return result
 
 
-@router.get("/{order_id}/vector-plot-data")
+from app.schemas.vector_view import VectorViewResponse
+
+@router.get("/{order_id}/vector-plot-data", response_model=VectorViewResponse)
 async def get_vector_plot_data(
     order_id: int,
+    mode: str = Query("per_condition_top_n"),
+    n: int | None = Query(None, ge=1),
+    axis: str = Query("adjusted"),
+    representation: str = Query("conventional_log2_contrast"),
+    ranking_metric: str = Query("abs_effect"),
+    lock_receptor: bool = Query(False),
+    force_refresh: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Select measured precursors, then attach independent annotation context."""
+    import asyncio
+    from app.config import get_settings
+    from app.services.vector_view import load_vector_view
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await _check_order_access_async(order, user, db)
+    if force_refresh:
+        raise HTTPException(status_code=409, detail="Use POST receptor-inference-refresh; view reads do not run analysis")
+    suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+    try:
+        view = await asyncio.to_thread(
+            load_vector_view, Path(get_settings().OUTPUT_DIR) / order.order_code, suffix,
+            order.report_options, mode=mode, n=n, axis=axis, representation=representation,
+            ranking_metric=ranking_metric,
+            design=(getattr(order, "analysis_context", None) or {}).get("sample_manifest"),
+        )
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    cached = getattr(order, "receptor_inference_data", None) or {}
+    # Legacy inference is context only. Its old measured co-wave values have no
+    # v2 analysis manifest binding and are not relabeled as current results.
+    view.update(inferred_receptors=cached.get("receptors", []), cowave_analysis=None,
+                divergence_pairs=[], receptor_inference_status="legacy_context" if cached else "not_requested")
+    return view
+
+
+@router.post("/{order_id}/receptor-inference-refresh")
+async def refresh_vector_receptor_inference(
+    order_id: int,
     lock_receptor: bool = Query(False, description="True이면 저장된 receptor 결과를 고정하고 재계산하지 않음"),
-    force_refresh: bool = Query(False, description="True이면 캐시를 무시하고 receptor를 강제 재계산"),
+    force_refresh: bool = Query(True, description="True이면 캐시를 무시하고 receptor를 강제 재계산"),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -2567,7 +2611,7 @@ async def get_vector_plot_data(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    await _check_order_access_async(order, user, db)
+    await _require_write_access(order, user, db)
 
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     if not output_dir.exists():
@@ -2599,74 +2643,13 @@ async def get_vector_plot_data(
                 row[f"{prefix}_{group}_biological_n"] = support[f"{group}_biological_n"]
 
 
-    # Load Top N PTMs — prefer enriched JSON, fall back to TSV-based selection
-    top_n_ptms = []
-    top_n_setting = (order.report_options or {}).get("top_n_ptms", 20)
-    enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
-    ptm_type_str = (order.ptm_type or "phosphorylation").lower().strip()
-
-    if enriched_path.exists():
-        from ptm_shared.temporal_contract import resolve_temporal_contract as _resolve_tc
-        show_p1_ui = _resolve_tc(order.report_options or {}).show_p1_ui
-        enriched = load_json_first_value(enriched_path)
-        seen = set()
-        for ptm in enriched:
-            gene = ptm.get("gene") or ptm.get("Gene.Name", "")
-            pos = ptm.get("position") or ptm.get("PTM_Position", "")
-            key = f"{gene}_{pos}"
-            if key not in seen and (gene or pos):
-                seen.add(key)
-                # v9.17: Predict protein class from enriched UniProt/GO data
-                protein_class = _predict_protein_class(ptm, ptm_type_str)
-                # P1 omitted under `legacy` so the timeseries UI matches the old path.
-                p1_pattern = _compute_p1_pattern(ptm) if show_p1_ui else None
-                top_n_ptms.append({
-                    "gene": str(gene),
-                    "position": str(pos),
-                    "label": f"{gene} {pos}".strip() or f"{gene}{pos}",
-                    "protein_class": protein_class,
-                    "p1_pattern": p1_pattern,
-                    "denovo_confidence": ptm.get("denovo_confidence") or ptm.get("DeNovo_Confidence") or "",
-                    "detection_control": ptm.get("detection_control") or ptm.get("Detection_Control") or "",
-                    "detection_pattern": ptm.get("detection_pattern") or ptm.get("Detection_Pattern") or "",
-                    "lod_relative_log2": ptm.get("lod_relative_log2") or ptm.get("LOD_Relative_Log2"),
-                    "peak_condition": ptm.get("peak_condition") or ptm.get("Peak_Condition") or "",
-                    "onset_condition": ptm.get("onset_condition") or ptm.get("Onset_Condition") or "",
-                    "reliable_onset_condition": ptm.get("reliable_onset_condition") or ptm.get("Reliable_Onset_Condition") or "",
-                    "conventional_log2fc_na": bool(
-                        ptm.get("conventional_log2fc_na")
-                        or ptm.get("Conventional_Log2FC_NA")
-                        or ptm.get("control_pseudocount_used")
-                        or ptm.get("Control_Pseudocount_Used")
-                    ),
-                    "shared_peptide": bool(ptm.get("shared_peptide") or ptm.get("Shared_Peptide")),
-                })
-    elif vector_data:
-        # Fallback: derive Top N from TSV (available right after preprocessing)
-        import math
-        conditions = set(r["condition"] for r in vector_data if r["condition"])
-        selected_keys = set()
-        for cond in conditions:
-            cond_rows = sorted(
-                [r for r in vector_data if r["condition"] == cond],
-                key=lambda r: (
-                    r.get("ranking_score")
-                    if r.get("ranking_score") is not None
-                    else (0.0 if r.get("conventional_log2fc_na") else abs(r["ptm_relative_log2fc"]) if r["ptm_relative_log2fc"] is not None else 0.0)
-                ),
-                reverse=True,
-            )
-            for r in cond_rows[:top_n_setting]:
-                selected_keys.add((r["gene"], r["position"]))
-        for gene, pos in sorted(selected_keys):
-            top_n_ptms.append({
-                "gene": gene,
-                "position": pos,
-                "label": f"{gene} {pos}".strip(),
-            })
-
+    from app.services.vector_view import load_annotations
     from ptm_shared.vector_plot import plot_feature_metadata
-    top_n_ptms = plot_feature_metadata(vector_data, top_n_ptms)
+    enriched, annotation_source = load_annotations(output_dir, file_suffix)
+    enriched_path = output_dir / f"enriched_ptm_data{file_suffix}.json"
+    top_n_setting = None  # full measured inventory, independent of display N
+    top_n_ptms = plot_feature_metadata(vector_data, enriched)
+    ptm_type_str = (order.ptm_type or "phosphorylation").lower().strip()
 
     # ── v9.18 + v9.19: Infer upstream receptors ──────────────────────────────
     # Three sources:
@@ -6451,6 +6434,39 @@ async def global_kinase_modules(
         raise HTTPException(status_code=404, detail="Order not found")
     await _check_order_access_async(order, user, db)
 
+    if body.get("analysis_scope", "full_eligible") in {"full_eligible", "explicit_subset"}:
+        from app.models.analysis_job import AnalysisHead, AnalysisJob
+        from app.services.analysis_jobs import submit_analysis, job_payload
+        from fastapi.responses import JSONResponse
+        if body.get("_cache_probe"):
+            head = await db.get(AnalysisHead, order_id)
+            if head and head.current_job_id:
+                from app.api.analysis_jobs import get_result
+                current = await get_result(order_id, head.current_job_id, db, user)
+                requested = await db.get(AnalysisJob, head.requested_job_id) if head.requested_job_id else None
+                current["requested_analysis"] = job_payload(requested) if requested else None
+                from ptm_shared.analysis_revision import input_directory
+                from app.services.analysis_jobs import runtime_signature, reference_signature
+                published = await db.get(AnalysisJob, head.current_job_id)
+                try:
+                    input_changed = input_directory(Path(settings.OUTPUT_DIR) / order.order_code).name != published.input_revision
+                except (FileNotFoundError, ValueError):
+                    input_changed = True
+                current["_stale"] = bool(input_changed or (requested and requested.job_id != head.current_job_id)
+                    or published.request_config.get("runtime") != runtime_signature()
+                    or published.request_config.get("references") != reference_signature())
+                return current
+            return {"kinase_modules": [], "summary": {"execution_status": "not_requested"}, "_cached": False}
+        await _require_write_access(order, user, db)
+        job = await submit_analysis(db, order, user.id, body)
+        return JSONResponse(job_payload(job), status_code=200 if job.execution_status == "completed" else 202)
+    if body.get("analysis_scope") != "legacy_explicit_subset":
+        raise HTTPException(status_code=422, detail="unknown analysis scope")
+
+    await _require_write_access(order, user, db)
+    if isinstance(order.kinase_analysis_data, dict) and order.kinase_analysis_data.get("analysis_job_id"):
+        raise HTTPException(409, "legacy_subset_cannot_overwrite_analysis_revision")
+
     ptms = body.get("ptms", [])
     cowave_modules_input = body.get("cowave_modules", [])
     force_refresh = body.get("force_refresh", False)
@@ -6468,13 +6484,15 @@ async def global_kinase_modules(
     # ── v9.44: Cache check ───────────────────────────────────────────────────────
     # Return cached result if available and input hasn't changed
     import hashlib as _hashlib
-    _ptm_keys_sorted = sorted(f"{p.get('gene','').upper()}_{p.get('position','')}" for p in ptms)
-    _cowave_keys_sorted = sorted(
-        f"{cw.get('id',0)}:{','.join(sorted(cw.get('ptm_keys',[])))}"
-        for cw in cowave_modules_input
-    ) if cowave_modules_input else []
-    _cache_input_str = f"{len(ptms)}|{'|'.join(_ptm_keys_sorted[:50])}|{'|'.join(_cowave_keys_sorted[:20])}"
-    _cache_hash = _hashlib.md5(_cache_input_str.encode()).hexdigest()[:12]
+    from ptm_shared.analysis_universe import signature as _analysis_signature
+    from ptm_shared.report_revision import file_sha256 as _file_sha256
+    from app.services.analysis_jobs import reference_signature, runtime_signature
+    _legacy_root = Path(settings.OUTPUT_DIR) / order.order_code
+    _cache_hash = _analysis_signature({"contract":"legacy_candidate_cache.v2", "ptms":ptms,
+        "cowave_modules":cowave_modules_input, "allow_motif_only_seed":allow_motif_only_seed,
+        "include_tmm_candidate_modules":include_tmm_candidate_modules,
+        "context":order.analysis_context, "references":reference_signature(), "runtime":runtime_signature(),
+        "vectors":{p.name:_file_sha256(p) for p in sorted(_legacy_root.glob("ptm_vector_data_*.tsv"))}})
 
     # _cache_probe: frontend mount-time check — return any existing cache regardless of hash
     _cache_probe = body.get("_cache_probe", False)
@@ -7600,6 +7618,11 @@ async def save_kinase_analysis_data(
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
 
+    if (order.kinase_analysis_data or {}).get("analysis_job_id") or (order.kinase_activity_heatmap or {}).get("analysis_job_id"):
+        raise HTTPException(409, "Server-owned analysis revision cannot be replaced by a display selection")
+    if body.get("analysis_scope") != "legacy_explicit_subset":
+        raise HTTPException(422, "Legacy merges require an explicit legacy_explicit_subset scope")
+
     kinase_modules = body.get("kinase_modules", [])
     temporal_cascade = body.get("temporal_cascade", {})
     cowave_cross_analysis = body.get("cowave_cross_analysis", {})
@@ -7680,6 +7703,15 @@ async def kinase_activity_heatmap(
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
 
+    if body.get("analysis_scope", "full_eligible") != "legacy_explicit_subset":
+        from app.services.analysis_jobs import submit_analysis, job_payload
+        from fastapi.responses import JSONResponse
+        job = await submit_analysis(db, order, user.id, body)
+        return JSONResponse(job_payload(job), status_code=200 if job.execution_status == "completed" else 202)
+
+    if isinstance(order.kinase_activity_heatmap, dict) and order.kinase_activity_heatmap.get("analysis_job_id"):
+        raise HTTPException(409, "legacy_subset_cannot_overwrite_analysis_revision")
+
     kinase_modules = body.get("kinase_modules", [])
     force_refresh = body.get("force_refresh", False)
     requested_tmm_config = dict(body.get("tmm_config") or {})
@@ -7743,13 +7775,19 @@ async def kinase_activity_heatmap(
     output_dir = Path(settings.OUTPUT_DIR) / order.order_code
     file_suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
     vector_fingerprint = vector_tsv_cache_fingerprint(output_dir, file_suffix)
-    km_keys = sorted([m.get("kinase", "") for m in kinase_modules])
-    tmm_config_key = json.dumps(effective_tmm_config, sort_keys=True, separators=(",", ":"))
-    hash_input = (
-        f"{order_id}|{len(kinase_modules)}|{'|'.join(km_keys[:30])}|{temporal.name}|"
-        f"{tmm_config_key}|{dynamic_analysis_cache_contract}|{vector_fingerprint}"
-    )
-    cache_hash = hashlib.md5(hash_input.encode()).hexdigest()[:12]
+    from ptm_shared.analysis_universe import signature, normalize_candidate_modules
+    from ptm_shared.tmm_feature_allocation import ALLOCATION_VERSION, RNG_POLICY_VERSION
+    from ptm_shared.report_revision import file_sha256
+    reference_hashes = {}
+    for env_name in ("PTM_MAPPING_SOURCE_BUNDLE_PATH", "PTM_RELATION_SOURCE_BUNDLE_PATH"):
+        path = os.getenv(env_name)
+        reference_hashes[env_name] = file_sha256(path) if path and Path(path).is_file() else "unavailable"
+    cache_manifest = {"order_id": order_id, "measurement": vector_fingerprint,
+        "candidates": normalize_candidate_modules(kinase_modules), "temporal_contract": temporal.name,
+        "context": order.analysis_context or {}, "tmm_config": effective_tmm_config,
+        "reference_hashes": reference_hashes, "diagnostic_contract": dynamic_analysis_cache_contract,
+        "allocation_version": ALLOCATION_VERSION, "rng_policy": RNG_POLICY_VERSION}
+    cache_hash = signature(cache_manifest)
 
     # Check cache — v11.3 Pure Renderer pattern:
     # Priority 1: If pipeline already computed & stored results (same hash), serve directly.
@@ -7777,7 +7815,8 @@ async def kinase_activity_heatmap(
             )
             from ptm_shared.temporal_feature_input import CONTRACT_VERSION as feature_input_version
             cached_identity_ready = (cached.get("temporal_feature_input") or {}).get("contract_version") == feature_input_version
-            if cached.get("_cache_hash") == cache_hash and cached_identity_ready:
+            if (cached.get("_cache_hash") == cache_hash and cached_identity_ready and cached_dynamic_ready
+                    and cached_ledger_ready and cached.get("execution_status") == "completed"):
                 return {**cached, "_cached": True}
             if not cached_dynamic_ready or not cached_ledger_ready or not cached_identity_ready:
                 # A legacy/static cache must not block dynamic-transition
@@ -8164,13 +8203,16 @@ async def kinase_activity_heatmap(
                          "coherence": 0.0, "is_dominant": True, "tier": "partial_observations",
                          "clustering_eligible": False, "reason": "incomplete_observed_grid"}]
             return []
+        partial_clusters = ([{"ptm_keys": partial_keys, "cluster_id": -1, "size": len(partial_keys),
+            "coherence": 0.0, "is_dominant": False, "tier": "partial_observations",
+            "clustering_eligible": False, "reason": "incomplete_observed_grid"}] if partial_keys else [])
         n_subs = len(valid_keys)
 
         # Fallback: too few substrates or conditions
         if n_subs < MIN_SUBSTRATES_FOR_CLUSTERING or n_conditions < 2:
             coh = _compute_coherence_for_keys(valid_keys)
             return [{"ptm_keys": valid_keys, "cluster_id": 0, "size": n_subs,
-                     "coherence": coh, "is_dominant": True, "tier": "mixed"}]
+                     "coherence": coh, "is_dominant": True, "tier": "mixed"}] + partial_clusters
 
         # ── Step 1: Assign Magnitude Tiers ──
         tiers: dict[int, list[tuple[int, str, list[float]]]] = {1: [], 2: [], 3: []}
@@ -8275,11 +8317,11 @@ async def kinase_activity_heatmap(
         if not all_clusters:
             coh = _compute_coherence_for_keys(valid_keys)
             return [{"ptm_keys": valid_keys, "cluster_id": 0, "size": n_subs,
-                     "coherence": coh, "is_dominant": True, "tier": "mixed"}]
+                     "coherence": coh, "is_dominant": True, "tier": "mixed"}] + partial_clusters
 
         best_idx = max(range(len(all_clusters)), key=lambda i: all_clusters[i]["_dominance_score"])
         all_clusters[best_idx]["is_dominant"] = True
-        return all_clusters
+        return all_clusters + partial_clusters
 
     # ── v11.3.2: Nuclear-Exclusive Substrate Evidence ──────────────────────────
     # Hardcoded lists of proteins that are exclusively or predominantly nuclear.
@@ -9281,6 +9323,7 @@ async def kinase_activity_heatmap(
             uncertainty_seed=effective_tmm_config["uncertainty_seed"],
             ptm_identities=temporal_inputs.get("features"),
             ptm_is_denovo=ptm_is_denovo,
+            ptm_representation={k: "protein_adjusted_relative_ptm_log2_contrast" for k in ptm_timeseries},
         )
         if len(occupancy_complete_timeseries) >= 2 and len(conditions_sorted) >= 3:
             from ptm_shared.temporal_wave_engine import analyze_temporal_waves
@@ -9523,13 +9566,12 @@ async def kinase_activity_heatmap(
             len(raw_cowave_groups),
             len(tmm_weighted_cowave_groups),
         )
+    except HTTPException:
+        raise
     except Exception as _tmm_err:
-        import traceback as _tb
-        _log.warning(f"[TMM] Deconvolution failed (non-fatal): {_tmm_err}\n{_tb.format_exc()}")
-        tmm_weighted_temporal_cascade = {}
-        tmm_kinase_pair_directionality = []
-        tmm_kinase_pair_directionality_candidates = []
-        tmm_directionality_gate = {}
+        _log.exception("[TMM] Failed; prior successful revision retained")
+        raise HTTPException(status_code=503, detail={"execution_status": "failed", "stage": "tmm_deconvolution",
+                            "failure_reason": "solver_or_diagnostics_failure"}) from _tmm_err
 
     # Save to DB
     result_data = {
@@ -9565,6 +9607,9 @@ async def kinase_activity_heatmap(
         "occupancy_tmm_scores": occupancy_tmm_scores,
         "dual_track_kinase_evidence": dual_track_kinase_evidence,
         "dual_track_evidence_contract": dual_track_contract,
+        "tmm_allocation_ledger": getattr(tmm_scores, "allocation_ledger", {}),
+        "cache_manifest": cache_manifest,
+        "execution_status": "completed",
         "available_patterns": sorted(all_patterns),
         "translocation_candidates": translocation_candidates,
         "temporal_feature_input": temporal_inputs,
@@ -9606,7 +9651,8 @@ async def kinase_activity_heatmap(
         )
         if unified_sidecar is not None:
             saved_input = (unified_sidecar.get("provenance") or {}).get("temporal_input") or {}
-            if saved_input.get("feature_input_sha256") != temporal_inputs["input_sha256"]:
+            if (saved_input.get("feature_input_sha256") != temporal_inputs["input_sha256"]
+                    or saved_input.get("analysis_signature") != cache_hash):
                 # Preserve the previously validated reference artifact, but do
                 # not attach aggregate-era values to new precursor trajectories.
                 previous_sha = hashlib.sha256(unified_path.read_bytes()).hexdigest()[:16]
@@ -9638,6 +9684,7 @@ async def kinase_activity_heatmap(
                 temporal_input_provenance={
                     "contract_version": temporal_inputs["contract_version"],
                     "feature_input_sha256": temporal_inputs["input_sha256"],
+                    "analysis_signature": cache_hash,
                     "biological_replicate_adapter": replicate_audit,
                     "aggregation_rule": "none_feature_level_only",
                 },
@@ -9673,19 +9720,12 @@ async def kinase_activity_heatmap(
             )
         )
         result_data["temporal_ptm_protein_analysis"] = temporal_compact
+    except HTTPException:
+        raise
     except Exception as _unified_sidecar_error:
-        _log.warning(
-            "[TMM] Shared temporal PTM–protein analysis failed (non-fatal): %s",
-            _unified_sidecar_error,
-            exc_info=True,
-        )
-        result_data["temporal_ptm_protein_analysis"] = {
-            "schema_version": "enrichment_free_temporal_mechanism.v2.sidecar",
-            "full_artifact_available": False,
-            "status": "unavailable",
-            "reason": "shared_temporal_ptm_protein_analysis_failed",
-            "causality_status": "not_tested",
-        }
+        _log.exception("[TMM] Required sidecar failed; prior successful revision retained")
+        raise HTTPException(status_code=503, detail={"execution_status": "failed", "stage": "diagnostics",
+                            "failure_reason": "shared_temporal_ptm_protein_analysis_failed"}) from _unified_sidecar_error
     # Keep the compact shared-contract projection alongside the established
     # kinase-analysis payload so compare/chat/Data-Grounded Analysis see the
     # same result contract as ordinary heatmap consumers.

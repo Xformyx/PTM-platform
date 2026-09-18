@@ -1,3 +1,8 @@
+import {PagedKinaseModules} from "./PagedKinaseModules";
+import {AnalysisJobStatus} from "./AnalysisJobStatus";
+import {VirtualScoreHeatmap,CanvasScoreTrajectories} from "./VirtualScoreHeatmap";
+import {observedSvgPath,LatestRequest} from "../lib/vectorView";
+import { requestAnalysis } from "../lib/analysisJobs";
 import { featureKey, finite } from "../lib/quantitation";
 /**
  * KinaseModuleAnalysis.tsx
@@ -321,6 +326,7 @@ interface GlobalKinaseModuleResponse {
   unassigned_ptms: { key: string; gene: string; position: string; motif_families: string[] }[];
   annotation_details: PtmAnnotation[];
   summary: {
+    analysis_features?: number;
     total_ptms: number;
     total_kinase_modules: number;
     total_confirmed: number;
@@ -341,6 +347,8 @@ interface GlobalKinaseModuleResponse {
     dynamic_co_wave_transition_config_sha256?: string;
     dynamic_transition_supported_wave_count?: number;
   };
+  _stale?: boolean;
+  requested_analysis?: {execution_status:string;failure_reason?:string};
   // v9.44: Cache metadata
   _cached?: boolean;
   _cache_hash?: string;
@@ -647,6 +655,7 @@ export default function KinaseModuleAnalysis({
 
   // ── Global Kinase Module state ─────────────────────────────────────────
   const [globalKinaseResult, setGlobalKinaseResult] = useState<GlobalKinaseModuleResponse | null>(null);
+  const [analysisJob,setAnalysisJob]=useState<any>(null);
   const [globalKinaseLoading, setGlobalKinaseLoading] = useState(false);
   const [globalKinaseError, setGlobalKinaseError] = useState<string | null>(null);
   const [globalKinaseBatchProgress, setGlobalKinaseBatchProgress] = useState<{ current: number; total: number; phase: string } | null>(null);
@@ -734,327 +743,33 @@ export default function KinaseModuleAnalysis({
     }
   }, [orderId, manualSelection, topNPtms]);
 
-  // ── Global Kinase Module annotation call (batched to avoid 524 timeout) ─
-  const GLOBAL_ANNOTATE_BATCH_SIZE = 150; // PTMs per batch (keeps each call < 60s)
-
-  // ── Auto-load cached Global Annotate result on mount ─────────────────────
+  // Probe server-owned candidates; display checkboxes are not an analysis input.
   useEffect(() => {
-    if (globalKinaseResult || globalKinaseLoading) return; // already loaded or loading
-    if (topNPtms.length === 0) return; // no PTMs yet
-    // Try to load from cache (force_refresh=false → instant if cached)
-    const loadCached = async () => {
-      try {
-        const allPtms = topNPtms;
-        console.log(`[GLOBAL-KINASE] Cache probe: sending ${Math.min(5, allPtms.length)} PTMs for order ${orderId}`);
-        const result = await api.post<GlobalKinaseModuleResponse>(
-          `/orders/${orderId}/global-kinase-modules`,
-          {
-            ptms: allPtms.slice(0, 5).map((p) => ({ gene: p.gene, position: p.position })),
-            cowave_modules: [],
-            force_refresh: false,
-            _cache_probe: true, // signal that this is a cache probe, not full computation
-          }
-        );
-        console.log(`[GLOBAL-KINASE] Cache probe response: _cached=${result._cached}, modules=${result.kinase_modules?.length ?? 0}`);
-        if (result._cached && result.kinase_modules) {
-          // Accept cached result even if kinase_modules is empty (valid cached state)
-          setGlobalKinaseResult(result);
-          console.log(`[GLOBAL-KINASE] Auto-loaded from cache on mount: ${result.kinase_modules.length} modules`);
-        }
-      } catch (err) {
-        console.error("[GLOBAL-KINASE] Cache probe failed:", err);
-        // Silently fail — user can click Global Annotate manually
-      }
-    };
-    loadCached();
-  }, [orderId, topNPtms.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    let active = true;
+    api.post<GlobalKinaseModuleResponse>(`/orders/${orderId}/global-kinase-modules`, {
+      analysis_scope: "full_eligible", _cache_probe: true,
+    }).then(result => { if (active) setGlobalKinaseResult(result); })
+      .catch(err => { if (active) setGlobalKinaseError(String(err)); });
+    return () => { active = false; };
+  }, [orderId]);
 
+  const globalRequests=useRef(new LatestRequest());
+  useEffect(()=>()=>globalRequests.current.invalidate(),[orderId]);
   const runGlobalKinaseModules = useCallback(async (forceRefresh = false) => {
+    const requestToken=globalRequests.current.begin();
     setGlobalKinaseLoading(true);
     setGlobalKinaseError(null);
-    setGlobalKinaseBatchProgress(null);
     try {
-      const allPtms = checkedPtmList.length > 0 ? checkedPtmList : topNPtms;
-      const cowaveModulesPayload = coWaveModules.map((m) => ({
-        id: m.id,
-        label: m.label,
-        ptms: m.ptms.map((p) => featureKey(p)),
-      }));
-
-      // If PTM count is small enough, do a single call (no batching needed)
-      if (allPtms.length <= GLOBAL_ANNOTATE_BATCH_SIZE) {
-        setGlobalKinaseBatchProgress({ current: 1, total: 1, phase: forceRefresh ? "Re-analyzing..." : "Annotating..." });
-        const result = await api.post<GlobalKinaseModuleResponse>(
-          `/orders/${orderId}/global-kinase-modules`,
-          {
-            ptms: allPtms.map((p) => ({ gene: p.gene, position: p.position })),
-            cowave_modules: cowaveModulesPayload,
-            force_refresh: forceRefresh,
-          }
-        );
-        setGlobalKinaseResult(result);
-        setActiveTab("kinaseModules");
-        if (result._cached) {
-          console.log("[GLOBAL-KINASE] Loaded from cache (instant). Use force_refresh to re-run.");
-        } else {
-          // Ensure result is persisted to DB (backup save in case API's internal save failed)
-          try {
-            await api.post(`/orders/${orderId}/save-kinase-analysis-data`, {
-              kinase_modules: (result.kinase_modules || []).map((km) => ({
-                ...km,
-                members: km.members.map((m) => ({ key: m.key, gene: m.gene, position: m.position, membership: m.membership })),
-              })),
-              temporal_cascade: result.temporal_cascade || {},
-              cowave_cross_analysis: result.cowave_cross_analysis || {},
-              summary: result.summary || {},
-              effector_proteins: (result.effector_proteins || []).map((eff) => ({
-                gene: eff.gene, data_type: eff.data_type, max_abs_fc: eff.max_abs_fc,
-                peak_condition: eff.peak_condition, peak_fc: eff.peak_fc,
-                sources: eff.sources, evidence_strength: eff.evidence_strength,
-                evidence_score: eff.evidence_score, directionality: eff.directionality,
-                connected_substrates: eff.connected_substrates,
-              })),
-              wave_kinase_profile: result.wave_kinase_profile || [],
-              _cache_hash: result._cache_hash || "",
-            });
-            console.log("[GLOBAL-KINASE] Single-batch result saved to DB (backup)");
-          } catch (saveErr) {
-            console.warn("[GLOBAL-KINASE] Backup save failed (non-fatal):", saveErr);
-          }
-        }
-        return;
-      }
-
-      // ── Batched processing ─────────────────────────────────────────────
-      const batches: { gene: string; position: string }[][] = [];
-      const ptmPayload = allPtms.map((p) => ({ gene: p.gene, position: p.position }));
-      for (let i = 0; i < ptmPayload.length; i += GLOBAL_ANNOTATE_BATCH_SIZE) {
-        batches.push(ptmPayload.slice(i, i + GLOBAL_ANNOTATE_BATCH_SIZE));
-      }
-
-      const totalBatches = batches.length;
-      const batchResults: GlobalKinaseModuleResponse[] = [];
-
-      for (let bIdx = 0; bIdx < totalBatches; bIdx++) {
-        setGlobalKinaseBatchProgress({
-          current: bIdx + 1,
-          total: totalBatches,
-          phase: `Batch ${bIdx + 1}/${totalBatches} (${batches[bIdx].length} PTMs)`,
-        });
-
-        const batchResult = await api.post<GlobalKinaseModuleResponse>(
-          `/orders/${orderId}/global-kinase-modules`,
-          {
-            ptms: batches[bIdx],
-            cowave_modules: cowaveModulesPayload,
-            force_refresh: forceRefresh,
-          }
-        );
-        batchResults.push(batchResult);
-      }
-
-      // ── Merge batch results ────────────────────────────────────────────
-      setGlobalKinaseBatchProgress({ current: totalBatches, total: totalBatches, phase: "Merging results..." });
-
-      // Merge kinase_modules: combine by canonical name
-      const mergedModulesMap = new Map<string, GlobalKinaseModule>();
-      for (const br of batchResults) {
-        for (const km of br.kinase_modules) {
-          const existing = mergedModulesMap.get(km.canonical);
-          if (!existing) {
-            mergedModulesMap.set(km.canonical, { ...km });
-          } else {
-            // Merge members (deduplicate by key)
-            const existingKeys = new Set(existing.members.map((m) => m.key));
-            for (const m of km.members) {
-              if (!existingKeys.has(m.key)) {
-                existing.members.push(m);
-                existingKeys.add(m.key);
-              }
-            }
-            // Merge sources
-            const srcSet = new Set([...existing.sources, ...km.sources]);
-            existing.sources = Array.from(srcSet);
-            existing.source_count = existing.sources.length;
-            // Recount
-            existing.confirmed_count = existing.members.filter((m) => m.membership === "confirmed").length;
-            existing.inferred_count = existing.members.filter((m) => m.membership === "inferred").length;
-            existing.total_count = existing.members.length;
-            // Merge cowave_overlap
-            const existingCwIds = new Set(existing.cowave_overlap.map((c) => c.cowave_id));
-            for (const cw of km.cowave_overlap) {
-              if (!existingCwIds.has(cw.cowave_id)) {
-                existing.cowave_overlap.push(cw);
-              } else {
-                const existCw = existing.cowave_overlap.find((c) => c.cowave_id === cw.cowave_id);
-                if (existCw) {
-                  const sharedSet = new Set([...existCw.shared_ptms, ...cw.shared_ptms]);
-                  existCw.shared_ptms = Array.from(sharedSet);
-                }
-              }
-            }
-          }
-        }
-      }
-      const mergedModules = Array.from(mergedModulesMap.values())
-        .sort((a, b) => b.total_count - a.total_count);
-
-      // Merge unassigned_ptms (deduplicate by key, remove those now assigned)
-      const assignedKeys = new Set<string>();
-      for (const km of mergedModules) {
-        for (const m of km.members) assignedKeys.add(m.key);
-      }
-      const mergedUnassigned: GlobalKinaseModuleResponse["unassigned_ptms"] = [];
-      const seenUnassigned = new Set<string>();
-      for (const br of batchResults) {
-        for (const ua of br.unassigned_ptms) {
-          if (!assignedKeys.has(ua.key) && !seenUnassigned.has(ua.key)) {
-            mergedUnassigned.push(ua);
-            seenUnassigned.add(ua.key);
-          }
-        }
-      }
-
-      // Merge annotation_details (deduplicate by gene+position)
-      const mergedAnnotations: GlobalKinaseModuleResponse["annotation_details"] = [];
-      const seenAnnot = new Set<string>();
-      for (const br of batchResults) {
-        for (const ann of br.annotation_details) {
-          const k = `${ann.gene}_${ann.position}`;
-          if (!seenAnnot.has(k)) {
-            mergedAnnotations.push(ann);
-            seenAnnot.add(k);
-          }
-        }
-      }
-
-      // Merge summary
-      const mergedSummary: GlobalKinaseModuleResponse["summary"] = {
-        total_ptms: mergedAnnotations.length,
-        total_kinase_modules: mergedModules.length,
-        total_confirmed: mergedModules.reduce((s, km) => s + km.confirmed_count, 0),
-        total_inferred: mergedModules.reduce((s, km) => s + km.inferred_count, 0),
-        total_unassigned: mergedUnassigned.length,
-        status_counts: { known: 0, motif_only: 0, novel_candidate: 0 },
-        top_kinases: mergedModules.slice(0, 10).map((km) => ({
-          kinase: km.kinase, canonical: km.canonical, total: km.total_count,
-        })),
-      };
-      for (const ann of mergedAnnotations) {
-        const st = (ann as any).status || "novel_candidate";
-        mergedSummary.status_counts[st] = (mergedSummary.status_counts[st] || 0) + 1;
-      }
-
-      // Merge cowave_cross_analysis (union)
-      const mergedCowaveCross: Record<string, CowaveCrossEntry> = {};
-      for (const br of batchResults) {
-        for (const [cwId, entry] of Object.entries(br.cowave_cross_analysis || {})) {
-          if (!mergedCowaveCross[cwId]) {
-            mergedCowaveCross[cwId] = { ...entry, overlapping_kinases: [...entry.overlapping_kinases] };
-          } else {
-            // Merge overlapping kinases
-            const existing = mergedCowaveCross[cwId];
-            for (const ok of entry.overlapping_kinases) {
-              const found = existing.overlapping_kinases.find((e) => e.canonical === ok.canonical);
-              if (!found) {
-                existing.overlapping_kinases.push(ok);
-              } else {
-                const sharedSet = new Set([...found.shared_ptms, ...ok.shared_ptms]);
-                found.shared_ptms = Array.from(sharedSet);
-                found.shared_count = found.shared_ptms.length;
-              }
-            }
-          }
-        }
-      }
-
-      // Use temporal_cascade and effector_proteins from the LAST batch (which has full cowave context)
-      // Actually, re-request the final merge call with all PTM keys for temporal cascade
-      // For simplicity, merge temporal_cascade from all batches
-      let mergedTemporal: TemporalCascade | undefined;
-      let mergedEffectors: EffectorProtein[] | undefined;
-      // Use the result from the first batch that has temporal data (all batches get same cowave_modules)
-      for (const br of batchResults) {
-        if (br.temporal_cascade && br.temporal_cascade.timepoints.length > 0) {
-          mergedTemporal = br.temporal_cascade;
-          break;
-        }
-      }
-      // Merge effector_proteins (deduplicate by gene)
-      const effectorMap = new Map<string, EffectorProtein>();
-      for (const br of batchResults) {
-        for (const eff of (br.effector_proteins || [])) {
-          if (!effectorMap.has(eff.gene.toUpperCase())) {
-            effectorMap.set(eff.gene.toUpperCase(), eff);
-          }
-        }
-      }
-      mergedEffectors = Array.from(effectorMap.values())
-        .sort((a, b) => (b.evidence_score || 0) - (a.evidence_score || 0));
-
-      // Merge wave_kinase_profile — use the first batch that has it (all batches get same cowave context)
-      let mergedWaveProfile: WaveKinaseProfile[] | undefined;
-      for (const br of batchResults) {
-        if (br.wave_kinase_profile && br.wave_kinase_profile.length > 0) {
-          mergedWaveProfile = br.wave_kinase_profile;
-          break;
-        }
-      }
-
-      const mergedResult: GlobalKinaseModuleResponse = {
-        order_id: orderId,
-        kinase_modules: mergedModules,
-        unassigned_ptms: mergedUnassigned,
-        annotation_details: mergedAnnotations,
-        summary: mergedSummary,
-        cowave_cross_analysis: mergedCowaveCross,
-        temporal_cascade: mergedTemporal,
-        effector_proteins: mergedEffectors,
-        wave_kinase_profile: mergedWaveProfile,
-      };
-
-      setGlobalKinaseResult(mergedResult);
+      const result = await requestAnalysis<GlobalKinaseModuleResponse>(`/orders/${orderId}/global-kinase-modules`, {
+        analysis_scope: "full_eligible", force_refresh: forceRefresh,
+      },status=>{if(globalRequests.current.current(requestToken))setAnalysisJob(status);},()=>globalRequests.current.current(requestToken));
+      if(!globalRequests.current.current(requestToken))return;
+      setGlobalKinaseResult(result);
       setActiveTab("kinaseModules");
-
-      // Save merged result to DB (so Receptor Inference uses complete data)
-      try {
-        await api.post(`/orders/${orderId}/save-kinase-analysis-data`, {
-          kinase_modules: mergedModules.map((km) => ({
-            ...km,
-            // Strip members to reduce payload size for DB storage
-            members: km.members.map((m) => ({ key: m.key, gene: m.gene, position: m.position, membership: m.membership })),
-          })),
-          temporal_cascade: mergedTemporal || {},
-          cowave_cross_analysis: mergedCowaveCross,
-          summary: mergedSummary,
-          effector_proteins: (mergedEffectors || []).map((eff) => ({
-            gene: eff.gene,
-            data_type: eff.data_type,
-            max_abs_fc: eff.max_abs_fc,
-            peak_condition: eff.peak_condition,
-            peak_fc: eff.peak_fc,
-            sources: eff.sources,
-            evidence_strength: eff.evidence_strength,
-            evidence_score: eff.evidence_score,
-            directionality: eff.directionality,
-            connected_substrates: eff.connected_substrates,
-          })),
-          wave_kinase_profile: mergedWaveProfile || [],
-          _cache_hash: mergedResult._cache_hash || "",
-        });
-        console.log("[Global Annotate] Merged kinase_analysis_data saved to DB");
-      } catch (saveErr) {
-        console.warn("[Global Annotate] Failed to save merged data to DB:", saveErr);
-        // Non-fatal: the UI still shows the merged result
-      }
     } catch (err: any) {
-      console.error("Global kinase module failed:", err);
-      setGlobalKinaseError(err?.message || "Global kinase module request failed");
-    } finally {
-      setGlobalKinaseLoading(false);
-      setGlobalKinaseBatchProgress(null);
-    }
-  }, [orderId, checkedPtmList, topNPtms, coWaveModules]);
+      if(globalRequests.current.current(requestToken))setGlobalKinaseError(err?.message || "Full analysis request failed");
+    } finally { if(globalRequests.current.current(requestToken))setGlobalKinaseLoading(false); }
+  }, [orderId]);
 
   const toggleModuleExpand = (key: string) => {
     setExpandedModules((prev) => {
@@ -1097,7 +812,7 @@ export default function KinaseModuleAnalysis({
         <p className="text-xs text-muted-foreground">
           {isUbi
             ? "Temporal module detection, E3 Ligase annotation (RING/HECT/RBR), Ubiquitin chain type classification (K48/K63/Mono), and Phospho-Ub cross-talk inference."
-            : "Temporal phosphosite trajectory clustering, multi-source kinase annotation (8 sources + motif prediction), and contextual footprint display. Similar trajectories are grouped for inspection; cluster membership alone does not establish a shared regulator, pathway, or causal cascade."}
+            : "Full precursor inventory, structured reference/motif candidate evidence, and temporal substrate-footprint display. Similar trajectories are grouped for inspection; cluster membership alone does not establish a shared regulator, pathway, or causal cascade."}
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -1199,7 +914,7 @@ export default function KinaseModuleAnalysis({
               variant="outline"
               size="sm"
               className="text-xs h-7 border-amber-400 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
-              disabled={globalKinaseLoading || checkedPtmList.length === 0}
+              disabled={globalKinaseLoading}
               onClick={() => runGlobalKinaseModules(false)}
             >
               {globalKinaseLoading ? (
@@ -1211,9 +926,9 @@ export default function KinaseModuleAnalysis({
                 ? "Analyzing..."
                 : isUbi
                   ? (globalKinaseResult ? "Re-run E3 Annotation" : "E3 Annotate")
-                  : (globalKinaseResult ? "Re-run Global Annotation" : "Global Annotate")}
+                  : (globalKinaseResult ? "Re-run Full Analysis" : "Analyze Full Inventory")}
               <Badge variant="outline" className="text-[9px] ml-1 h-4 px-1">
-                {checkedPtmList.length} PTMs
+                Full eligible inventory
               </Badge>
             </Button>
             {globalKinaseResult && (
@@ -1223,7 +938,7 @@ export default function KinaseModuleAnalysis({
                 className="text-xs h-7 text-muted-foreground hover:text-amber-600"
                 disabled={globalKinaseLoading}
                 onClick={() => runGlobalKinaseModules(true)}
-                title="Ignore cache and re-run full analysis"
+                title="Refresh analysis status; reuse a matching immutable result"
               >
                 <RefreshCw className="h-3 w-3 mr-1" />
                 Refresh
@@ -1233,11 +948,12 @@ export default function KinaseModuleAnalysis({
         </div>
 
         {/* Global annotation loading/error with batch progress */}
+        <AnalysisJobStatus job={analysisJob} onRetry={()=>runGlobalKinaseModules(false)}/>
         {globalKinaseLoading && (
           <div className="flex flex-col gap-1 text-xs text-muted-foreground py-3 px-2 bg-amber-50 dark:bg-amber-900/10 rounded">
             <div className="flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
-              {isUbi ? `Running E3 Ligase module analysis for ${checkedPtmList.length} ubiquitylation sites across all sources...` : `Running global kinase module analysis for ${checkedPtmList.length} PTMs across all sources...`}
+              {isUbi ? `Running E3 Ligase module analysis for ${checkedPtmList.length} ubiquitylation sites across all sources...` : `Running global kinase module analysis for the full eligible inventory across all sources...`}
             </div>
             {globalKinaseBatchProgress && globalKinaseBatchProgress.total > 1 && (
               <div className="ml-6 space-y-1">
@@ -1259,6 +975,7 @@ export default function KinaseModuleAnalysis({
             )}
           </div>
         )}
+        {globalKinaseResult?._stale && <p role="status">이전 성공 revision을 표시 중입니다. 새 분석: {globalKinaseResult.requested_analysis?.execution_status} {globalKinaseResult.requested_analysis?.failure_reason}</p>}
         {globalKinaseError && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
@@ -1661,7 +1378,7 @@ export default function KinaseModuleAnalysis({
             result={globalKinaseResult}
             loading={globalKinaseLoading}
             onRun={runGlobalKinaseModules}
-            ptmCount={checkedPtmList.length}
+            ptmCount={globalKinaseResult?.summary?.analysis_features ?? checkedPtmList.length}
             vectorData={vectorData}
             conditions={conditions}
             onSelectPtms={onSelectPtms}
@@ -2875,7 +2592,11 @@ function EffectorLayerSection({ effectorProteins }: { effectorProteins: Effector
   );
 }
 
-function GlobalKinaseModulesPanel({
+function GlobalKinaseModulesPanel(props:Parameters<typeof LegacyGlobalKinaseModulesPanel>[0]) {
+  return (props.result as any)?.membership_page_url ? <PagedKinaseModules result={props.result}/> : <LegacyGlobalKinaseModulesPanel {...props}/>;
+}
+
+function LegacyGlobalKinaseModulesPanel({
   result,
   loading,
   onRun,
@@ -5019,11 +4740,12 @@ function KinaseActivityHeatmapView({
   isUbi?: boolean;
 }) {
   const [heatmapData, setHeatmapData] = useState<KinaseHeatmapData | null>(null);
+  const [heatmapJob,setHeatmapJob]=useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<HeatmapSortMode>("peak_score");
   const [viewMode, setViewMode] = useState<HeatmapViewMode>("heatmap");
-  const [topN, setTopN] = useState(20);
+  const [topN, setTopN] = useState<number | null>(20);
    const [selectedKinases, setSelectedKinases] = useState<Set<string>>(new Set());
   const [selectedCwGroupFilter, setSelectedCwGroupFilter] = useState<number | null>(null);
   const [signalTierFilter, setSignalTierFilter] = useState<"all" | "de_novo" | "regulated" | "minor">("all");
@@ -5044,24 +4766,33 @@ function KinaseActivityHeatmapView({
   const prevKinaseResultRef = useRef<typeof globalKinaseResult | null>(null);
   const [lineTooltip, setLineTooltip] = useState<{ x: number; y: number; kinase: string; condition: string; score: number } | null>(null);
   // Fetch heatmap data from backend
+  const heatmapRequests=useRef(new LatestRequest());
+  useEffect(()=>()=>heatmapRequests.current.invalidate(),[orderId]);
   const fetchHeatmapData = useCallback(async (forceRefresh = false) => {
+    const requestToken=heatmapRequests.current.begin();
     setLoading(true);
     setError(null);
     try {
+      const pinned=globalKinaseResult as unknown as KinaseHeatmapData & {execution_status?:string};
+      if(!forceRefresh && pinned.execution_status==='completed' && Array.isArray(pinned.kinase_scores)) {
+        if(heatmapRequests.current.current(requestToken))setHeatmapData(pinned);
+        return;
+      }
+
       const kinase_modules = globalKinaseResult.kinase_modules.map((km) => ({
         kinase: km.kinase,
         ptms: km.members.map((m) => ({ gene: m.gene, position: m.position })),
         confidence_score: Number.isFinite(km.confidence_score) ? km.confidence_score : null,
       }));
-      const result = await api.post<KinaseHeatmapData>(
+      const result = await requestAnalysis<KinaseHeatmapData>(
         `/orders/${orderId}/kinase-activity-heatmap`,
-        { kinase_modules, force_refresh: forceRefresh }
+        { kinase_modules, force_refresh: forceRefresh },status=>{if(heatmapRequests.current.current(requestToken))setHeatmapJob(status);},()=>heatmapRequests.current.current(requestToken)
       );
-      setHeatmapData(result);
+      if(heatmapRequests.current.current(requestToken))setHeatmapData(result);
     } catch (err: any) {
-      setError(err?.message || "Failed to compute kinase activity heatmap");
+      if(heatmapRequests.current.current(requestToken))setError(err?.message || "Failed to compute kinase activity heatmap");
     } finally {
-      setLoading(false);
+      if(heatmapRequests.current.current(requestToken))setLoading(false);
     }
   }, [orderId, globalKinaseResult]);
 
@@ -5251,9 +4982,9 @@ function KinaseActivityHeatmapView({
         const children = subsByParent.get(s.kinase);
         if (children) result.push(...children);
       }
-      return result.slice(0, topN);
+      return topN === null ? result : result.slice(0, topN);
     }
-    return scores.slice(0, topN);
+    return topN === null ? scores : scores.slice(0, topN);
   }, [heatmapData, sortMode, topN, signalTierFilter, getTierTotalSignal, sortByCondition, showSubPatterns]);
 
   // Color scale for heatmap: blue(-) → white(0) → red(+)
@@ -5361,7 +5092,8 @@ function KinaseActivityHeatmapView({
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-cyan-400 mr-2" />
-        <span className="text-sm text-muted-foreground">Computing kinase activity scores...</span>
+        <span className="text-sm text-muted-foreground">Computing temporal substrate footprints...</span>
+        <AnalysisJobStatus job={heatmapJob} onRetry={()=>fetchHeatmapData(true)}/>
       </div>
     );
   }
@@ -5370,6 +5102,7 @@ function KinaseActivityHeatmapView({
     return (
       <div className="text-center py-8">
         <p className="text-sm text-red-400 mb-2">{error}</p>
+        <AnalysisJobStatus job={heatmapJob} onRetry={()=>fetchHeatmapData(true)}/>
         <Button size="sm" variant="outline" onClick={() => fetchHeatmapData(true)}>
           <RefreshCw className="h-3 w-3 mr-1" /> Retry
         </Button>
@@ -5423,7 +5156,7 @@ function KinaseActivityHeatmapView({
             const mode = e.target.value as HeatmapSortMode;
             setSortMode(mode);
             // Auto-expand to show all when sorting by local co-membership group
-            if (mode === "cowave_group") setTopN(9999);
+            if (mode === "cowave_group") setTopN(null);
           }}
         >
           <option value="peak_score">Peak Score</option>
@@ -5436,15 +5169,15 @@ function KinaseActivityHeatmapView({
         <span className="text-xs text-muted-foreground">Top:</span>
         <select
           className="text-xs h-7 bg-background border border-border rounded px-2"
-          value={topN}
-          onChange={(e) => setTopN(Number(e.target.value))}
+          value={topN ?? "all"}
+          onChange={(e) => setTopN(e.target.value === "all" ? null : Number(e.target.value))}
         >
           <option value={10}>10</option>
           <option value={20}>20</option>
           <option value={30}>30</option>
           <option value={50}>50</option>
 
-          <option value={9999}>All</option>
+          <option value="all">All</option>
         </select>
         <span className="text-xs text-muted-foreground">Signal:</span>
         <select
@@ -5558,8 +5291,11 @@ function KinaseActivityHeatmapView({
         </div>
       )}
 
+      <p className="text-xs text-muted-foreground">계산 완료 {heatmapData.kinase_scores.length} · 표시 선택 {sortedScores.length} · 모델 적격 feature {(heatmapData as any).coverage?.eligible_features ?? 'NA'}. 표시 설정은 분석 입력을 변경하지 않습니다.</p>
+      {viewMode === "heatmap" && (sortedScores.length > 100 || heatmapData.conditions.length > 30) && <VirtualScoreHeatmap rows={sortedScores} conditions={heatmapData.conditions} onSelect={name=>{setSelectedKinases(new Set([name]));onKinaseSelect?.(name);}} />}
+      <AnalysisJobStatus job={heatmapJob} onRetry={()=>fetchHeatmapData(true)}/>
       {/* Heatmap View */}
-      {viewMode === "heatmap" && (
+      {viewMode === "heatmap" && sortedScores.length <= 100 && heatmapData.conditions.length <= 30 && (
         <div className="overflow-x-auto border border-border rounded-lg">
           <table className="w-full text-xs">
             <thead>
@@ -5961,9 +5697,9 @@ function KinaseActivityHeatmapView({
                     <td className="text-center px-1 py-0.5">
                       <span
                         className={`text-[10px] ${getCoherenceColor(ks.coherence ?? 0)}`}
-                        title={`Raw intra-footprint coherence: ${(ks.coherence ?? 0).toFixed(3)}\nSupport-adjusted diagnostic coherence: ${(ks.footprint_diagnostics?.support_adjusted_coherence ?? 0).toFixed(3)}\n\nThe adjusted value shrinks raw coherence by the contribution-weighted effective support, so small-n footprints are not over-interpreted. It does not change the displayed score or rank.${ks.n_clusters && ks.n_clusters > 1 ? `\n\nBased on dominant cluster (${ks.substrate_count}/${ks.total_substrates ?? ks.substrate_count} substrates)\n${ks.n_clusters} trajectory clusters detected` : ""}`}
+                        title={`Raw intra-footprint coherence: ${finite(ks.coherence) ? ks.coherence.toFixed(3) : "not_evaluable"}\nSupport-adjusted diagnostic coherence: ${ks.footprint_diagnostics?.support_adjusted_coherence?.toFixed(3) ?? "not_evaluable"}\n\nThe adjusted value shrinks raw coherence by the contribution-weighted effective support, so small-n footprints are not over-interpreted. It does not change the displayed score or rank.${ks.n_clusters && ks.n_clusters > 1 ? `\n\nBased on dominant cluster (${ks.substrate_count}/${ks.total_substrates ?? ks.substrate_count} substrates)\n${ks.n_clusters} trajectory clusters detected` : ""}`}
                       >
-                        {(ks.coherence ?? 0).toFixed(2)}
+                        {finite(ks.coherence) ? ks.coherence.toFixed(2) : "NA"}
                       </span>
                     </td>
                     {/* Heatmap cells - split up/down with independent normalization */}
@@ -6341,7 +6077,7 @@ function KinaseActivityHeatmapView({
                   {/* Bar chart - simple CSS bars */}
                   <div className="grid gap-1">
                     {Object.entries(goLocData.summary).slice(0, 10).map(([term, count]) => {
-                      const maxCount = Math.max(...Object.values(goLocData.summary));
+                      const maxCount = Object.values(goLocData.summary).reduce((max, value) => Math.max(max, value), 0);
                       const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
                       const totalGenes = Object.keys(goLocData.gene_localizations).length;
                       // Color coding by compartment
@@ -6408,7 +6144,8 @@ function KinaseActivityHeatmapView({
       )}
 
       {/* Line Chart View -- All kinases with pattern-based filtering */}
-      {viewMode === "line" && (() => {
+      {viewMode === "line" && sortedScores.length > 100 && <CanvasScoreTrajectories rows={sortedScores} conditions={heatmapData.conditions}/> }
+      {viewMode === "line" && sortedScores.length <= 100 && (() => {
         // Determine which kinases match the current pattern filter
         const patternMatched = patternFilter
           ? sortedScores.filter((s) => (s.temporal_pattern || []).some((p) => p === patternFilter || p.includes(patternFilter)))
@@ -6542,7 +6279,8 @@ function KinaseActivityHeatmapView({
                       let closestDist = Infinity;
                       const mouseYSvg = mouseY / rect.height * svgH;
                       for (const ks of candidates) {
-                        const score = ks.scores[cond] || 0;
+                        const score = ks.scores[cond];
+                        if (!finite(score)) continue;
                         const lineY = getY(score);
                         const dist = Math.abs(lineY - mouseYSvg);
                         if (dist < closestDist) {
@@ -6579,16 +6317,12 @@ function KinaseActivityHeatmapView({
                       {sortedScores.map((ks) => {
                         const isHighlighted = highlighted.length > 0 && highlighted.some((h) => h.kinase === ks.kinase);
                         if (isHighlighted) return null;
-                        const points = heatmapData.conditions.map((c, i) => {
-                          const x = i * 60 + 30;
-                          const y = getY(ks.scores[c] || 0);
-                          return `${x},${y}`;
-                        }).join(" ");
+                        const points = observedSvgPath(heatmapData.conditions, ks.scores, i => i * 60 + 30, getY);
                         const isHovered = hoveredLineKinase === ks.kinase;
                         return (
-                          <polyline
+                          <path
                             key={ks.kinase}
-                            points={points}
+                            d={points}
                             fill="none"
                             stroke={isHovered ? "#fff" : "#555"}
                             strokeWidth={isHovered ? 2.5 : 1}
@@ -6598,11 +6332,7 @@ function KinaseActivityHeatmapView({
                       })}
                       {/* Highlighted kinases on top */}
                       {highlighted.map((ks, idx) => {
-                        const points = heatmapData.conditions.map((c, i) => {
-                          const x = i * 60 + 30;
-                          const y = getY(ks.scores[c] || 0);
-                          return `${x},${y}`;
-                        }).join(" ");
+                        const points = observedSvgPath(heatmapData.conditions, ks.scores, i => i * 60 + 30, getY);
                         const color = LINE_COLORS[idx % LINE_COLORS.length];
                         const isHovered = hoveredLineKinase === ks.kinase;
                         const dimmed = hoveredLineKinase && !isHovered;
@@ -6617,7 +6347,8 @@ function KinaseActivityHeatmapView({
                             />
                             {heatmapData.conditions.map((c, i) => {
                               const x = i * 60 + 30;
-                              const y = getY(ks.scores[c] || 0);
+                              if (!finite(ks.scores[c])) return null;
+                              const y = getY(ks.scores[c]);
                               return <circle key={c} cx={x} cy={y} r={isHovered ? 5 : 3.5} fill={color} opacity={dimmed ? 0.2 : 1} />;
                             })}
                           </g>
@@ -6849,7 +6580,8 @@ function KinaseActivityHeatmapView({
                         <td className="text-center px-1 py-1"></td>
                         <td className="text-center px-1 py-1 text-amber-400/70 text-[9px]">substrate-inferred</td>
                         {heatmapData.conditions.map((c) => {
-                          const val = ks.scores[c] ?? 0;
+                          const val = ks.scores[c];
+                          if (!finite(val)) return <td key={c} title="No evaluable observation">NA</td>;
                           return (
                             <td key={c} className="text-center px-0.5 py-0.5">
                               <span

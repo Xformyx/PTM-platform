@@ -148,7 +148,7 @@ def _series_track(key: str, representation: Mapping[str, Any] | None) -> str:
     payload = (representation or {}).get(key) or {}
     if isinstance(payload, Mapping):
         return str(payload.get("track") or payload.get("quantification_track") or "unadjusted")
-    return "unadjusted"
+    return str(payload) if isinstance(payload, str) and payload else "unadjusted"
 
 
 def _eligible_keys(
@@ -178,7 +178,11 @@ def _anchor_deltas(
     eligible_keys: Sequence[str],
     identities: Mapping[str, Mapping[str, Any]] | None,
     exclude_groups: set[str],
+    index=None,
+    include_deltas=True,
 ) -> dict[str, Any]:
+    if index is not None:
+        return index.query(interval, exclude_groups, include_deltas)
     if interval.get("status") != "scheduled":
         return {"status": "not_evaluable", "reason": interval.get("reason"), "deltas": {}, "n_anchor_groups": 0}
     start, end = interval["from"], interval["to"]
@@ -209,6 +213,34 @@ def _anchor_deltas(
         "anchor_median": float(np.median(list(group_deltas.values()))),
         "membership_changed": False,
     }
+
+
+class AnchorDeltaIndex:
+    """Exact sorted medians with at most two group omissions; no model changes."""
+    def __init__(self, intervals, timeseries, keys, identities):
+        self.records = {}
+        for interval in intervals:
+            record = _anchor_deltas(interval, timeseries, keys, identities, set())
+            ordered = sorted((v, k) for k, v in record["deltas"].items())
+            self.records[interval["interval_id"]] = (record, ordered, {g:i for i, (_,g) in enumerate(ordered)})
+
+    def query(self, interval, excluded, include_deltas=True):
+        original, ordered, positions = self.records[interval["interval_id"]]
+        if interval.get("status") != "scheduled":
+            return dict(original)
+        removed = sorted(positions[g] for g in excluded if g in positions)
+        size = len(ordered) - len(removed)
+        deltas = {g:v for g,v in original["deltas"].items() if g not in excluded} if include_deltas else {}
+        if size < MIN_ANCHOR_GROUPS_FOR_MEDIAN:
+            return {"status":"not_evaluable", "reason":"no_eligible_anchor_after_group_exclusion", "deltas":deltas, "n_anchor_groups":0}
+        def kth(k):
+            index = k
+            for missing in removed:
+                if missing <= index: index += 1
+            return ordered[index][0]
+        median = kth(size//2) if size % 2 else (kth(size//2-1)+kth(size//2))/2
+        return {"status":"computed", "reason":None, "deltas":deltas, "n_anchor_groups":size,
+                "anchor_median":float(median), "membership_changed":False}
 
 
 def _fixed_common_groups(
@@ -278,6 +310,7 @@ def compute_target_trajectory_evidence(
     eligible_keys: Sequence[str],
     identities: Mapping[str, Mapping[str, Any]] | None = None,
     iterative_shared_keys: Sequence[str] | None = None,
+    _anchor_index=None,
 ) -> dict[str, Any]:
     """Compare one target to anchors that exclude its measurement group."""
     target_series = timeseries.get(target_key) or {}
@@ -304,7 +337,7 @@ def compute_target_trajectory_evidence(
     common_groups = _fixed_common_groups(intervals, timeseries, eligible_keys, identities, exclude)
     for interval in intervals:
         target_delta = interval_delta(target_series, interval["from"], interval["to"]) if interval["status"] == "scheduled" else None
-        anchors = _anchor_deltas(interval, timeseries, eligible_keys, identities, exclude)
+        anchors = _anchor_deltas(interval, timeseries, eligible_keys, identities, exclude, _anchor_index)
         fixed_deltas = [anchors["deltas"][group] for group in common_groups if group in anchors.get("deltas", {})] if anchors.get("status") == "computed" else []
         anchor_median = anchors.get("anchor_median") if anchors.get("status") == "computed" else None
         if interval["status"] != "scheduled":
@@ -368,7 +401,7 @@ def compute_target_trajectory_evidence(
         dropped_same = dropped_opp = 0
         for interval in intervals:
             target_delta = interval_delta(target_series, interval["from"], interval["to"]) if interval["status"] == "scheduled" else None
-            anchors = _anchor_deltas(interval, timeseries, eligible_keys, identities, exclude | {group})
+            anchors = _anchor_deltas(interval, timeseries, eligible_keys, identities, exclude | {group}, _anchor_index, False)
             if target_delta is None or anchors.get("status") != "computed":
                 continue
             target_dir = direction_of(target_delta)
@@ -445,6 +478,7 @@ def compute_kinase_trajectory_evidence(
     representation: Mapping[str, Any] | None = None,
     iterative_shared_keys: Sequence[str] | None = None,
     required_track: str = "unadjusted",
+    target_sink=None,
 ) -> dict[str, Any]:
     """Kinase-level summary. Does not alter NNLS ratios or weighted sums."""
     if isinstance(denovo_keys, Mapping):
@@ -459,8 +493,9 @@ def compute_kinase_trajectory_evidence(
         required_track=required_track,
     )
     targets = []
+    anchor_index = AnchorDeltaIndex(scheduled_intervals(conditions), timeseries, eligible, identities)
     for key in eligible:
-        targets.append(compute_target_trajectory_evidence(
+        target = compute_target_trajectory_evidence(
             candidate=candidate,
             target_key=key,
             timeseries=timeseries,
@@ -468,7 +503,13 @@ def compute_kinase_trajectory_evidence(
             eligible_keys=eligible,
             identities=identities,
             iterative_shared_keys=iterative_shared_keys,
-        ))
+            _anchor_index=anchor_index,
+        )
+        if target_sink is not None:
+            target_sink(target)
+            target = {**target, "metrics": {name:value for name,value in target["metrics"].items()
+                      if name in {"signed_profile_correlation", "direction_concordance_fraction"}}}
+        targets.append(target)
     evaluable = [row for row in targets if row.get("support_status") == "computed"]
     correlations = [
         row["metrics"]["signed_profile_correlation"]["value"]
@@ -492,7 +533,9 @@ def compute_kinase_trajectory_evidence(
         "unavailable_reason": None if evaluable else "no_evaluable_signed_interval_comparison",
         "median_signed_profile_correlation": float(np.median(correlations)) if correlations else None,
         "median_direction_concordance_fraction": float(np.median(concordances)) if concordances else None,
-        "targets": targets,
+        "targets": targets if target_sink is None else [],
+        "target_details_storage": "inline" if target_sink is None else "streamed_artifact",
+        "quantification_track": required_track,
         "estimator": CONTRACT_VERSION,
         "does_not_modify": ["nnls_ratio", "weighted_up_sums", "weighted_down_sums", "ranking"],
     }
@@ -507,6 +550,7 @@ def attach_trajectory_evidence(
     identities: Mapping[str, Mapping[str, Any]] | None = None,
     denovo_keys: Any = None,
     representation: Mapping[str, Any] | None = None,
+    target_sink=None,
 ) -> dict[str, dict]:
     """Write ``trajectory_evidence`` only. Weighted sums stay untouched."""
     members_by_kinase = {}
@@ -528,5 +572,8 @@ def attach_trajectory_evidence(
             denovo_keys=denovo_keys,
             representation=representation,
             iterative_shared_keys=iterative_keys.get(canonical),
+            target_sink=target_sink,
+            required_track=next(iter({_series_track(k, representation) for k in members_by_kinase.get(canonical, [])}), "unadjusted")
+                if len({_series_track(k, representation) for k in members_by_kinase.get(canonical, [])}) <= 1 else "mixed_tracks_not_evaluable",
         )
     return results

@@ -83,6 +83,13 @@ def project_report_vector_row(row: Mapping[str, Any]) -> dict[str, Any]:
         # Existing aliases used across legacy Report nodes.
         "gene": gene,
         "position": position,
+        "source_gene_label": row.get("source_gene_label", row.get("Gene.Name", row.get("gene", ""))),
+        "source_position_label": row.get("source_position_label", row.get("PTM_Position", row.get("position", ""))),
+        "source_row_lineage": list(row.get("source_row_lineage") or []),
+        "source_observation_id": row.get("source_observation_id"),
+        "biological_unit": row.get("biological_unit"),
+        "sample_id": row.get("sample_id"),
+        "residue_coordinate_system": _text(row, "residue_coordinate_system", "coordinate_system"),
         "condition": _text(row, "Condition", "condition", "Comparison") or "",
         "time_minutes": _optional_float(row, "time_minutes", "Time_Minutes"),
         "reference_id": _text(row, "reference_id", "Reference_ID") or None,

@@ -79,6 +79,8 @@ async def _seed_system_settings(conn) -> None:
 async def _run_migrations(conn) -> None:
     """Apply incremental schema changes that create_all won't handle."""
     await _seed_system_settings(conn)
+    await _add_column_if_missing(conn, "analysis_jobs", "heartbeat_at", "heartbeat_at DATETIME NULL")
+    await _add_column_if_missing(conn, "analysis_jobs", "recovery_count", "recovery_count INT NOT NULL DEFAULT 0")
     await _add_column_if_missing(
         conn, "users", "must_change_password",
         "must_change_password TINYINT(1) NOT NULL DEFAULT 0"
@@ -290,9 +292,17 @@ async def lifespan(app: FastAPI):
     # Resume monitoring of any ptmquant jobs that were 'running' when the server restarted
     asyncio.create_task(_resume_orphaned_ptmquant_jobs())
 
-    yield
-
-    await engine.dispose()
+    from app.services.analysis_job_recovery import recovery_loop
+    from app.core.database import AsyncSessionLocal
+    recovery_task=asyncio.create_task(recovery_loop(AsyncSessionLocal))
+    try:
+        yield
+    finally:
+        recovery_task.cancel()
+        from contextlib import suppress
+        with suppress(asyncio.CancelledError):
+            await recovery_task
+        await engine.dispose()
     logger.info("API Server shutting down")
 
 
@@ -372,6 +382,10 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
 app.include_router(settings_api.router, prefix="/api")
 app.include_router(orders.router, prefix="/api")
+from app.api import analysis_jobs
+app.include_router(analysis_jobs.router, prefix="/api")
+from app.api import vector_view
+app.include_router(vector_view.router, prefix="/api")
 app.include_router(benchmarks.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")

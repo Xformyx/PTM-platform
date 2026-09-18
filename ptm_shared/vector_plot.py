@@ -44,10 +44,15 @@ def normalize_plot_records(rows):
         # Unresolved identities remain diagnostic rows, never combined by site.
         if not key[0]:
             key = (json.dumps(row, sort_keys=True), row["condition"])
-        grouped.setdefault(key, {})[json.dumps(row, sort_keys=True)] = row
+        grouped.setdefault(key, []).append(row)
     output = []
-    for key, variants in sorted(grouped.items()):
-        row = deepcopy(variants[sorted(variants)[0]])
+    for key, members in sorted(grouped.items()):
+        members = sorted(members, key=lambda r: json.dumps(r, sort_keys=True))
+        row = deepcopy(members[0])
+        variants = {json.dumps(measurement_signature(r), sort_keys=True) for r in members}
+        row["source_row_lineage"] = [locator for r in members for locator in r.get("source_row_lineage", [])]
+        row["source_labels"] = sorted({str(r.get("source_gene_label") or r.get("gene") or "") for r in members})
+        row["source_row_count"] = sum(r.get("source_row_count", 1) for r in members)
         if len(variants) > 1:
             row.update(project_axis_fields({}))
             row.update(ptm_relative_log2fc=None, ptm_absolute_log2fc=None, p_value=None, q_value=None,
@@ -57,6 +62,16 @@ def normalize_plot_records(rows):
                 row["axis_eligibility"][axis] = {"eligible": False, "missing_reason": "conflicting_feature_condition"}
         output.append(row)
     return output
+
+
+def measurement_signature(row):
+    """Labels/locators may differ; observation units and quantitative support may not."""
+    prefixes = ("ptm_unadjusted_", "ptm_protein_adjusted_", "protein_", "ptm_reconstructed_")
+    names = {"feature_id", "condition", "time_minutes", "reference_id", "sample_id", "biological_unit",
+             "source_observation_id", "axis_eligibility", "lod_relative_log2", "normalized_log2_intensity",
+             "conventional_log2fc_na", "control_pseudocount_used", "detection_control", "detection_treatment",
+             "detection_n", "detection_expected", "occupancy_fraction", "occupancy_logit_delta", "pair_quality_tier"}
+    return {k: v for k, v in row.items() if k in names or k.startswith(prefixes)}
 
 
 def project_plot_row(row):
@@ -88,19 +103,22 @@ def project_plot_row(row):
     return result
 
 
-def plot_feature_metadata(rows, annotations):
+def plot_feature_metadata(rows, annotations, selected_feature_ids=None):
     """Expand site annotations to identified forms; never aggregate their values."""
-    by_site = {(str(p.get("gene", "")), str(p.get("position", ""))): p for p in annotations}
+    from .annotation_context import AnnotationIndex
+    index = AnnotationIndex(annotations)
+    allowed = set(selected_feature_ids) if selected_feature_ids is not None else None
     selected = {}
     for row in sorted(rows, key=lambda r: (r.get("feature_id") or "", r["condition"])):
         fid = row.get("feature_id")
-        site = (row["gene"], row["position"])
-        if not fid or (by_site and site not in by_site):
+        if not fid or (allowed is not None and fid not in allowed):
             continue
         if fid not in selected:
-            selected[fid] = {**by_site.get(site, {}), **{k: row.get(k) for k in (
+            match = index.match(row)
+            selected[fid] = {**{k: row.get(k) for k in (
                 "gene", "position", "feature_id", "feature_identity_version", "precursor_id", "precursor_charge",
-                "modified_sequence", "protein_group", "conventional_log2fc_na", "denovo_confidence")},
-                "label": f"{row['gene']} {row['position']} · {row['reader_feature_id']}",
-                "p1_pattern": None, "annotation_scope": "gene_site_context_not_feature_measurement"}
+                "modified_sequence", "protein_group", "fasta_taxonomy_id", "isoform", "accession",
+                "source_gene_label", "source_position_label", "conventional_log2fc_na", "denovo_confidence")},
+                "label": f"{str(row.get('source_gene_label') or row['gene']).strip()} {row['position']} · {row['reader_feature_id']}",
+                "p1_pattern": None, "annotation_scope": match["match_scope"], "annotation_match": match}
     return list(selected.values())

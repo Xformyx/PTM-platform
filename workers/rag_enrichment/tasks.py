@@ -62,6 +62,11 @@ def _build_relative_ptm_timeseries(enriched_data: list) -> dict[str, dict[str, f
 
 
 def _auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, mcp_client=None) -> dict:
+    from common.production_analysis import complete_production_analysis
+    return complete_production_analysis(order_id, config)
+
+
+def _legacy_auto_run_global_analysis(order_id: int, enriched_data: list, config: dict, mcp_client=None) -> dict:
     """v9.44: Auto-run Global Kinase Modules + Activity Heatmap after RAG enrichment.
 
     Self-contained implementation — no cross-worker imports.

@@ -156,6 +156,7 @@ async def _run_tmm_with_session(
             annotated = await global_kinase_modules(
                 child.id,
                 {
+                    "analysis_scope": "legacy_explicit_subset",
                     "ptms": temporal_request["ptms"],
                     "cowave_modules": temporal_request["cowave_modules"],
                     "allow_motif_only_seed": True,
@@ -200,6 +201,7 @@ async def _run_tmm_with_session(
             tmm = await kinase_activity_heatmap(
                 child.id,
                 {
+                    "analysis_scope": "legacy_explicit_subset",
                     "kinase_modules": tmm_modules,
                     "tmm_config": TMM_CONFIG,
                     "force_refresh": True,

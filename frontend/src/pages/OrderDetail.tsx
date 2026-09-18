@@ -1,3 +1,9 @@
+import {savedViewSettings} from "../lib/vectorView";
+import {VirtualFeatureList} from "../components/VirtualFeatureList";
+import {FullTrajectoryBrowser} from "../components/FullTrajectoryBrowser";
+import { VectorDensityPlot } from "../components/VectorDensityPlot";
+import { VectorViewControls } from "../components/VectorViewControls";
+import { LatestRequest, sharedViewRequest, finiteExtent, representationValue, type VectorView, type ViewMode, type Representation } from "../lib/vectorView";
 import { QuantitationEvidenceTable } from "../components/QuantitationEvidenceTable";
 import { sampledExtremumIndex, expandContextSelection, featureKey, axisValue, axisQ, axisPrefix, axisLabel, finite, supportedChange, type QuantAxis, type QuantRow } from "../lib/quantitation";
 import { useEffect, useRef, useState, useMemo } from "react";
@@ -1009,209 +1015,10 @@ type VectorRow = QuantRow & {
   q_value?: number | null;
 };
 
-function ScatterPlotsInteractive({ orderId, orderStatus }: { orderId: number; orderStatus?: string }) {
-  const [data, setData] = useState<{ vector_data: VectorRow[] } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [metric, setMetric] = useState<"relative" | "unadjusted" | "occupancy">("relative");
-  const [zoom, setZoom] = useState(1); // 1 = auto, zoom in = narrower range
-
-  useEffect(() => {
-    setLoading(true);
-    api
-      .get<{ vector_data: VectorRow[] }>(`/orders/${orderId}/vector-plot-data`)
-      .then((d) => setData({ vector_data: d.vector_data || [] }))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [orderId, orderStatus]);
-
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mb-3" />
-        <p className="text-sm text-muted-foreground">Loading scatter data...</p>
-      </div>
-    );
-  }
-
-  if (!data?.vector_data?.length) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
-        <ChartScatter className="h-12 w-12 text-muted-foreground/40 mb-3" />
-        <p className="text-sm text-muted-foreground text-center">
-          Scatter data will appear here after preprocessing completes.
-        </p>
-      </div>
-    );
-  }
-
-  const conditions = Array.from(
-    new Set(data.vector_data.map((r) => r.condition).filter((c) => c && c !== "Control"))
-  ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
-
-  const yKey = metric === "relative"
-    ? "ptm_protein_adjusted_log2fc"
-    : metric === "unadjusted"
-      ? "ptm_unadjusted_log2fc"
-      : "occupancy_logit_delta";
-  const occupancyAvailable = data.vector_data.some((row) => (
-    row.pair_quality_tier === "O1" || row.pair_quality_tier === "O2"
-  ) && row.occupancy_logit_delta != null);
-  const metricLabel = metric === "relative"
-    ? "Protein-adjusted PTM (A)"
-    : metric === "unadjusted"
-      ? "Independent PTM (U)"
-      : "Paired Occupancy (apparent)";
-
-  const chartsByCond = conditions.map((cond) => {
-    const rows = data.vector_data.filter((r) => (
-      r.condition === cond && finite(r.protein_log2fc) && finite(r[yKey])
-      && (metric === "occupancy" || axisValue(r, metric) !== null)
-      && (metric !== "occupancy" || (
-        (r.pair_quality_tier === "O1" || r.pair_quality_tier === "O2")
-        && r.occupancy_logit_delta != null
-      ))
-    ));
-    const points = rows.map((r) => ({
-      x: r.protein_log2fc,
-      y: r[yKey] as number,
-      name: `${r.gene} ${r.position} · ${featureKey(r)}`,
-      pairTier: r.pair_quality_tier || "O0",
-      calibration: r.occupancy_calibration_type || "none",
-      occupancyPercent: r.occupancy_percent,
-    }));
-    return { condition: cond, points };
-  });
-
-  const metricRows = metric === "occupancy"
-    ? data.vector_data.filter((row) => (
-      (row.pair_quality_tier === "O1" || row.pair_quality_tier === "O2")
-      && row.occupancy_logit_delta != null
-    ))
-    : data.vector_data;
-  const allX = chartsByCond.flatMap(c => c.points.map(p => p.x));
-  const allY = chartsByCond.flatMap(c => c.points.map(p => p.y));
-  const xMin = allX.length ? Math.min(...allX) : -1;
-  const xMax = allX.length ? Math.max(...allX) : 1;
-  const yMin = allY.length ? Math.min(...allY) : -1;
-  const yMax = allY.length ? Math.max(...allY) : 1;
-  const pad = Math.max(0.3, (Math.max(xMax - xMin, yMax - yMin) || 2) * 0.1);
-  const domainPadding = pad / zoom;
-  const xDomain = [xMin - domainPadding, xMax + domainPadding];
-  const yDomain = [yMin - domainPadding, yMax + domainPadding];
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex gap-1">
-          <Button
-            variant={metric === "relative" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setMetric("relative")}
-          >
-            Protein-adjusted PTM (A)
-          </Button>
-          <Button
-            variant={metric === "unadjusted" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setMetric("unadjusted")}
-          >
-            Independent PTM (U)
-          </Button>
-          <Button
-            variant={metric === "occupancy" ? "default" : "outline"}
-            size="sm"
-            disabled={!occupancyAvailable}
-            onClick={() => setMetric("occupancy")}
-          >
-            Paired Occupancy
-          </Button>
-        </div>
-        {metric === "occupancy" && (
-          <p className="w-full text-xs text-muted-foreground">
-            Observed-only paired modified/unmodified peptide signal. O2 values are apparent occupancy fractions and are not calibrated physical occupancy.
-          </p>
-        )}
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.min(4, z + 0.5))}>
-            <ZoomIn className="h-3.5 w-3.5" /> Zoom In
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.max(0.5, z - 0.5))}>
-            <ZoomOut className="h-3.5 w-3.5" /> Zoom Out
-          </Button>
-          <span className="text-xs text-muted-foreground ml-1">{zoom.toFixed(1)}x</span>
-        </div>
-      </div>
-
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {chartsByCond.map(({ condition, points }, idx) => (
-          <Card key={condition} className="overflow-hidden">
-            <CardHeader className="py-2 px-4">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: SCATTER_PALETTE[idx % SCATTER_PALETTE.length] }} />
-                {condition} ({metricLabel})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-2">
-              <div className="h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 8, right: 8, bottom: 24, left: 24 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis
-                      type="number"
-                      dataKey="x"
-                      name="Protein Log2FC"
-                      domain={xDomain}
-                      tick={{ fontSize: 10 }}
-                    />
-                    <YAxis
-                      type="number"
-                      dataKey="y"
-                      name={metric === "occupancy" ? "Occupancy logit delta" : metric === "relative" ? "Protein-adjusted PTM (A) Log2FC" : "Independent PTM (U) Log2FC"}
-                      domain={yDomain}
-                      tick={{ fontSize: 10 }}
-                    />
-                    <Tooltip
-                      cursor={{ strokeDasharray: "3 3" }}
-                      content={({ active, payload }) => {
-                        if (!active || !payload?.[0]) return null;
-                        const p = payload[0].payload;
-                        return (
-                          <div className="rounded-md border bg-background px-3 py-2 text-sm shadow-md">
-                            <p className="font-medium">{p.name}</p>
-                            <p className="text-muted-foreground">
-                              Protein: {p.x.toFixed(3)} · {metric === "relative" ? "PTM Rel" : "PTM Abs"}: {p.y.toFixed(3)}
-                            </p>
-                          </div>
-                        );
-                      }}
-                    />
-                    {metric === "relative" && [-1, -0.5, 0, 0.5, 1].map((y) => (
-                      <ReferenceLine key={y} y={y} stroke="#ef4444" strokeDasharray={y === 0 ? undefined : "3 3"} strokeOpacity={0.5} />
-                    ))}
-                    {metric === "relative" && <ReferenceLine x={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />}
-                    {metric === "unadjusted" && (
-                      <>
-                        <ReferenceLine x={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
-                        <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
-                        <ReferenceLine segment={[{ x: Math.min(xMin, yMin), y: Math.min(xMin, yMin) }, { x: Math.max(xMax, yMax), y: Math.max(xMax, yMax) }]} stroke="#000" strokeDasharray="3 3" strokeOpacity={0.6} />
-                      </>
-                    )}
-                    <Scatter
-                      name={condition}
-                      data={points}
-                      fill={SCATTER_PALETTE[idx % SCATTER_PALETTE.length]}
-                      fillOpacity={0.7}
-                    />
-                  </ScatterChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
+function ScatterPlotsInteractive({orderId}: {orderId:number;orderStatus?:string}) {
+  return <VectorDensityPlot orderId={orderId} />;
 }
+
 
 function parseTimeOrder(cond: string): number {
   // Normalize to minutes for correct time-series ordering.
@@ -1245,8 +1052,8 @@ type TrendCategory =
   | "other";
 
 const TREND_META: Record<TrendCategory, { label: string; color: string; description: string }> = {
-  sustained_activation: { label: "Sustained Activation", color: "#ef4444", description: "지속적 활성화 (대부분 시간대에서 높은 양의 Log2FC)" },
-  sustained_inhibition: { label: "Sustained Inhibition", color: "#8b5cf6", description: "지속적 억제 (대부분 시간대에서 음의 Log2FC)" },
+  sustained_activation: { label: "Sustained increase", color: "#ef4444", description: "지속적 활성화 (대부분 시간대에서 높은 양의 Log2FC)" },
+  sustained_inhibition: { label: "Sustained decrease", color: "#8b5cf6", description: "지속적 억제 (대부분 시간대에서 음의 Log2FC)" },
   transient_burst:      { label: "Transient Burst",      color: "#f59e0b", description: "일시적 급등 후 복귀 (스파이크 패턴)" },
   increasing:           { label: "Increasing",           color: "#22c55e", description: "시간에 따른 증가 추세" },
   decreasing:           { label: "Decreasing",           color: "#3b82f6", description: "시간에 따른 감소 추세" },
@@ -1886,7 +1693,7 @@ function MultiSiteDivergencePanel({
   const BUBBLE_R_MAX = 18;
   const BUBBLE_R_MIN = 6;
   const allFCs = Array.from(geneSites.values()).flatMap((sites) => sites.map((s) => Math.abs(s.peakFC)));
-  const globalMaxFC = Math.max(...allFCs, 1);
+  const globalMaxFC = Math.max(1, finiteExtent(allFCs)?.[1] ?? 1);
   function bubbleR(fc: number) {
     return BUBBLE_R_MIN + ((Math.abs(fc) / globalMaxFC) * (BUBBLE_R_MAX - BUBBLE_R_MIN));
   }
@@ -2255,7 +2062,7 @@ function MultiSiteDivergencePanel({
 }
 
 // ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
-function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
+export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   type TopNPtmMeta = {
     feature_id?: string;
@@ -2273,10 +2080,18 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     conventional_log2fc_na?: boolean;
     shared_peptide?: boolean;
   };
-  const [data, setData] = useState<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
+  const [data, setData] = useState<Partial<VectorView> & { vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
-  const [metric, setMetric] = useState<QuantAxis>("relative");
+  const [metric, setMetric] = useState<QuantAxis>(()=>savedViewSettings(orderId).axis ?? "relative");
+  const [viewMode, setViewMode] = useState<ViewMode>(()=>savedViewSettings(orderId).mode ?? "per_condition_top_n");
+  const [viewN, setViewN] = useState<number | null>(()=>savedViewSettings(orderId).n ?? null);
+  const [viewError,setViewError]=useState<string|null>(null);
+  const [curvePage, setCurvePage] = useState(0);
+  const [representation, setRepresentation] = useState<Representation>(()=>savedViewSettings(orderId).representation ?? "conventional_log2_contrast");
+  useEffect(()=>{try{localStorage.setItem(`vector-view.v2:${orderId}`,JSON.stringify({mode:viewMode,n:viewN,axis:metric,representation}));}catch{}},[orderId,viewMode,viewN,metric,representation]);
+  const requestSequence = useRef(new LatestRequest());
+
   const [trendFilter, setTrendFilter] = useState<TrendCategory | "all">("all");
   const [yZoom, setYZoom] = useState(1); // 1 = default, <1 = zoom in (narrower range), >1 = zoom out (wider range)
   const [hoveredPtm, setHoveredPtm] = useState<string | null>(null);
@@ -2298,68 +2113,72 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
       .catch(() => setIpOverlayData(null));
   }, [orderId]);
 
-  const fetchVectorPlotData = (forceRefresh = false) => {
-    const params = forceRefresh ? "?force_refresh=true" : "";
-    return api
-      .get<{ vector_data: unknown[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }> }>(`/orders/${orderId}/vector-plot-data${params}`);
+  const fetchVectorPlotData = () => {
+    const params = new URLSearchParams({mode: viewMode, axis: metric === "relative" ? "adjusted" : metric, representation});
+    if (viewMode.endsWith("top_n") && viewN !== null) params.set("n", String(viewN));
+    const url = `/orders/${orderId}/vector-plot-data?${params}`;
+    return sharedViewRequest(url, () => api.get<VectorView & {vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; inferred_receptors?: any[]}>(url));
   };
 
   const refreshReceptorInference = async () => {
     setRefreshingReceptors(true);
     try {
-      const d = await fetchVectorPlotData(true);
-      setData((prev) => prev ? { ...prev, inferred_receptors: d.inferred_receptors || [] } : prev);
-    } catch (err) {
-      console.error("Failed to refresh receptor inference:", err);
-    } finally {
-      setRefreshingReceptors(false);
-    }
+      const d = await api.post<{inferred_receptors: any[]}>(`/orders/${orderId}/receptor-inference-refresh`, {});
+      setData(prev => prev ? {...prev, inferred_receptors: d.inferred_receptors || []} : prev);
+    } finally { setRefreshingReceptors(false); }
   };
 
   useEffect(() => {
-    fetchVectorPlotData()
-      .then((d) => {
-        setData({
-          vector_data: (d.vector_data || []) as TopNVectorPlotRow[],
-          top_n_ptms: d.top_n_ptms || [],
-          suggested_n: d.suggested_n,
-          top_n_setting: d.top_n_setting,
-          source: d.source,
-          inferred_receptors: d.inferred_receptors || [],
-        });
-        // Deduplicate canonical feature metadata
-        const seen = new Set<string>();
-        const init: Record<string, boolean> = {};
-        (d.top_n_ptms || []).forEach((p) => {
-          const key = featureKey(p);
-          if (!seen.has(key)) {
-            seen.add(key);
-            init[key] = true;
-          }
-        });
-        setChecked(init);
-      })
-      .catch(() => setData({ vector_data: [], top_n_ptms: [] }))
-      .finally(() => setLoading(false));
-  }, [orderId]);
+    const token = requestSequence.current.begin();
+    if (viewMode === "all_observed" && representation === "conventional_log2_contrast") {
+      setLoading(false);return () => requestSequence.current.invalidate();
+    }
+    setLoading(true);
+    setViewError(null);
+    fetchVectorPlotData().then(d => {
+      if (!requestSequence.current.current(token)) return;
+      setData(d);
+      setChecked(Object.fromEntries(d.selection.selected_feature_ids.map(id => [id, true])));
+    }).catch(error => {
+      if (requestSequence.current.current(token)) {setData(null);setViewError(String(error?.message||error));}
+    }).finally(() => { if (requestSequence.current.current(token)) setLoading(false); });
+    return () => requestSequence.current.invalidate();
+  }, [orderId, metric, viewMode, viewN, representation]);
+
+  const rowsByFeature = useMemo(() => {
+    const index = new Map<string, TopNVectorPlotRow[]>();
+    for (const row of data?.vector_data || []) {
+      if (!row.feature_id) continue;
+      if (!index.has(row.feature_id)) index.set(row.feature_id, []);
+      index.get(row.feature_id)!.push(row);
+    }
+    return index;
+  }, [data]);
+  const controls = <VectorViewControls view={!loading&&data?.selection ? data as VectorView : null} mode={viewMode} n={viewN}
+    representation={representation} onMode={setViewMode} onN={setViewN} onRepresentation={setRepresentation} />;
+
+  if (viewMode === "all_observed" && representation === "conventional_log2_contrast") {
+    return <div className="space-y-3">{controls}<FullTrajectoryBrowser orderId={orderId} axis={metric}/></div>;
+  }
 
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
+        {controls}
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
         <p className="text-sm text-muted-foreground">Loading time-series data...</p>
       </div>
     );
   }
 
+  if(viewError)return <div>{controls}<p role="alert">측정값 조회 실패: {viewError}</p></div>;
+
   if (!data || data.top_n_ptms.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
-        <TrendingUp className="h-12 w-12 text-muted-foreground/40 mb-3" />
+        {controls}<TrendingUp className="h-12 w-12 text-muted-foreground/40 mb-3" />
         <p className="text-sm text-muted-foreground text-center">
-          {isUbi
-            ? "Top N Ubiquitylation site time-series data will appear here after preprocessing completes."
-            : "Top N PTM time-series data will appear here after preprocessing completes."}
+          {data?.selection?.selection_status === "unavailable" ? `선택 불가: ${data.selection.reason_codes.join(", ")}` : "현재 선택과 축에서 표시할 관측이 없습니다. 다른 축·표현·선택을 사용할 수 있습니다."}
         </p>
       </div>
     );
@@ -2395,20 +2214,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     if (!topNSet.has(key)) return;
     if (!vectorByPtm.has(key)) vectorByPtm.set(key, []);
     const isDenovo = metric !== "protein" && Boolean(row.conventional_log2fc_na || row.control_pseudocount_used);
-    let value = axisValue(row, metric);
-    let axis: "log2fc" | "lod_relative" | "log2_intensity" = "log2fc";
-    if (isDenovo) {
-      if (activityFilter === "de_novo" && row.normalized_log2_intensity != null) {
-        value = row.normalized_log2_intensity;
-        axis = "log2_intensity";
-      } else if (row.lod_relative_log2 != null) {
-        value = row.lod_relative_log2;
-        axis = "lod_relative";
-      } else {
-        value = null;
-        axis = "lod_relative";
-      }
-    }
+    const value = representationValue(row, metric, representation);
+    const axis: "log2fc" | "lod_relative" | "log2_intensity" = representation === "lod_relative_log2" ? "lod_relative" : representation === "normalized_log2_intensity" ? "log2_intensity" : "log2fc";
     if (!finite(value)) return;
     vectorByPtm.get(key)!.push({
       condition: row.condition,
@@ -2423,7 +2230,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
 
   });
 
-  const conditions = Array.from(
+  const conditions = data.conditions || Array.from(
     new Set(data.vector_data.map((r) => r.condition).filter(Boolean))
   ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
 
@@ -2451,7 +2258,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const ptmActivityClass = new Map<string, "de_novo" | "regulated" | "minor">();
   uniquePtms.forEach(p => {
     const key = featureKey(p);
-    const rows = data.vector_data.filter(row => featureKey(row) === key);
+    const rows = rowsByFeature.get(key) || [];
     ptmActivityClass.set(key, ptmPseudocountUsed.get(key) ? "de_novo" : supportedChange(rows, metric) ? "regulated" : "minor");
   });
 
@@ -2475,9 +2282,12 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     return trendOk && actOk;
   });
 
+  const checkedInView = filteredPtms.filter(p => checked[featureKey(p)]);
+  const effectiveCurvePage = Math.min(curvePage, Math.max(0, Math.ceil(checkedInView.length / 100) - 1));
+  const drawnPtms = checkedInView.slice(effectiveCurvePage * 100, (effectiveCurvePage + 1) * 100);
   const chartData = conditions.map((cond) => {
     const point: Record<string, string | number | null> = { condition: cond };
-    filteredPtms.forEach((p) => {
+    drawnPtms.forEach((p) => {
       const key = featureKey(p);
       if (!checked[key]) return;
       const arr = vectorByPtm.get(key);
@@ -2487,7 +2297,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
     return point;
   });
 
-  const visibleLabels = filteredPtms.filter((p) => checked[featureKey(p)]).map((p) => p.label);
+  const visibleLabels = drawnPtms.map((p) => p.label);
 
   // v9.28: Activity class-based color palettes
   const AC_PALETTES: Record<string, string[]> = {
@@ -2537,8 +2347,8 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
   const allValues = visibleLabels.flatMap((label) =>
     chartData.map((d) => d[label]).filter(finite)
   );
-  const yMin = allValues.length > 0 ? Math.min(...allValues) : -1;
-  const yMax = allValues.length > 0 ? Math.max(...allValues) : 1;
+  const yMin = allValues.length > 0 ? finiteExtent(allValues)[0] : -1;
+  const yMax = allValues.length > 0 ? finiteExtent(allValues)[1] : 1;
   const yCenter = (yMin + yMax) / 2;
   const yHalfRange = Math.max((yMax - yMin) / 2, 0.5) * yZoom;
   const autoYMin = Math.floor(yCenter - yHalfRange - 1);
@@ -2583,23 +2393,12 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
 
   return (
     <div className="space-y-4">
-      {/* Info badges: source, suggested N */}
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className={`px-2 py-0.5 rounded-full font-medium ${data.source === "enriched" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-          {data.source === "enriched" ? "Source: Enriched (RAG)" : "Source: Preprocessing (TSV)"}
-        </span>
-        <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
-          Top N setting: {data.top_n_setting ?? "?"} / condition
-        </span>
-        <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
-          {isUbi ? "Unique Sites" : "Unique PTMs"}: {uniquePtms.length}
-        </span>
-        {data.suggested_n != null && (
-          <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">
-            Suggested N: {data.suggested_n} (|Log2FC| &gt; mean+2σ)
-          </span>
-        )}
-      </div>
+      {controls}
+      <p>선정 precursor features {uniquePtms.length} · 체크 {Object.values(checked).filter(Boolean).length} · 현재 표시 {visibleLabels.length}</p>
+      {checkedInView.length > 100 && <p>정확한 곡선 페이지 {effectiveCurvePage+1} / {Math.ceil(checkedInView.length/100)} · 현재 페이지 밖 {checkedInView.length-visibleLabels.length} features (outside_viewport).
+        <button disabled={effectiveCurvePage===0} onClick={()=>setCurvePage(effectiveCurvePage-1)}>이전 곡선</button>
+        <button disabled={(effectiveCurvePage+1)*100>=checkedInView.length} onClick={()=>setCurvePage(effectiveCurvePage+1)}>다음 곡선</button> · 전체 분포는 전체 관측 보기에서 확인할 수 있습니다.</p>}
+      {data.suggested_n != null && <p>변화량 분포 참고: {data.suggested_n} features (전체 선택 축의 |effect| 평균+2σ 이상, N에 자동 적용되지 않음)</p>}
 
       {/* Metric toggle + Trend filter */}
       <div className="flex flex-wrap items-center gap-3">
@@ -2760,9 +2559,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                 domain={[yDomainMin, yDomainMax]}
                 tickCount={Math.max(8, Math.round((yDomainMax - yDomainMin) / 2))}
                 label={{
-                  value: activityFilter === "de_novo"
-                    ? "Normalized log2 intensity (de novo)"
-                    : `${axisLabel[metric]} log2 contrast / LOD-relative ≥`,
+                  value: representation === "conventional_log2_contrast" ? `${axisLabel[metric]} log2 contrast` : representation,
                   angle: -90,
                   position: "insideLeft",
                   style: { fontSize: 10, fill: "hsl(var(--muted-foreground))" },
@@ -2853,12 +2650,14 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                       <Line
                         key={label}
                         type="linear"
+                        isAnimationActive={false}
                         connectNulls={false}
                         dataKey={label}
                         stroke={lineColor}
                         strokeWidth={baseWidth}
                         strokeDasharray={style.strokeDasharray}
                         dot={(dotProps: { cx?: number; cy?: number; payload?: Record<string, unknown> }) => {
+                          if (!finite(dotProps.payload?.[label]) || !finite(dotProps.cx) || !finite(dotProps.cy)) return <g />;
                           const meta = filteredPtms.find((p) => p.label === label);
                           const key = meta ? featureKey(meta) : "";
                           const detN = vectorByPtm.get(key)?.find((r) => r.condition === dotProps.payload?.condition)?.detectionN;
@@ -2983,7 +2782,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
             </div>
           </details>
           <div className="max-h-[calc(100vh-400px)] min-h-[300px] overflow-y-auto space-y-0.5 rounded border p-2">
-            {filteredPtms.map((p) => {
+            <VirtualFeatureList items={filteredPtms} itemKey={featureKey} renderItem={(p) => {
               const key = featureKey(p);
               const trend = ptmTrends.get(key) || "other";
               const actCls = ptmActivityClass.get(key) || "minor";
@@ -3054,7 +2853,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
                   )}
                 </label>
               );
-            })}
+            }}/>
             {filteredPtms.length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-4">
                 {isUbi ? "No Ubi sites match the current filters." : "No PTMs match the current filters."}
@@ -3082,7 +2881,7 @@ function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId:
           Receptor:        { bg: "bg-slate-500/15",   text: "text-slate-400",   border: "border-slate-500/30" },
         };
         // Unified scaling: all receptors normalized against the global max PTM count
-        const globalMax = Math.max(...receptors.map(r => r.downstream_ptm_count), 1);
+        const globalMax = receptors.reduce((max, r) => Math.max(max, r.downstream_ptm_count), 1);
         const getBarPct = (rec: typeof receptors[0]) => {
           return Math.max(Math.round((rec.downstream_ptm_count / globalMax) * 100), 5);
         };
@@ -3409,7 +3208,7 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
               </p>
             </CardHeader>
             <CardContent>
-              <TopNTimeSeriesPlot orderId={orderId} ptmType={ptmType} />
+              <TopNTimeSeriesPlot key={orderId} orderId={orderId} ptmType={ptmType} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -3920,7 +3719,7 @@ export default function OrderDetail() {
       setOrder(o);
       setLogs(l.logs);
       if (l.logs.length > 0) {
-        lastLogIdRef.current = Math.max(...l.logs.map((x) => x.id));
+        lastLogIdRef.current = l.logs.reduce((max, x) => Math.max(max, x.id), 0);
       }
       setLlmConfig(lc);
       setLoading(false);

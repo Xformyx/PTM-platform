@@ -34,3 +34,18 @@ def test_run_cpu_bound_rejects_overlapping_jobs():
         assert await first == "done"
 
     asyncio.run(_overlap())
+def test_cancelled_caller_does_not_release_running_child():
+    async def scenario():
+        import asyncio
+        from app.core.bounded_compute import run_cpu_bound, CpuBoundBusy, _test_sleep
+        caller = asyncio.create_task(run_cpu_bound(_test_sleep, .3, timeout_sec=5))
+        await asyncio.sleep(.05)
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        with pytest.raises(CpuBoundBusy):
+            await run_cpu_bound(_test_sleep, .01, timeout_sec=5)
+        from app.core import bounded_compute
+        await asyncio.gather(*bounded_compute._running_tasks)
+        assert await run_cpu_bound(_test_sleep, .01, timeout_sec=5) == "done"
+    asyncio.run(scenario())

@@ -437,10 +437,14 @@ def heatmap_denovo_weight(confidence: str) -> float:
     return HEATMAP_DENOVO_WEIGHT.get(confidence, HEATMAP_DENOVO_WEIGHT["moderate"])
 
 
-def heatmap_denovo_value(lod_relative: Optional[float]) -> float:
-    if lod_relative is None:
-        return 0.0
-    return float(min(max(lod_relative, 0.0), LOD_INDUCTION_RANK_CAP))
+def heatmap_denovo_value(lod_relative: Optional[float]) -> Optional[float]:
+    try:
+        value = float(lod_relative)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return min(max(value, 0.0), LOD_INDUCTION_RANK_CAP)
 
 
 def compute_site_metrics(
@@ -733,7 +737,7 @@ def apply_legacy_denovo_ranking(df: pd.DataFrame, *, fc_col: str, denovo_col: st
     return pd.Series(scores, index=df.index)
 
 
-def plot_value_for_row(row: Mapping[str, Any], *, metric: str = "relative") -> Tuple[float, str]:
+def plot_value_for_row(row: Mapping[str, Any], *, metric: str = "relative") -> Tuple[Optional[float], str]:
     """그래프에 올릴 값과 축 이름. de novo는 pseudo-Log2FC를 반환하지 않는다."""
     is_denovo = _truthy(
         row.get("Conventional_Log2FC_NA")
@@ -742,7 +746,7 @@ def plot_value_for_row(row: Mapping[str, Any], *, metric: str = "relative") -> T
         or row.get("control_pseudocount_used")
     )
     if is_denovo:
-        lod_rel = _optional_float(row.get("LOD_Relative_Log2") or row.get("lod_relative_log2"))
+        lod_rel = _optional_float(row.get("LOD_Relative_Log2", row.get("lod_relative_log2")))
         if lod_rel is not None:
             return float(lod_rel), "lod_relative"
         log2i = _optional_float(
@@ -750,14 +754,14 @@ def plot_value_for_row(row: Mapping[str, Any], *, metric: str = "relative") -> T
         )
         if log2i is not None:
             return float(log2i), "log2_intensity"
-        return 0.0, "lod_relative"
+        return None, "lod_relative"
     if metric == "absolute":
-        val = _optional_float(row.get("PTM_Absolute_Log2FC") or row.get("ptm_absolute_log2fc")) or 0.0
-        return float(val), "log2fc"
+        val = _optional_float(row.get("PTM_Absolute_Log2FC", row.get("ptm_absolute_log2fc")))
+        return val, "log2fc"
     val = _optional_float(
-        row.get("PTM_Relative_Log2FC") or row.get("ptm_relative_log2fc") or row.get("Log2FC")
-    ) or 0.0
-    return float(val), "log2fc"
+        row.get("PTM_Relative_Log2FC", row.get("ptm_relative_log2fc", row.get("Log2FC")))
+    )
+    return val, "log2fc"
 
 
 def format_denovo_prompt_line(ptm: Mapping[str, Any]) -> str:

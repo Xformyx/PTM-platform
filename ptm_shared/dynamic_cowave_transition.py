@@ -7,6 +7,7 @@ persistence/split/merge/recruitment/exit events as non-causal evidence.
 """
 
 from __future__ import annotations
+from collections import Counter
 
 import hashlib
 import json
@@ -112,6 +113,8 @@ def _jaccard(left: set[str], right: set[str]) -> float | None:
 def _event_examples(rows: Sequence[Mapping[str, Any]], maximum: int, *, identity_key: str) -> list[dict[str, Any]]:
     """Return deterministic examples while calculations retain complete event sets."""
 
+    if hasattr(rows, "examples"):
+        return rows.examples(maximum)
     ordered = sorted(rows, key=lambda row: str(row.get(identity_key) or ""))
     return [dict(row) for row in ordered[:maximum]]
 
@@ -144,21 +147,11 @@ def _per_wave_interval_exposure(
     for wave_id in sorted(set(membership.values())):
         members = sorted(site for site, assigned in membership.items() if assigned == wave_id and (site, ordered[0]) in state_lookup) if ordered else []
         for before_label, after_label in zip(ordered, ordered[1:]):
-            candidate = 0
-            evaluable = 0
-            non_evaluable = 0
-            for site_a, site_b in combinations(members, 2):
-                candidate += 1
-                states = (
-                    state_lookup.get((site_a, before_label), "not_evaluable"),
-                    state_lookup.get((site_b, before_label), "not_evaluable"),
-                    state_lookup.get((site_a, after_label), "not_evaluable"),
-                    state_lookup.get((site_b, after_label), "not_evaluable"),
-                )
-                if "not_evaluable" in states:
-                    non_evaluable += 1
-                else:
-                    evaluable += 1
+            candidate = len(members) * (len(members)-1)//2
+            valid = sum(state_lookup.get((site,before_label), "not_evaluable") != "not_evaluable"
+                and state_lookup.get((site,after_label), "not_evaluable") != "not_evaluable" for site in members)
+            evaluable = valid * (valid-1)//2
+            non_evaluable = candidate - evaluable
             records.append({
                 "static_wave_id": wave_id,
                 "from_window": before_label,
@@ -266,6 +259,7 @@ def _annotate_once(
     timepoints: Sequence[str],
     trajectories: Mapping[str, Sequence[float | None]],
     config: Mapping[str, Any],
+    event_store=None,
 ) -> dict[str, Any]:
     membership = _static_membership(wave_contract)
     qualified = {
@@ -273,6 +267,14 @@ def _annotate_once(
         for key in sorted(membership)
         if key in trajectories and sum(value is not None for value in trajectories[key]) >= int(config["minimum_observed_timepoints"])
     }
+    pair_events = event_store.collection() if event_store else []
+    def attach_pair(row):
+        if membership.get(row.get("site_a")) != membership.get(row.get("site_b")):
+            return
+        enriched = dict(row)
+        enriched["static_wave_id"] = membership[str(row.get("site_a"))]
+        enriched["transition_id"] = _pair_event_id(enriched)
+        pair_events.append(enriched)
     raw = compute_time_varying_comovement(
         timepoints,
         qualified,
@@ -283,15 +285,10 @@ def _annotate_once(
             include_inert_site_observations=False,
         ),
         group_by_site={key: membership[key] for key in qualified},
+        pair_sink=attach_pair if event_store else None,
     ).to_dict()
-    pair_events = []
     for row in raw.get("pair_transitions") or []:
-        if membership.get(row.get("site_a")) != membership.get(row.get("site_b")):
-            continue
-        enriched = dict(row)
-        enriched["static_wave_id"] = membership[str(row.get("site_a"))]
-        enriched["transition_id"] = _pair_event_id(enriched)
-        pair_events.append(enriched)
+        attach_pair(row)
     site_events = []
     for row in raw.get("site_transitions") or []:
         if row.get("site_key") not in membership:
@@ -311,15 +308,17 @@ def _annotate_once(
     active_states = {"positive_active", "negative_active"}
     for wave_id in sorted(set(membership.values())):
         members = sorted(key for key, assigned_wave in membership.items() if assigned_wave == wave_id and key in qualified)
-        for left, right in combinations(members, 2):
-            for window in window_labels:
-                left_state = state_lookup.get((left, window), "inactive")
-                right_state = state_lookup.get((right, window), "inactive")
-                opportunities += 1
-                if left_state in active_states and left_state == right_state:
-                    active_pairs += 1
-    nonpersistent = [row for row in pair_events if row.get("transition_type") != "persistence"]
-    transition_waves = sorted({str(row["static_wave_id"]) for row in nonpersistent})
+        opportunities += len(members)*(len(members)-1)//2 * len(window_labels)
+        for window in window_labels:
+            counts = Counter(state_lookup.get((member,window), "inactive") for member in members)
+            active_pairs += sum(counts[state]*(counts[state]-1)//2 for state in active_states)
+    nonpersistent_count = 0
+    transition_wave_set = set()
+    for row in pair_events:
+        if row.get("transition_type") != "persistence":
+            nonpersistent_count += 1
+            transition_wave_set.add(str(row["static_wave_id"]))
+    transition_waves = sorted(transition_wave_set)
     per_wave_interval_exposure = _per_wave_interval_exposure(raw.get("memberships") or [], membership)
     return {
         "memberships": raw.get("memberships") or [],
@@ -338,8 +337,8 @@ def _annotate_once(
             "local_active_pair_coverage": (active_pairs / opportunities) if opportunities else None,
             "pair_transition_count": len(pair_events),
             "site_transition_count": len(site_events),
-            "nonpersistence_pair_transition_count": len(nonpersistent),
-            "transition_resolution": (len(nonpersistent) / len(pair_events)) if pair_events else None,
+            "nonpersistence_pair_transition_count": nonpersistent_count,
+            "transition_resolution": (nonpersistent_count / len(pair_events)) if pair_events else None,
             "transition_supported_wave_ids": transition_waves,
             "transition_supported_wave_count": len(transition_waves),
             "within_wave_candidate_pair_count": (raw.get("pair_scope") or {}).get("candidate_pair_count"),
@@ -801,6 +800,8 @@ def analyze_dynamic_co_wave_transitions(
     t_adjacency_test: bool = False,
     t_adjacency_random_n: int = 10000,
     t_adjacency_seed: int = PERMUTATION_SEED_DEFAULT,
+    event_sink=None,
+    event_store=None,
 ) -> dict[str, Any]:
     """Create additive local transition evidence for immutable static Waves.
 
@@ -824,11 +825,16 @@ def analyze_dynamic_co_wave_transitions(
         timepoints=timepoints,
         trajectories=trajectories,
         config=effective,
+        event_store=event_store,
     )
-    full_pair_rows = list(annotation["pair_transitions"])
+    full_pair_rows = annotation["pair_transitions"] if event_store else list(annotation["pair_transitions"])
     full_site_rows = list(annotation["site_transitions"])
     full_memberships = list(annotation["memberships"])
-    full_pair_ids = {row["transition_id"] for row in full_pair_rows}
+    if event_sink is not None:
+        for kind, records in (("pair_transition", full_pair_rows), ("site_transition", full_site_rows), ("membership", full_memberships)):
+            for record in records:
+                event_sink({"record_type":kind, **record})
+    full_pair_ids = None if event_store else {row["transition_id"] for row in full_pair_rows}
     full_site_ids = {row["transition_id"] for row in full_site_rows}
     folds = []
     pair_scores: list[float] = []
@@ -844,12 +850,18 @@ def analyze_dynamic_co_wave_transitions(
             timepoints=retained,
             trajectories=reduced_trajectories,
             config={**effective, "minimum_observed_timepoints": min(int(effective["minimum_observed_timepoints"]), len(retained))},
+            event_store=event_store,
         )
-        pair_ids = {row["transition_id"] for row in reduced["pair_transitions"]}
         site_ids = {row["transition_id"] for row in reduced["site_transitions"]}
-        comparable_pairs = {value for value in full_pair_ids if dropped_label not in value} | {value for value in pair_ids if dropped_label not in value}
         comparable_sites = {value for value in full_site_ids if dropped_label not in value} | {value for value in site_ids if dropped_label not in value}
-        pair_score = _jaccard({value for value in full_pair_ids if value in comparable_pairs}, {value for value in pair_ids if value in comparable_pairs})
+        if event_store:
+            comparable_pair_count, pair_score = full_pair_rows.compare_ids(reduced["pair_transitions"], dropped_label)
+            reduced["pair_transitions"].release()
+        else:
+            pair_ids = {row["transition_id"] for row in reduced["pair_transitions"]}
+            comparable_pairs = {value for value in full_pair_ids if dropped_label not in value} | {value for value in pair_ids if dropped_label not in value}
+            comparable_pair_count = len(comparable_pairs)
+            pair_score = _jaccard({value for value in full_pair_ids if value in comparable_pairs}, {value for value in pair_ids if value in comparable_pairs})
         site_score = _jaccard({value for value in full_site_ids if value in comparable_sites}, {value for value in site_ids if value in comparable_sites})
         if pair_score is not None:
             pair_scores.append(pair_score)
@@ -858,7 +870,7 @@ def analyze_dynamic_co_wave_transitions(
         folds.append(
             {
                 "dropped_timepoint": dropped_label,
-                "comparable_pair_transition_count": len(comparable_pairs),
+                "comparable_pair_transition_count": comparable_pair_count,
                 "comparable_site_transition_count": len(comparable_sites),
                 "pair_transition_jaccard": pair_score,
                 "site_transition_jaccard": site_score,

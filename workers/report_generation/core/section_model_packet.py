@@ -36,6 +36,7 @@ MODEL_CARD_FIELDS = (
     "feature_label",
     "condition",
     "axis_patterns",
+    "analysis_scope_contract",
     "literature_comparison",
     "trajectory_shape_fact",
     "value_records",

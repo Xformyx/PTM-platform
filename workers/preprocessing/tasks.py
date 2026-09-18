@@ -862,6 +862,12 @@ def run_preprocessing(self, order_id: int, config: dict):
         publish_progress(order_id, "preprocessing", "finalization", "started", finalization_start, "Finalizing results")
         _emit_prep_phase(order_id, "finalization", "running", "Finalizing results", finalization_start)
 
+        from ptm_shared.analysis_revision import publish_analysis_input
+        abort_if_superseded(order_id)
+        analysis_input = publish_analysis_input(order_output, config=config, parent_generation=config.get("run_generation"), before_publish=lambda: abort_if_superseded(order_id))
+        from ptm_shared.vector_columnar import publish_vector_columnar
+        publish_vector_columnar(order_output, file_suffix)
+
         output_files = [f.name for f in order_output.iterdir() if f.is_file() and f.suffix in (".tsv", ".txt", ".png", ".json")]
         elapsed = round(time.time() - start_time, 1)
 

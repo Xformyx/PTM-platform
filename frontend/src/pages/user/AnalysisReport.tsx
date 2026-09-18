@@ -1,3 +1,7 @@
+import { VectorDensityPlot } from "../../components/VectorDensityPlot";
+import { finite } from "../../lib/quantitation";
+import { TopNTimeSeriesPlot } from "../OrderDetail";
+import { finiteExtent } from "../../lib/vectorView";
 /**
  * AnalysisReport — Result visualization + Mekii AI chat for general users.
  * 
@@ -655,185 +659,10 @@ function parseTimeOrder(cond: string): number {
   return v;
 }
 
-function VectorPlotTab({ orderId }: { orderId: number }) {
-  const [data, setData] = useState<{ vector_data: VectorRow[] } | null>(null);
-  const [plotFiles, setPlotFiles] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [metric, setMetric] = useState<"relative" | "absolute">("relative");
-  const [zoom, setZoom] = useState(1);
-  useEffect(() => {
-    Promise.all([
-      api.get<{ vector_data: VectorRow[] }>(`/orders/${orderId}/vector-plot-data`).catch(() => null),
-      api.get<{ files: string[] }>(`/orders/${orderId}/vector-plots`).catch(() => ({ files: [] })),
-    ]).then(([vd, pf]) => {
-      if (vd) setData({ vector_data: vd.vector_data || [] });
-      setPlotFiles((pf as any)?.files || []);
-    }).finally(() => setLoading(false));
-  }, [orderId]);
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
-          <p className="text-sm text-muted-foreground">Loading vector plot data...</p>
-        </CardContent>
-      </Card>
-    );
-  }
-  if (!data?.vector_data?.length) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
-          <ScatterChartIcon className="h-12 w-12 text-muted-foreground/40 mb-3" />
-          <p className="text-sm text-muted-foreground text-center">Scatter data will appear here after preprocessing completes.</p>
-        </CardContent>
-      </Card>
-    );
-  }
-  const yKey = metric === "relative" ? "ptm_relative_log2fc" : "ptm_absolute_log2fc";
-  const conditions = Array.from(
-    new Set(data.vector_data.map((r) => r.condition).filter((c) => c && c !== "Control"))
-  ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
-  const chartsByCond = conditions.map((cond) => {
-    const rows = data.vector_data.filter((r) => r.condition === cond);
-    const points = rows.map((r) => ({
-      x: r.protein_log2fc ?? 0,
-      y: (r[yKey as keyof VectorRow] as number) ?? 0,
-      name: `${r.gene} ${r.position}`.trim() || `${r.gene}${r.position}`,
-    }));
-    return { condition: cond, points };
-  });
-  const allX = data.vector_data.map((r) => r.protein_log2fc ?? 0);
-  const allY = data.vector_data.map((r) => (r[yKey as keyof VectorRow] as number) ?? 0);
-  const xMin = Math.min(...allX);
-  const xMax = Math.max(...allX);
-  const yMin = Math.min(...allY);
-  const yMax = Math.max(...allY);
-  const domainPadding = Math.max(Math.abs(xMax - xMin), Math.abs(yMax - yMin)) * 0.1 / zoom;
-  const xDomain = [xMin - domainPadding, xMax + domainPadding];
-  const yDomain = [yMin - domainPadding, yMax + domainPadding];
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex gap-1">
-          <Button
-            variant={metric === "relative" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setMetric("relative")}
-          >
-            PTM Relative
-          </Button>
-          <Button
-            variant={metric === "absolute" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setMetric("absolute")}
-          >
-            PTM Absolute
-          </Button>
-        </div>
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.min(4, z + 0.5))}>
-            <ZoomIn className="h-3.5 w-3.5" /> Zoom In
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.max(0.5, z - 0.5))}>
-            <ZoomOut className="h-3.5 w-3.5" /> Zoom Out
-          </Button>
-          <span className="text-xs text-muted-foreground ml-1">{zoom.toFixed(1)}x</span>
-        </div>
-      </div>
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {chartsByCond.map(({ condition, points }, idx) => (
-          <Card key={condition} className="overflow-hidden">
-            <CardHeader className="py-2 px-4">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: SCATTER_PALETTE[idx % SCATTER_PALETTE.length] }} />
-                {condition} ({metric === "relative" ? "PTM Relative" : "PTM Absolute"})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-2">
-              <div className="h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 8, right: 8, bottom: 24, left: 24 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis
-                      type="number"
-                      dataKey="x"
-                      name="Protein Log2FC"
-                      domain={xDomain}
-                      tick={{ fontSize: 10 }}
-                    />
-                    <YAxis
-                      type="number"
-                      dataKey="y"
-                      name={metric === "relative" ? "PTM Relative Log2FC" : "PTM Absolute Log2FC"}
-                      domain={yDomain}
-                      tick={{ fontSize: 10 }}
-                    />
-                    <RechartsTooltip
-                      cursor={{ strokeDasharray: "3 3" }}
-                      content={({ active, payload }) => {
-                        if (!active || !payload?.[0]) return null;
-                        const p = payload[0].payload;
-                        return (
-                          <div className="rounded-md border bg-background px-3 py-2 text-sm shadow-md">
-                            <p className="font-medium">{p.name}</p>
-                            <p className="text-muted-foreground">
-                              Protein: {p.x.toFixed(3)} · {metric === "relative" ? "PTM Rel" : "PTM Abs"}: {p.y.toFixed(3)}
-                            </p>
-                          </div>
-                        );
-                      }}
-                    />
-                    {metric === "relative" && [-1, -0.5, 0, 0.5, 1].map((y) => (
-                      <ReferenceLine key={y} y={y} stroke="#ef4444" strokeDasharray={y === 0 ? undefined : "3 3"} strokeOpacity={0.5} />
-                    ))}
-                    {metric === "relative" && <ReferenceLine x={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />}
-                    {metric === "absolute" && (
-                      <>
-                        <ReferenceLine x={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
-                        <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
-                        <ReferenceLine segment={[{ x: Math.min(xMin, yMin), y: Math.min(xMin, yMin) }, { x: Math.max(xMax, yMax), y: Math.max(xMax, yMax) }]} stroke="#000" strokeDasharray="3 3" strokeOpacity={0.6} />
-                      </>
-                    )}
-                    <Scatter
-                      name={condition}
-                      data={points}
-                      fill={SCATTER_PALETTE[idx % SCATTER_PALETTE.length]}
-                      fillOpacity={0.7}
-                    />
-                  </ScatterChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-      {/* Static PNG plots */}
-      {plotFiles.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Static Report Plots (PNG)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {plotFiles.map((f) => (
-                <Button
-                  key={f}
-                  variant="outline"
-                  size="sm"
-                  className="gap-1 text-xs"
-                  onClick={() => api.downloadFile(`/orders/${orderId}/files/${encodeURIComponent(f)}`, f)}
-                >
-                  <Download className="h-3 w-3" /> {f}
-                </Button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
+function VectorPlotTab({orderId}: {orderId:number}) {
+  return <VectorDensityPlot orderId={orderId} />;
 }
+
 
 function KinaseActivityTab({ orderId }: { orderId: number }) {
   const [data, setData] = useState<any>(null);
@@ -841,7 +670,7 @@ function KinaseActivityTab({ orderId }: { orderId: number }) {
 
   useEffect(() => {
     api
-      .get<any>(`/orders/${orderId}/vector-plot-data`)
+      .get<any>(`/orders/${orderId}/vector-plot-data?mode=all_observed`)
       .then((d) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
@@ -1015,7 +844,7 @@ function ModulesTab({ orderId }: { orderId: number }) {
 
   useEffect(() => {
     api
-      .get<any>(`/orders/${orderId}/vector-plot-data`)
+      .get<any>(`/orders/${orderId}/vector-plot-data?mode=all_observed`)
       .then((d) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
@@ -1052,6 +881,7 @@ function ModulesTab({ orderId }: { orderId: number }) {
   // Show a summary of top PTMs and their protein classes
   return (
     <div className="space-y-4">
+      <TopNTimeSeriesPlot key={orderId} orderId={orderId} />
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -1059,7 +889,7 @@ function ModulesTab({ orderId }: { orderId: number }) {
             Top N PTM Sites ({topNPtms.length})
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Most significant PTM sites identified by the analysis pipeline
+            Measured precursor features; annotation does not establish statistical support
           </p>
         </CardHeader>
         <CardContent>

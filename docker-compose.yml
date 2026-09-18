@@ -119,7 +119,15 @@ services:
       # for the container restart/log UI features.  Remove this line when those
       # features are not needed or if the host is externally reachable.
       - /var/run/docker.sock:/var/run/docker.sock
+      - ${PTM_MAPPING_SNAPSHOT_HOST_PATH:-../ptm-reference/rat-human-ensembl-116-strict-tree-20260831}:/opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831:ro
+      - ${PTM_RELATION_SNAPSHOT_HOST_PATH:-../ptm-reference/iptmnet-release-6.2}:/opt/ptm-reference/iptmnet-release-6.2:ro
     environment:
+      PTM_MAPPING_SNAPSHOT_ROOT: /opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831
+      PTM_MAPPING_SOURCE_BUNDLE_PATH: /opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831/bundle.json
+      PTM_MAPPING_BUNDLE_SHA256: f80b6f9abf5568153cde2c730332dd9c55431476f8a2e6cfa3acb01cca291dfe
+      PTM_RELATION_SNAPSHOT_ROOT: /opt/ptm-reference/iptmnet-release-6.2
+      PTM_RELATION_SOURCE_BUNDLE_PATH: /opt/ptm-reference/iptmnet-release-6.2/iptmnet_release_6_2_p2_bundle.json
+      PTM_RELATION_BUNDLE_SHA256: ca3e24df5679a3bd9f93f66c4a99ab461448add19705bc5a3a08d7e8ad5cc783
       APP_ENV: ${APP_ENV:-development}
       DEBUG: ${DEBUG:-true}
       AUTH_ENABLED: ${AUTH_ENABLED:-false}
@@ -306,6 +314,53 @@ services:
     networks:
       - ptm-network
     depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Production analysis has its own queue; benchmark truth is never mounted.
+  production-tmm-worker:
+    build:
+      context: .
+      dockerfile: api-server/Dockerfile
+    image: ptm-production-tmm-worker:${VERSION_API:-001}
+    container_name: ptm-production-tmm-worker
+    entrypoint: []
+    command: celery -A app.tasks.production_tmm:celery_app worker -Q production_tmm -c ${PRODUCTION_TMM_CONCURRENCY:-1} -n production-tmm@%h -l info
+    env_file:
+      - .env
+    volumes:
+      - ./api-server/app:/app/app
+      - ./ptm_shared:/opt/ptm_shared:ro
+      - ./data:/app/data
+      - ${PTM_MAPPING_SNAPSHOT_HOST_PATH:-../ptm-reference/rat-human-ensembl-116-strict-tree-20260831}:/opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831:ro
+      - ${PTM_RELATION_SNAPSHOT_HOST_PATH:-../ptm-reference/iptmnet-release-6.2}:/opt/ptm-reference/iptmnet-release-6.2:ro
+    environment:
+      PTM_MAPPING_SNAPSHOT_ROOT: /opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831
+      PTM_MAPPING_SOURCE_BUNDLE_PATH: /opt/ptm-reference/rat-human-ensembl-116-strict-tree-20260831/bundle.json
+      PTM_MAPPING_BUNDLE_SHA256: f80b6f9abf5568153cde2c730332dd9c55431476f8a2e6cfa3acb01cca291dfe
+      PTM_RELATION_SNAPSHOT_ROOT: /opt/ptm-reference/iptmnet-release-6.2
+      PTM_RELATION_SOURCE_BUNDLE_PATH: /opt/ptm-reference/iptmnet-release-6.2/iptmnet_release_6_2_p2_bundle.json
+      PTM_RELATION_BUNDLE_SHA256: ca3e24df5679a3bd9f93f66c4a99ab461448add19705bc5a3a08d7e8ad5cc783
+      TZ: Asia/Seoul
+      PYTHONDONTWRITEBYTECODE: "1"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      PYTHONPATH: /app:/opt
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      DATABASE_URL: mysql+asyncmy://${MYSQL_USER:-ptm_user}:${MYSQL_PASSWORD:-ptm_password_change_me}@mysql:3306/${MYSQL_DATABASE:-ptm_platform}?charset=utf8mb4
+      INPUT_DIR: /app/data/inputs
+      REDIS_URL: redis://redis:6379/0
+      OUTPUT_DIR: /app/data/outputs
+    networks:
+      - ptm-network
+    depends_on:
+      api-server:
+        condition: service_healthy
       mysql:
         condition: service_healthy
       redis:

@@ -1,0 +1,266 @@
+{
+  "schema_version": "vector_tmm_validation.v1",
+  "baseline_commit": "b150a010fc6374239eec0a2b1d88922d6b871c27",
+  "repository": "Xformyx/PTM-platform",
+  "branch": "main",
+  "synthetic_only": true,
+  "runtime": {
+    "os": "macOS 15.6.1",
+    "arch": "arm64",
+    "cpu": "Apple M4 Max",
+    "logical_cpus": 14,
+    "memory_bytes": 38654705664,
+    "python": "3.14.6",
+    "node": "24.8.0",
+    "numpy": "2.5.3",
+    "pandas": "3.0.5",
+    "scipy": "1.18.1",
+    "fastapi": "0.141.1",
+    "celery": "5.6.3",
+    "sqlalchemy": "2.0.52",
+    "duckdb": "1.5.5"
+  },
+  "python_suites": {
+    "api": {
+      "tests": 80,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 5.078
+    },
+    "workers": {
+      "tests": 129,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 20.487
+    },
+    "shared": {
+      "tests": 43,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 0.376
+    }
+  },
+  "node_tests": {
+    "tests": 9,
+    "failures": 0,
+    "skipped": 0
+  },
+  "frontend_build": "passed_tsc_and_vite",
+  "diff_check": "passed",
+  "scale": [
+    {
+      "rows": 10000,
+      "ingest_s": 2.1662402499932796,
+      "count_s": 0.002904833003412932,
+      "density_s": 0.010797541995998472,
+      "density_response_bytes": 16303,
+      "parquet_bytes": 1350961,
+      "peak_rss_native": 265748480,
+      "counts": {
+        "source_rows": 10000,
+        "identified_features": 2500,
+        "identity_unresolved_rows": 0,
+        "malformed_source_rows": 0,
+        "measurement_revision": "vector-sha256:414418b8117ed142abf9ab66c724b74cf2c808cb1d13014046eff60a2471dac5",
+        "conditions": [
+          "1min",
+          "5min",
+          "10min",
+          "20min"
+        ]
+      },
+      "density_count": 9896,
+      "bounds": [
+        -2.5,
+        2.5,
+        -40.0,
+        40.0
+      ],
+      "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O"
+    },
+    {
+      "rows": 100000,
+      "ingest_s": 21.516341000038665,
+      "count_s": 0.008159207995049655,
+      "density_s": 0.08308845799183473,
+      "density_response_bytes": 17477,
+      "parquet_bytes": 13576586,
+      "peak_rss_native": 274939904,
+      "counts": {
+        "source_rows": 100000,
+        "identified_features": 25000,
+        "identity_unresolved_rows": 0,
+        "malformed_source_rows": 0,
+        "measurement_revision": "vector-sha256:5172db8cba57bf91c8b2e891b866b23b162ee3df542d5d7219040fe7db8b8056",
+        "conditions": [
+          "1min",
+          "5min",
+          "10min",
+          "20min"
+        ]
+      },
+      "density_count": 98969,
+      "bounds": [
+        -2.5,
+        2.5,
+        -40.0,
+        40.0
+      ],
+      "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O"
+    },
+    {
+      "rows": 1000000,
+      "ingest_s": 212.63858245895244,
+      "count_s": 0.07295762497233227,
+      "density_s": 1.0022550410358235,
+      "density_response_bytes": 17991,
+      "parquet_bytes": 135687701,
+      "peak_rss_native": 708624384,
+      "counts": {
+        "source_rows": 1000000,
+        "identified_features": 250000,
+        "identity_unresolved_rows": 0,
+        "malformed_source_rows": 0,
+        "measurement_revision": "vector-sha256:a4bbba198f4426db9a337f682114ef6d4e86242439aa293b7a3f0a28589119aa",
+        "conditions": [
+          "1min",
+          "5min",
+          "10min",
+          "20min"
+        ]
+      },
+      "density_count": 989690,
+      "bounds": [
+        -2.5,
+        2.5,
+        -40.0,
+        40.0
+      ],
+      "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O"
+    }
+  ],
+  "scale_cli_rerun": {
+    "rows": 10000,
+    "ingest_s": 2.1890047500492074,
+    "count_s": 0.0020018750219605863,
+    "density_s": 0.011411875020712614,
+    "density_response_bytes": 16303,
+    "parquet_bytes": 1350961,
+    "peak_rss_native": 281526272,
+    "counts": {
+      "source_rows": 10000,
+      "identified_features": 2500,
+      "identity_unresolved_rows": 0,
+      "malformed_source_rows": 0,
+      "measurement_revision": "vector-sha256:414418b8117ed142abf9ab66c724b74cf2c808cb1d13014046eff60a2471dac5",
+      "conditions": [
+        "1min",
+        "5min",
+        "10min",
+        "20min"
+      ]
+    },
+    "density_count": 9896,
+    "bounds": [
+      -2.5,
+      2.5,
+      -40.0,
+      40.0
+    ],
+    "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+    "python": "3.14.6",
+    "schema_version": "vector_columnar.v2",
+    "fresh_publication": true
+  },
+  "browser_scale": {
+    "source_rows": 1000000,
+    "heap": {
+      "usedSize": 18402660,
+      "totalSize": 24313856,
+      "embedderHeapUsedSize": 10532328,
+      "backingStorageSize": 9174780
+    },
+    "dom_elements": 1028,
+    "drill_seconds": 0.32908387505449355,
+    "hover_event_seconds": 0.019728499988559633,
+    "responses": [
+      {
+        "operation": "manifest",
+        "bytes": 270,
+        "seconds": 0.07471004204126075
+      },
+      {
+        "operation": "density",
+        "bytes": 302424,
+        "seconds": 0.5260922500165179
+      },
+      {
+        "operation": "coordinates",
+        "bytes": 18436,
+        "seconds": 0.26387866702862084
+      }
+    ],
+    "errors": [],
+    "browser": "153.0.8010.50"
+  },
+  "browser_time_series": {
+    "labels": "선정 3 · 이름 연결 0 · 주석 없음 3 · 모호 0 · 식별자 유효 3 · 축 유효 3 · 식별 보류 원본 행 0",
+    "selection": "조건별 Top 50 · 합집합 3 precursor features",
+    "dots": 5,
+    "errors": [],
+    "lines": 3,
+    "gap_paths": [
+      "M70,64.545L715,173.636",
+      "M715,555.455Z",
+      "M70,391.818ZM1360,282.727Z"
+    ],
+    "checkbox_preserves_selection": true,
+    "late_response_preserves_latest_selection": true
+  },
+  "browser_virtual_heatmap_and_canvas": {
+    "source_cells": 40000,
+    "dom_elements": 342,
+    "tail_zero_and_null_preserved": true,
+    "canvas_missing_column_painted_pixels": 0,
+    "errors": []
+  },
+  "integration_completed": [
+    "synthetic_http_tsv_parquet",
+    "sqlite_job_executor_artifact_result",
+    "report_pinned_inventory_handoff",
+    "actual_chart_browser",
+    "lease_lock_heartbeat_fencing"
+  ],
+  "not_completed": [
+    "production_data_review",
+    "mysql_redis_celery_staging",
+    "process_kill_restart_broker_redelivery_in_production",
+    "heavy_job_health_login_latency",
+    "large_tmm_resource_slo",
+    "domain_review_and_independent_scientific_evaluation",
+    "live_llm_manuscript_export_evaluation"
+  ],
+  "expected_numeric_change": {
+    "shared_group_observed": [
+      1,
+      2,
+      1
+    ],
+    "legacy_duplicated_shared_total": [
+      2,
+      4,
+      2
+    ],
+    "v2_unique_group_total": [
+      1,
+      2,
+      1
+    ],
+    "individual_unresolved_share": null,
+    "normalization_threshold_changes": false
+  },
+  "frozen_benchmark_changes": false
+}

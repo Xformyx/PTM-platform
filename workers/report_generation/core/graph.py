@@ -49,6 +49,7 @@ class ReportState(TypedDict, total=False):
     # Inputs
     biological_unit_crosswalk: dict
     source_run_manifest: dict
+    analysis_evidence_inventory: dict
     source_observation_inventory: dict
     order_id: int
     enriched_ptm_data: List[dict]

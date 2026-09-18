@@ -1,4 +1,5 @@
 from app.models.chat_message import ChatMessage
+from app.models.analysis_job import AnalysisJob, AnalysisHead
 from app.models.benchmark_run import BenchmarkRun
 from app.models.comparison_report import ComparisonReport
 from app.models.llm_model import LlmModel

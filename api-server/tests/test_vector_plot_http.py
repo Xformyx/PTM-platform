@@ -2,6 +2,7 @@
 import csv
 import json
 import subprocess
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -37,7 +38,7 @@ def test_route_to_ui_preserves_null_support_and_distinct_forms(tmp_path, monkeyp
     app.include_router(orders.router)
     app.dependency_overrides[orders.get_db] = lambda: db
     app.dependency_overrides[orders.get_current_user] = lambda: SimpleNamespace(id=1, role="admin")
-    response = TestClient(app).get("/orders/1/vector-plot-data?lock_receptor=true")
+    response = TestClient(app).get("/orders/1/vector-plot-data?lock_receptor=true&axis=unadjusted")
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["cowave_analysis"] is None
@@ -58,9 +59,9 @@ def test_route_to_ui_preserves_null_support_and_distinct_forms(tmp_path, monkeyp
         assert candidates, "esbuild binary was not installed for component bundle regression"
         esbuild = candidates[-1]
     subprocess.run([str(esbuild), "src/components/QuantitationEvidenceTable.tsx",
-                    "--bundle", "--platform=node", "--format=cjs", "--jsx=automatic", f"--outfile={script}"], cwd=frontend, check=True, capture_output=True)
+                    "--bundle", "--external:react", "--external:react-dom", "--platform=node", "--format=cjs", "--jsx=automatic", f"--outfile={script}"], cwd=frontend, check=True, capture_output=True)
     render = "const React=require('react'), R=require('react-dom/server'); const C=require(process.argv[1]); let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>process.stdout.write(R.renderToStaticMarkup(React.createElement(C.QuantitationEvidenceTable,{rows:JSON.parse(s).vector_data}))));"
-    result = subprocess.run(["node", "-e", render, str(script)], cwd=frontend, input=json.dumps(payload), text=True, capture_output=True, check=True)
+    result = subprocess.run(["node", "-e", render, str(script)], cwd=frontend, env={**os.environ,"NODE_PATH":str(frontend/"node_modules")}, input=json.dumps(payload), text=True, capture_output=True, check=True)
     assert "protein_denominator_unavailable" in result.stdout
     assert "<strong>NA</strong>" in result.stdout
     assert "2.000" in result.stdout and "-2.000" in result.stdout

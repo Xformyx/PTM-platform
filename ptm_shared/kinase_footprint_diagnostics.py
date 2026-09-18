@@ -54,9 +54,9 @@ def detection_aware_footprint_value(
     if not is_denovo:
         return parsed_conventional, False
     source = row or {}
-    lod_relative = _finite(source.get("lod_relative_log2", source.get("LOD_Relative_Log2")), default=0.0)
+    lod_relative = heatmap_denovo_value(source.get("lod_relative_log2", source.get("LOD_Relative_Log2")))
     confidence = str(source.get("denovo_confidence", source.get("DeNovo_Confidence", "")) or "").strip().lower()
-    return heatmap_denovo_value(lod_relative) * heatmap_denovo_weight(confidence), True
+    return (None if lod_relative is None else lod_relative * heatmap_denovo_weight(confidence)), True
 
 
 def _profile_peak(profile: Mapping[str, float], conditions: Sequence[str]) -> tuple[str | None, float, str]:

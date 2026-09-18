@@ -122,6 +122,7 @@ def compute_time_varying_comovement(
     profiles: Optional[Mapping[str, SiteKineticProfile]] = None,
     config: Optional[TimeVaryingCoMovementConfig] = None,
     group_by_site: Optional[Mapping[str, str]] = None,
+    pair_sink=None,
 ) -> TimeVaryingCoMovementResult:
     """Compute adjacent-window membership transitions for qualified sites.
 
@@ -184,6 +185,7 @@ def compute_time_varying_comovement(
         states_by_window.append(states)
 
     pair_transitions: List[PairTransition] = []
+    pair_counts = Counter()
     site_transitions: List[SiteTransition] = []
     all_sites = sorted(qualified)
     grouped_sites: Dict[str, List[str]] = defaultdict(list)
@@ -214,8 +216,8 @@ def compute_time_varying_comovement(
         before = states_by_window[index]
         after = states_by_window[index + 1]
         before_label, after_label = window_labels[index], window_labels[index + 1]
-        before_partners: Dict[str, set[str]] = defaultdict(set)
-        after_partners: Dict[str, set[str]] = defaultdict(set)
+        before_partners: Dict[str, int] = defaultdict(int)
+        after_partners: Dict[str, int] = defaultdict(int)
 
         for members in grouped_sites.values():
             for site_a, site_b in combinations(members, 2):
@@ -232,11 +234,11 @@ def compute_time_varying_comovement(
                 prior_pair = _coactive_pair(before[site_a], before[site_b])
                 next_pair = _coactive_pair(after[site_a], after[site_b])
                 if prior_pair:
-                    before_partners[site_a].add(site_b)
-                    before_partners[site_b].add(site_a)
+                    before_partners[site_a] += 1
+                    before_partners[site_b] += 1
                 if next_pair:
-                    after_partners[site_a].add(site_b)
-                    after_partners[site_b].add(site_a)
+                    after_partners[site_a] += 1
+                    after_partners[site_b] += 1
 
                 if prior_pair and next_pair:
                     transition_type = "persistence"
@@ -251,7 +253,7 @@ def compute_time_varying_comovement(
                     non_event_pair_window_comparison_count += 1
                     both_windows_noncoactive_pair_count += 1
                     continue
-                pair_transitions.append(PairTransition(
+                pair_event = PairTransition(
                     site_a=site_a,
                     site_b=site_b,
                     from_window=before_label,
@@ -259,7 +261,12 @@ def compute_time_varying_comovement(
                     transition_type=transition_type,
                     prior_states=(before[site_a], before[site_b]),
                     next_states=(after[site_a], after[site_b]),
-                ))
+                )
+                pair_counts[transition_type] += 1
+                if pair_sink is None:
+                    pair_transitions.append(pair_event)
+                else:
+                    pair_sink(asdict(pair_event))
 
         for site_key in all_sites:
             site_transition_opportunities += 1
@@ -270,8 +277,8 @@ def compute_time_varying_comovement(
             ):
                 non_evaluable_site_transition_count += 1
                 continue
-            partners_before = len(before_partners[site_key])
-            partners_after = len(after_partners[site_key])
+            partners_before = before_partners[site_key]
+            partners_after = after_partners[site_key]
             if prior_state != STATE_INACTIVE and next_state == STATE_INACTIVE:
                 site_transition = "exit"
             elif prior_state == STATE_INACTIVE and next_state != STATE_INACTIVE and partners_after == 0:
@@ -298,7 +305,7 @@ def compute_time_varying_comovement(
                 partner_count_after=partners_after,
             ))
 
-    counts = Counter(item.transition_type for item in pair_transitions)
+    counts = pair_counts
     counts.update(item.transition_type for item in site_transitions)
     return TimeVaryingCoMovementResult(
         memberships=memberships,

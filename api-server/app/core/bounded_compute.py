@@ -18,6 +18,8 @@ _log = logging.getLogger("ptm-platform.bounded_compute")
 # One in-flight CPU job per API process.  A second heatmap TMM must not stack
 # on the same core and starve login/health again.
 _in_use = False
+# Process-local admission only; production fleet admission belongs to its queue.
+_running_tasks: set[asyncio.Task] = set()
 
 
 class CpuBoundTimeout(TimeoutError):
@@ -116,7 +118,16 @@ async def run_cpu_bound(
             "A CPU-bound kinase computation is already running on this API process"
         )
     _in_use = True
-    try:
-        return await asyncio.to_thread(_run_in_process, fn, args, kwargs, float(timeout_sec))
-    finally:
+    task = asyncio.create_task(asyncio.to_thread(_run_in_process, fn, args, kwargs, float(timeout_sec)))
+    _running_tasks.add(task)
+    def release(completed):
+        global _in_use
+        _running_tasks.discard(completed)
         _in_use = False
+        # Consume an exception even if the HTTP caller disconnected.
+        if not completed.cancelled():
+            completed.exception()
+    task.add_done_callback(release)
+    # Await cancellation does not stop a thread or its child. Keep the slot until
+    # _run_in_process has actually joined/terminated that child.
+    return await asyncio.shield(task)

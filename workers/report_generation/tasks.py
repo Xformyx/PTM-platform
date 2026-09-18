@@ -431,7 +431,7 @@ def run_report_generation(self, order_id: int, config: dict):
             _emit_kinase_phase(order_id, "skipped", f"Using pre-computed data ({n_km} kinase modules)")
             logger.info(f"[Order {order_id}] Kinase modules already in DB ({n_km} modules) — skipped")
         else:
-            kinase_analysis_data = _auto_build_kinase_modules(order_id, enriched_data, config)
+            kinase_analysis_data = {}  # Resolve a server-owned revision before legacy fallback.
 
         # Build initial state (merge single_time_point into experimental_context)
         experimental_context = dict(config.get("experimental_context") or {})
@@ -529,6 +529,41 @@ def run_report_generation(self, order_id: int, config: dict):
         except Exception as _rec_err:
             logger.warning(f"[Order {order_id}] Could not load analysis data from DB: {_rec_err}")
 
+        # A new analysis pointer is authoritative. Integrity errors are fatal;
+        # old fixed-path files cannot substitute for this requested revision.
+        analysis_evidence_inventory = None
+        _analysis_pointer = next((p for p in (config_kinase_analysis_data, db_kinase_analysis_data,
+            kinase_activity_heatmap_from_db) if p.get("analysis_job_id") and p.get("result_path")), None)
+        if _analysis_pointer:
+            from ptm_shared.analysis_revision import resolve_analysis_artifacts
+            from ptm_shared.vector_snapshot import load_vector_snapshot
+            _pinned = resolve_analysis_artifacts(order_output, _analysis_pointer)
+            _cm = _pinned["candidate_manifest"]
+            analysis_evidence_inventory = _pinned["evidence_inventory"]
+            kinase_analysis_data = {**_analysis_pointer, "kinase_modules": _cm["candidate_modules"],
+                "coverage": _cm["coverage"], "analysis_evidence_inventory": analysis_evidence_inventory,
+                "temporal_ptm_protein_analysis": _pinned["heatmap"]["temporal_ptm_protein_analysis"]}
+            db_kinase_analysis_data = config_kinase_analysis_data = kinase_analysis_data
+            kinase_activity_heatmap_from_db = config_kinase_activity_heatmap = _pinned["heatmap"]
+            _pinned_stats = _pinned["source_directory"] / f"pipeline_statistics{_vp_suffix}.json"
+            pipeline_statistics = json.loads(_pinned_stats.read_text()) if _pinned_stats.is_file() else {}
+            _snapshot = load_vector_snapshot(_pinned["source_directory"], _vp_suffix)
+            if _snapshot["measurement_revision"] != _cm["measurement_revision"]:
+                raise ValueError("report_analysis_measurement_revision_mismatch")
+            vector_plot_raw_data = _snapshot["rows"]
+            _pinned_vector_path = next((_pinned["source_directory"] / n for n in (
+                f"ptm_vector_data_normalized{_vp_suffix}.tsv", f"ptm_vector_data_with_motifs{_vp_suffix}.tsv")
+                if (_pinned["source_directory"] / n).is_file()), None)
+            if vector_source_path:
+                input_source_hashes.pop(vector_source_path, None)
+            vector_source_path = str(_pinned_vector_path) if _pinned_vector_path else None
+            if vector_source_path:
+                input_source_hashes[vector_source_path] = file_sha256(vector_source_path)
+            for _af in _pinned["revision"]["artifacts"]:
+                input_source_hashes[str(order_output / _analysis_pointer["result_path"] / _af["filename"])] = _af["sha256"]
+        elif not kinase_analysis_data.get("kinase_modules"):
+            kinase_analysis_data = _auto_build_kinase_modules(order_id, enriched_data, config)
+
         # Resolve sidecar availability independently of the DB read.  A chained
         # RAG task supplies the fresh compact projection in config before its DB
         # write can be visible; report-only reruns can recover from the full
@@ -593,10 +628,11 @@ def run_report_generation(self, order_id: int, config: dict):
                 )
 
         source_observation_inventory = None
-        inventory_pointer = order_output / 'observation_inventory_current.json'
+        _inventory_root = _pinned["source_directory"] if _analysis_pointer else order_output
+        inventory_pointer = _inventory_root / 'observation_inventory_current.json'
         if inventory_pointer.is_file():
             inventory_ref = json.loads(inventory_pointer.read_text())
-            inventory_path = order_output / inventory_ref['filename']
+            inventory_path = _inventory_root / inventory_ref['filename']
             if not inventory_path.resolve().is_relative_to(order_output.resolve()) or file_sha256(inventory_path) != inventory_ref['sha256']:
                 raise ValueError('source_observation_inventory_integrity_mismatch')
             source_observation_inventory = json.loads(inventory_path.read_text())
@@ -637,6 +673,7 @@ def run_report_generation(self, order_id: int, config: dict):
             "biological_unit_crosswalk": crosswalk,
             "source_run_manifest": source_run_manifest,
             "source_observation_inventory": source_observation_inventory,
+            "analysis_evidence_inventory": analysis_evidence_inventory,
             "order_id": order_id,
             "enriched_ptm_data": enriched_data,
             "enriched_json_path": enriched_path,
@@ -1016,6 +1053,8 @@ def run_report_generation(self, order_id: int, config: dict):
                 ),
                 None,
             )
+            if analysis_evidence_inventory:
+                temporal_sidecar_path = order_output / analysis_evidence_inventory["artifact_directory"] / "temporal_diagnostics.json"
             try:
                 from report_generation.core.report_artifact_manifest import build_report_artifact_manifest, persist_report_packets
 

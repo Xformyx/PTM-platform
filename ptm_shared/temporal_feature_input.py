@@ -62,7 +62,17 @@ def build_temporal_feature_inputs(rows):
     for key in sorted(grouped):
         measurements = {}
         for condition, variants in sorted(grouped[key].items()):
-            unique = {json.dumps(row, sort_keys=True, allow_nan=False): row for row in variants}
+            # Display labels and source locators are not independent measurements.
+            # Biological units, statistics, masks and actual values remain in the
+            # signature; two equal-valued biological replicates cannot collapse.
+            metadata = {"source_gene_label", "source_position_label", "source_row_lineage", "source_record", "source_labels", "source_row_count"}
+            unique = {}
+            for row in sorted(variants, key=lambda r: json.dumps(r, sort_keys=True, allow_nan=False)):
+                token = json.dumps({k:v for k,v in row.items() if k not in metadata}, sort_keys=True, allow_nan=False)
+                if token not in unique:
+                    unique[token] = dict(row)
+                    unique[token]["source_row_lineage"] = []
+                unique[token]["source_row_lineage"].extend(row.get("source_row_lineage", []))
             if len(unique) > 1:
                 measurements[condition] = {
                     "status": "conflicting_duplicate_feature_condition",

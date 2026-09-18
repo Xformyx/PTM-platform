@@ -413,6 +413,9 @@ def _study_frame_card(state: Mapping[str, Any], synthesis: Mapping[str, Any]) ->
         "allowed_verbs": ["measured", "evaluated", "summarized"],
         "forbidden_interpretations": ["caused", "activated", "directly regulates"],
         "counterevidence": "Study-frame metadata define experimental scope rather than a mechanistic conclusion.",
+        "analysis_scope_contract": {k:v for k,v in (state.get("analysis_evidence_inventory") or {}).items()
+            if k in {"analysis_revision", "input_revision", "analysis_manifest_id", "coverage", "execution_status",
+                     "evaluation_status", "track_status", "artifact_directory", "input_scope"}},
         "study_metadata_contract": metadata,
         "timepoint_interpretation": metadata.get("timepoint_interpretation"),
         "control_design": metadata.get("control_design"),
@@ -1185,6 +1188,7 @@ def build_coverage_inventory(state, observations):
                         "authoring_destinations": ["appendix"], "authoring_reason": "inventory_retained"})
     return {"schema_version": "report_coverage_inventory.v1", "denominator": "input_vector_rows",
             "input_count": len(records), "accounted_count": len(records), "records": records,
+            "analysis_evidence_inventory": state.get("analysis_evidence_inventory"),
             "source_observation_inventory": state.get("source_observation_inventory"),
             "source_inventory_status": "available" if state.get("source_observation_inventory") else "legacy_not_recorded"}
 

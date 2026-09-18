@@ -5,17 +5,12 @@ from pathlib import Path
 
 
 def route_vectors(tmp_path, rows):
-    path = Path(__file__).parents[1] / "app/api/orders.py"
-    route = next(n for n in ast.parse(path.read_text()).body
-                 if isinstance(n, ast.AsyncFunctionDef) and n.name == "get_vector_plot_data")
-    loop = next(n for n in route.body if isinstance(n, ast.For) and ast.unparse(n.target) == "name")
     with (tmp_path / "ptm_vector_data_normalized_phospho.tsv").open("w") as f:
         writer = csv.DictWriter(f, fieldnames=list(dict.fromkeys(k for row in rows for k in row)), delimiter="\t")
         writer.writeheader()
         writer.writerows(rows)
-    env = {"output_dir": tmp_path, "file_suffix": "_phospho", "vector_data": []}
-    exec(compile(ast.Module(body=[loop], type_ignores=[]), str(path), "exec"), env)
-    return env["vector_data"]
+    from app.services.vector_view import load_vector_snapshot
+    return load_vector_snapshot(tmp_path, "_phospho")["rows"]
 
 
 def test_canonical_null_survives_general_route_with_independent_support(tmp_path):

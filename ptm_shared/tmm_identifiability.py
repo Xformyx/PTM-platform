@@ -142,10 +142,25 @@ def normalized_ratios(coefficients: np.ndarray) -> np.ndarray:
 # ----------------------------------------------------------------------------
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=128)
+def _cached_singular_values(dtype, shape, payload):
+    # Pure geometry only: full dtype/shape/bytes bind candidate columns,
+    # observed rows and the fixed profile values. No attribution is cached.
+    matrix = np.frombuffer(payload, dtype=np.dtype(dtype)).reshape(shape)
+    result = np.linalg.svd(matrix, compute_uv=False)
+    result.flags.writeable = False
+    return result
+
+
 def _singular_values(matrix: np.ndarray) -> np.ndarray:
     if matrix.size == 0 or min(matrix.shape) == 0:
         return np.zeros(0, dtype=float)
     try:
+        if matrix.nbytes <= 65536 and matrix.dtype.kind in "fc":
+            return _cached_singular_values(matrix.dtype.str, tuple(matrix.shape), matrix.tobytes(order="C")).copy()
         return np.linalg.svd(matrix, compute_uv=False)
     except np.linalg.LinAlgError:  # pragma: no cover - numerically pathological input
         return np.zeros(0, dtype=float)

@@ -207,12 +207,12 @@ def _build_wave(
     details = [_member_detail(site_keys[index], matrix[index], timepoints, metadata) for index in row_indices]
     mean_profile = np.mean(profiles, axis=0)
     peak_index = int(np.argmax(np.abs(mean_profile)))
-    pairwise = [
-        corr[row_indices[left_position], right_index]
-        for left_position in range(len(row_indices))
-        for right_index in row_indices[left_position + 1 :]
-    ]
-    coherence = float(np.mean(pairwise)) if pairwise else 1.0
+    if hasattr(corr, "mean_pairs"):
+        coherence = corr.mean_pairs(row_indices)
+    else:
+        pairwise = [corr[row_indices[left_position], right_index]
+                    for left_position in range(len(row_indices)) for right_index in row_indices[left_position + 1:]]
+        coherence = float(np.mean(pairwise)) if pairwise else 1.0
     peak_indices = np.argmax(np.abs(profiles), axis=1)
     peak_dispersion = float(np.std(peak_indices)) if len(peak_indices) else 0.0
     dominant_sign = 1 if mean_profile[peak_index] >= 0 else -1
@@ -472,11 +472,12 @@ def analyze_temporal_waves(
     standard_deviation = matrix.std(axis=1, keepdims=True)
     standard_deviation[standard_deviation == 0] = 1.0
     standardized = standardized / standard_deviation
-    correlation = np.clip((standardized @ standardized.T) / matrix.shape[1], -1.0, 1.0)
-    np.fill_diagonal(correlation, 1.0)
-    distance = np.maximum((1.0 - correlation + (1.0 - correlation).T) / 2.0, 0.0)
-    np.fill_diagonal(distance, 0.0)
-    linkage_matrix = linkage(squareform(distance, checks=False), method="average")
+    from ptm_shared.condensed_wave_distance import CorrelationView, condensed_distance, IMPLEMENTATION_VERSION
+    correlation = CorrelationView(standardized)
+    with condensed_distance(standardized) as distance:
+        linkage_matrix = linkage(distance, method="average")
+    result["distance_implementation"] = IMPLEMENTATION_VERSION
+    result["algorithm_resource_boundary"] = "exact_average_linkage_quadratic_scipy_workspace"
     labels = fcluster(linkage_matrix, t=1.0 - effective_config["correlation_threshold"], criterion="distance")
 
     groups: Dict[int, List[int]] = defaultdict(list)
@@ -491,6 +492,9 @@ def analyze_temporal_waves(
         wave_rows.append((indices, _build_wave(0, indices, matrix, site_keys, ordered_timepoints, correlation, metadata)))
     wave_rows.sort(key=lambda item: (-item[1]["member_count"], item[1]["members"]))
     retained = wave_rows[: effective_config["maximum_waves"]]
+    result["all_evaluated_waves"] = [{**wave, "downstream_selected": i < effective_config["maximum_waves"],
+        "selection_reason": "within_frozen_maximum_waves_policy" if i < effective_config["maximum_waves"] else "outside_frozen_downstream_wave_scope"}
+        for i, (_, wave) in enumerate(wave_rows)]
     for indices, _ in wave_rows[effective_config["maximum_waves"] :]:
         unassigned.extend(_member_detail(site_keys[index], matrix[index], ordered_timepoints, metadata) for index in indices)
     waves = [_build_wave(index + 1, indices, matrix, site_keys, ordered_timepoints, correlation, metadata) for index, (indices, _) in enumerate(retained)]
