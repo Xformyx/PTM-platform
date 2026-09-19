@@ -1,7 +1,7 @@
 import {savedViewSettings} from "../lib/vectorView";
 import {VirtualFeatureList} from "../components/VirtualFeatureList";
 import {FullTrajectoryBrowser} from "../components/FullTrajectoryBrowser";
-import { VectorDensityPlot } from "../components/VectorDensityPlot";
+import { VectorScatterPlots } from "../components/VectorScatterPlots";
 import { VectorViewControls } from "../components/VectorViewControls";
 import { LatestRequest, sharedViewRequest, finiteExtent, representationValue, type VectorView, type ViewMode, type Representation } from "../lib/vectorView";
 import { QuantitationEvidenceTable } from "../components/QuantitationEvidenceTable";
@@ -1016,7 +1016,7 @@ type VectorRow = QuantRow & {
 };
 
 function ScatterPlotsInteractive({orderId}: {orderId:number;orderStatus?:string}) {
-  return <VectorDensityPlot orderId={orderId} />;
+  return <VectorScatterPlots orderId={orderId} />;
 }
 
 

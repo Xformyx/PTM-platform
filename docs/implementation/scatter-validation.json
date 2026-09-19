@@ -1,0 +1,115 @@
+{
+  "schema_version": "scatter_validation.v1",
+  "baseline_commit": "67867a751be01b4d36c3066eda8f6675ad3c472a",
+  "branch": "fix/restore-vector-scatter",
+  "browser_execution": {
+    "started_at": "2026-09-19T03:40:15.215190+00:00",
+    "finished_at": "2026-09-19T03:40:21.534549+00:00",
+    "status": "passed",
+    "browser_exit_code": 0,
+    "source_unchanged": true,
+    "fixture_unchanged": true,
+    "playwright_version": "1.63.0",
+    "current_reader_fixtures_verified": [
+      "constant-adjusted.json",
+      "empty-adjusted.json",
+      "large-adjusted.json",
+      "noeligible-adjusted.json",
+      "other-adjusted.json",
+      "other-occupancy.json",
+      "other-unadjusted.json",
+      "small-adjusted.json",
+      "small-occupancy.json",
+      "small-unadjusted.json"
+    ]
+  },
+  "browser_result": {
+    "synthetic_only": true,
+    "full_login_order_e2e": false,
+    "browser": "153.0.8010.50",
+    "scenarios": [
+      "legacy TSV / six condition cards / nonempty Canvas",
+      "precursor/raw label hover including real zero",
+      "real viewport zoom in/out",
+      "independent U / quality-gated paired occupancy",
+      "late previous axis response discarded",
+      "late previous order response discarded",
+      "390px mobile without horizontal overflow",
+      "authorized source download without write requests",
+      "read error / no blank canvas / retry",
+      "120,000 whole-row bins / density range hover",
+      "constant zero density / all 2,001 source rows accessible on hover",
+      "empty source distinguished from axis-ineligible source without blank Canvas",
+      "zero browser errors / zero worker or write requests"
+    ],
+    "errors": [],
+    "scenario_count": 13,
+    "request_count": 16,
+    "write_requests": 0
+  },
+  "results_directory": "/tmp/ptm-scatter-browser-resume-20260919-01",
+  "artifact_sha256": {
+    "browser-result.json": "1b96a4892175539ab0dd5abe8df99948d717919d4020892b816ac946ab87d4ad",
+    "downloaded-source.tsv": "939214ac2fd4e0d32f7a9efc947011301dab0a60641c2c13d35c2dbbb74b78e6",
+    "exit-code.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "progress.json": "4ca2d3b5c3040e8a043596f8dc49b5783cc4a8f410cab6ee369365826383aba0",
+    "scatter-density.png": "0dccd7a73d4e48c418955c3e143bb3ae30b4f6c33c6abbabbd9a9cdcd9566729",
+    "scatter-desktop-hover.png": "a457a68c5b6a53362e49fb82d0db21c78c0e34fff175089d141fa91431d8e99f",
+    "scatter-error.png": "cbee35ceabef99aa42797ab8eeacc5eb3ff1157a4dcec1468d1ccf35e8b4118f",
+    "scatter-mobile.png": "11827eb34d8df2d245733400dc862b23d6c3c6f82527456eb290cf8cca731c83",
+    "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout.log": "cb72edba9eda7db7c88753225e8c29ca6ddd92cf1748331b1c8dd5a87d3bc68a"
+  },
+  "source_sha256": {
+    "api-server/app/api/vector_view.py": "4d7e23dd46d1fc3f0b7917e094de69dd3fdb4f0d09cbd3e857891822ec190cea",
+    "frontend/src/components/VectorScatterPlots.tsx": "f8908510918469199bdc29c1bd70677675a8076e74ec09271e66681c2e7b118a",
+    "frontend/src/lib/scatterOverview.ts": "c1f070c4428b04e51e6c25bf75364d915e2e68515389b61efcd613b4298a8853",
+    "ptm_shared/scatter_overview.py": "7356691eeb6594b4ceb9d8c1191592bbbddc19184284d117503ef73249053bc8",
+    "scripts/run_scatter_browser_validation.py": "5d2bde551932a61e9e800eda9218da1f012ecf4d10a7b584e697d3311a7253bb",
+    "scripts/validate_scatter_browser.mjs": "d7d8376c550e87f0431b5bdfdf72670fb80b2c48985de815f834f05668e246c1"
+  },
+  "prior_checks": {
+    "python": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0
+    },
+    "node": {
+      "passed": 12,
+      "failed": 0
+    },
+    "frontend_build": "passed"
+  },
+  "scale": {
+    "synthetic_only": true,
+    "rows": 120000,
+    "conditions": 6,
+    "bin_count": 505,
+    "query_seconds": 1.654422167048324,
+    "cache_seconds": 0.000424208992626518,
+    "json_bytes": 19415,
+    "peak_rss_native": 92241920,
+    "rss_unit": "bytes",
+    "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+    "python": "3.14.6",
+    "coverage": {
+      "source_rows": 120000,
+      "represented_rows": 120000,
+      "excluded_rows": 0,
+      "exclusion_reasons": {},
+      "identity_unresolved_represented_rows": 6,
+      "sampled_out_rows": 0
+    }
+  },
+  "not_performed": [
+    "production_deployment",
+    "production_order_validation",
+    "authenticated_full_page_e2e",
+    "order_reanalysis"
+  ],
+  "cancelled_attempt": {
+    "output_directory": "/tmp/ptm-scatter-20260919-final-browser",
+    "directory_existed": false,
+    "counted_as_success": false
+  }
+}

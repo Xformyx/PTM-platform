@@ -1,6 +1,8 @@
 """Bounded view queries over immutable derived columns; no analysis mutation."""
 import asyncio
 from pathlib import Path
+from typing import Literal
+import csv
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
@@ -9,6 +11,23 @@ from app.config import get_settings
 from ptm_shared.vector_columnar import VectorColumnar
 
 router = APIRouter(prefix="/orders", tags=["vector-view"])
+
+
+@router.get("/{order_id}/vector-scatter-data")
+async def vector_scatter_data(order_id: int, axis: Literal["adjusted", "unadjusted", "occupancy"] = "adjusted",
+                              db=Depends(get_db), user=Depends(get_current_user)):
+    """Legacy TSV scatter requires read access only, never a preparation job."""
+    order = await access(db, user, order_id)
+    from ptm_shared.scatter_overview import read_scatter_overview, ScatterSourceChanged
+    suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+    try:
+        return await asyncio.to_thread(read_scatter_overview, Path(get_settings().OUTPUT_DIR) / order.order_code, suffix, axis)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, detail={"reason": "source_vector_tsv_unavailable"}) from exc
+    except ScatterSourceChanged as exc:
+        raise HTTPException(409, detail={"reason": "source_vector_changed_during_read", "action": "retry"}) from exc
+    except (csv.Error, UnicodeError, ValueError) as exc:
+        raise HTTPException(422, detail={"reason": "source_vector_parse_failed"}) from exc
 
 
 def query(directory, suffix, operation, revision, options):
