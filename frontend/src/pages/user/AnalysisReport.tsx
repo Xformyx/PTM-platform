@@ -1,4 +1,4 @@
-import { VectorDensityPlot } from "../../components/VectorDensityPlot";
+import { VectorScatterPlots } from "../../components/VectorScatterPlots";
 import { finite } from "../../lib/quantitation";
 import { TopNTimeSeriesPlot } from "../OrderDetail";
 import { finiteExtent } from "../../lib/vectorView";
@@ -660,7 +660,7 @@ function parseTimeOrder(cond: string): number {
 }
 
 function VectorPlotTab({orderId}: {orderId:number}) {
-  return <VectorDensityPlot orderId={orderId} />;
+  return <VectorScatterPlots orderId={orderId} />;
 }
 
 

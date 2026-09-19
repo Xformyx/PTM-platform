@@ -108,3 +108,5 @@ docs/implementation/*
 !docs/tmm_allocation_change.md
 !docs/implementation/vector-tmm-validation.md
 !docs/implementation/vector-tmm-validation.json
+!docs/implementation/scatter-recovery.md
+!docs/implementation/scatter-validation.json
