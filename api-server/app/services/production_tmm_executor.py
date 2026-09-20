@@ -129,7 +129,7 @@ async def execute_production_tmm(job_id, *, session_factory=AsyncSessionLocal):
             frozen = await stage("input_validation", verify_input, source)
             def candidates():
                 manifest, inputs, sources = prepare_analysis(source, cfg["ptm_type"], cfg["analysis_context"],
-                    config=cfg["tmm_config"], scope=cfg["analysis_scope"], subset_ids=cfg["analysis_feature_ids"], subset_reason=cfg["subset_reason"])
+                    config={**cfg["tmm_config"],"inference_mode":cfg.get("inference_mode","legacy_unrecorded")}, scope=cfg["analysis_scope"], subset_ids=cfg["analysis_feature_ids"], subset_reason=cfg["subset_reason"])
                 from ptm_shared.analysis_inventory_index import write_inventory_indexes
                 write_inventory_indexes(work, manifest)
                 _atomic_json(work/'candidate_summary.json',module_response(manifest,compact=True))
@@ -137,9 +137,52 @@ async def execute_production_tmm(job_id, *, session_factory=AsyncSessionLocal):
             prepared = await stage("candidates", candidates)
             manifest, inputs = prepared["manifest"], prepared["inputs"]
             scores = await stage("score", score_tracks, manifest, inputs, cfg)
+            await stage("engine_binding", lambda: {
+                "schema_version":"production_engine_binding.v1",
+                "measurement_revision":manifest["measurement_revision"],
+                "feature_identity_version":manifest["feature_identity_version"],
+                "analysis_scope":manifest["analysis_scope"],
+                "candidate_graph_hash":signature(manifest["candidate_modules"]),
+                "reference_snapshots":cfg["references"],"effective_config":scores["effective_config"],
+                "engine_signature":signature(cfg["runtime"]),"runtime":cfg["runtime"],
+                "inference_mode":cfg.get("inference_mode","legacy_unrecorded"),
+                "input_signature":input_sig,"sample_manifest_hash":signature(manifest["sample_manifest"]),
+                "condition_grid":manifest["conditions"],"primary_track":"protein_adjusted_relative_ptm_log2_contrast"})
             scores = await stage("trajectory_diagnostics", trajectory_diagnostics, scores, manifest, inputs, work)
             sidecar = await stage("temporal_diagnostics", temporal_diagnostics, scores, manifest, inputs, source, work, cfg["ptm_type"])
             result = await stage("result", render_result, scores, sidecar, manifest, inputs)
+            def comparisons():
+                from ptm_shared.kinase_model_comparison import run_footprint_comparisons
+                requested = cfg.get("comparison_models", [])
+                output = run_footprint_comparisons(manifest, inputs, [m for m in requested if m not in {"tmm_magnitude.v1","proda_label_free.v1","time_window_nnls.v1"}])
+                if "time_window_nnls.v1" in requested:
+                    from ptm_shared.time_window_comparison import compare_time_windows
+                    output["models"].append(compare_time_windows(manifest,inputs,scores))
+                if "proda_label_free.v1" in requested:
+                    from ptm_shared.proda_comparison import run_proda_comparison
+                    output["models"].append(run_proda_comparison(source,work/"proda-comparison",inputs["features"],cfg))
+                if "tmm_magnitude.v1" in requested:
+                    alternate = score_tracks(manifest, inputs, {"tmm_config":{**cfg["tmm_config"], "target_transform":"magnitude"}})
+                    output["models"].append({"model_id":"tmm_magnitude.v1", "status":"completed", "track":"relative",
+                        "evaluation_status":alternate["track_status"]["relative"], "effective_config":alternate["effective_config"],
+                        "records":[{"kinase":k,"up_sums":v["weighted_up_sums"],"down_sums":v["weighted_down_sums"],
+                                    "identifiability":v["tmm_identifiability"]} for k,v in alternate["relative"].items()],
+                        "allocation_ledger":alternate["allocation_ledger"], "default_model_promoted":False,
+                        "interpretation":"magnitude_shape_allocation_with_original_signed_observations"})
+                output["requested_models"] = requested
+                return output
+            comparison = await stage("model_comparisons", comparisons)
+            from ptm_shared.signaling_evidence_index import build_explorer_index
+            def explorer():
+                reference = os.getenv("PTM_PATHWAY_SOURCE_BUNDLE_PATH")
+                frozen_reference = None
+                if reference and Path(reference).is_file():
+                    frozen_reference = work/"pathway_reference.json"
+                    shutil.copyfile(reference, frozen_reference)
+                    if file_sha256(frozen_reference) != cfg["references"].get("PTM_PATHWAY_SOURCE_BUNDLE_PATH"):
+                        raise AnalysisInterrupted("superseded")
+                return build_explorer_index(work, manifest, inputs, scores, sidecar, result, pathway_reference=frozen_reference, comparison=comparison)
+            await stage("explorer", explorer)
             await check()
             revision = {"schema_version": RESULT_VERSION, "input_revision": job.input_revision,
                 "input_signature": input_sig, "generation": job.generation, "attempt": attempt,
@@ -148,6 +191,9 @@ async def execute_production_tmm(job_id, *, session_factory=AsyncSessionLocal):
             revision["revision_id"] = signature(revision)
             _atomic_json(work/"manifest.json", revision)
             await asyncio.to_thread(verify_result, work)
+            from ptm_shared.run_evidence_bundle import publish_analysis_bundle
+            bundle = publish_analysis_bundle(work, order_id=job.order_id, job_id=job_id,
+                parent_generation=cfg.get("parent_generation"), reference_snapshots=cfg["references"])
             # Lock admission/publication on the same existing Order row. Failed,
             # stale or cancelled attempts never replace the successful pointer.
             await db.execute(select(Order.id).where(Order.id == job.order_id).with_for_update())
@@ -161,6 +207,7 @@ async def execute_production_tmm(job_id, *, session_factory=AsyncSessionLocal):
             result["temporal_ptm_protein_analysis"]["analysis_revision"] = revision["revision_id"]
             if head is not None:
                 order.kinase_activity_heatmap = {"execution_status": "completed", "analysis_job_id": job_id,
+                    "evidence_bundle_id": bundle["bundle_id"],
                     "revision_id": job.result_revision, "result_path": job.result_path, "coverage": result["coverage"],
                     "temporal_ptm_protein_analysis": result["temporal_ptm_protein_analysis"]}
                 order.kinase_analysis_data = {"analysis_manifest_id": manifest["analysis_manifest_id"],

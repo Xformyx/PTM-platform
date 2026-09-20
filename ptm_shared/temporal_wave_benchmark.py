@@ -119,7 +119,10 @@ def _rank(scores: Mapping[str, float], target: str) -> int | None:
     return None
 
 
-def _scores_from_rows(rows: Sequence[Mapping[str, Any]], expected_windows: Mapping[str, Any]) -> Dict[str, float]:
+def _scores_from_rows(rows: Sequence[Mapping[str, Any]], expected_windows: Mapping[str, Any], *, scoring_mode="discovery_blind") -> Dict[str, float]:
+    if scoring_mode not in {"discovery_blind", "prior_assisted_benchmark"}:
+        raise ValueError("unsupported_benchmark_scoring_mode")
+    expected_windows = expected_windows if scoring_mode == "prior_assisted_benchmark" else {}
     scores: Dict[str, float] = defaultdict(float)
     by_site: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -132,7 +135,10 @@ def _scores_from_rows(rows: Sequence[Mapping[str, Any]], expected_windows: Mappi
     return dict(scores)
 
 
-def _scores_from_waves(contract: Mapping[str, Any], expected_windows: Mapping[str, Any]) -> Dict[str, float]:
+def _scores_from_waves(contract: Mapping[str, Any], expected_windows: Mapping[str, Any], *, scoring_mode="discovery_blind") -> Dict[str, float]:
+    if scoring_mode not in {"discovery_blind", "prior_assisted_benchmark"}:
+        raise ValueError("unsupported_benchmark_scoring_mode")
+    expected_windows = expected_windows if scoring_mode == "prior_assisted_benchmark" else {}
     scores: Dict[str, float] = defaultdict(float)
     for wave in contract.get("waves", []):
         profile = wave.get("evidence_profile", {})
@@ -177,13 +183,13 @@ def _permuted_rows(rows: Sequence[Mapping[str, Any]], seed: int) -> List[Dict[st
     return permuted
 
 
-def _run_method(rows: Sequence[Mapping[str, Any]], wave_config: Mapping[str, Any], expected_windows: Mapping[str, Any]) -> Dict[str, Any]:
+def _run_method(rows: Sequence[Mapping[str, Any]], wave_config: Mapping[str, Any], expected_windows: Mapping[str, Any], *, scoring_mode="discovery_blind") -> Dict[str, Any]:
     series, timepoints, metadata = build_input_from_vector_rows(rows)
     contract = analyze_temporal_waves(series, timepoints, metadata=metadata, config=wave_config)
     return {
         "contract": contract,
-        "site_scores": _scores_from_rows(rows, expected_windows),
-        "wave_scores": _scores_from_waves(contract, expected_windows),
+        "site_scores": _scores_from_rows(rows, expected_windows, scoring_mode=scoring_mode),
+        "wave_scores": _scores_from_waves(contract, expected_windows, scoring_mode=scoring_mode),
     }
 
 
@@ -195,9 +201,13 @@ def run_benchmark(manifest_path: str | Path, output_dir: str | Path) -> Dict[str
     known_targets = [str(target) for target in manifest["known_targets"]]
     expected_windows = manifest.get("expected_target_windows", {})
     base_config = dict(manifest.get("wave_config") or {})
-    observed = _run_method(rows, base_config, expected_windows)
+    scoring_mode = manifest.get("scoring_mode", "discovery_blind")
+    observed = _run_method(rows, base_config, expected_windows, scoring_mode=scoring_mode)
     result: Dict[str, Any] = {
         "benchmark_version": BENCHMARK_VERSION,
+        "ranking_policy_version": "wave_truth_free_ranking.v2",
+        "scoring_mode": scoring_mode,
+        "frozen_discovery_scores": {"site": observed["site_scores"], "wave": observed["wave_scores"]},
         "contract_version": CONTRACT_VERSION,
         "engine_version": ENGINE_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -224,10 +234,10 @@ def run_benchmark(manifest_path: str | Path, output_dir: str | Path) -> Dict[str
     }
     repetitions = int(manifest.get("time_permutation", {}).get("repetitions", 100))
     seed = int(manifest.get("time_permutation", {}).get("seed", 20260813))
-    if expected_windows:
+    if expected_windows and scoring_mode == "prior_assisted_benchmark":
         permutation_metrics = []
         for repetition in range(max(1, repetitions)):
-            permuted = _run_method(_permuted_rows(rows, seed + repetition), base_config, expected_windows)
+            permuted = _run_method(_permuted_rows(rows, seed + repetition), base_config, expected_windows, scoring_mode=scoring_mode)
             permutation_metrics.append(_target_metrics(permuted["wave_scores"], known_targets))
         observed_mrr = result["observed"]["wave"]["mean_reciprocal_rank"]
         null_mrr = [metric["mean_reciprocal_rank"] for metric in permutation_metrics if metric["mean_reciprocal_rank"] is not None]
@@ -246,13 +256,13 @@ def run_benchmark(manifest_path: str | Path, output_dir: str | Path) -> Dict[str
     else:
         result["time_permutation"] = {
             "evaluable": False,
-            "reason": "expected_target_windows_required_for_temporal_target_permutation_test",
+            "reason": "prior_assisted_temporal_target_test_not_requested_or_windows_absent",
         }
     for threshold in manifest.get("threshold_sensitivity", {}).get("correlation_thresholds", [0.60, 0.70, 0.80]):
         configured = dict(base_config)
         configured["correlation_threshold"] = float(threshold)
         configured["threshold_source"] = "benchmark_threshold_sensitivity"
-        run = _run_method(rows, configured, expected_windows)
+        run = _run_method(rows, configured, expected_windows, scoring_mode=scoring_mode)
         result["threshold_sensitivity"].append(
             {
                 "correlation_threshold": float(threshold),
@@ -264,6 +274,8 @@ def run_benchmark(manifest_path: str | Path, output_dir: str | Path) -> Dict[str
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     json_path = destination / f"{manifest['dataset_id']}_temporal_wave_benchmark.json"
+    if json_path.exists():
+        raise FileExistsError("benchmark_output_is_immutable_use_new_output_directory")
     json_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     markdown_path = destination / f"{manifest['dataset_id']}_temporal_wave_benchmark.md"
     markdown_path.write_text(_render_markdown(result), encoding="utf-8")

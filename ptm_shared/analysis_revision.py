@@ -10,7 +10,7 @@ from .analysis_universe import signature
 from .report_revision import _atomic_json, file_sha256
 
 INPUT_VERSION = "temporal_analysis_input.v1"
-RESULT_VERSION = "temporal_analysis_revision.v1"
+RESULT_VERSION = "temporal_analysis_revision.v2"
 
 
 @lru_cache(maxsize=256)
@@ -115,11 +115,13 @@ def write_stage(directory, name, payload, input_signature):
 def verify_result(directory):
     directory = Path(directory)
     manifest = json.loads((directory/"manifest.json").read_text())
-    if manifest.get("schema_version") != RESULT_VERSION or manifest.get("execution_status") != "completed":
+    if manifest.get("schema_version") not in {RESULT_VERSION, "temporal_analysis_revision.v1"} or manifest.get("execution_status") != "completed":
         raise ValueError("analysis_revision_incomplete")
     if signature({k:v for k,v in manifest.items() if k != "revision_id"}) != manifest.get("revision_id"):
         raise ValueError("result_manifest_integrity_mismatch")
     required = {"input_validation", "candidates", "score", "trajectory_diagnostics", "temporal_diagnostics", "result"}
+    if manifest["schema_version"] == RESULT_VERSION:
+        required |= {"explorer", "model_comparisons", "explorer_records.parquet", "pathway_result.json", "validation_registry.json"}
     names = [a["name"] for a in manifest["artifacts"]]
     if not required.issubset(names) or len(names) != len(set(names)) or not required.issubset(manifest.get("required_stages", [])):
         raise ValueError("analysis_required_stages_incomplete")
@@ -153,5 +155,13 @@ def resolve_analysis_artifacts(output_dir, pointer):
                  "execution_status": revision["execution_status"], "evaluation_status": revision["evaluation_status"],
                  "track_status": result["track_status"], "artifacts": revision["artifacts"],
                  "artifact_directory": str(directory.relative_to(root)), "inventory": candidates["inventory"]}
+    bundle_path = directory/"run_evidence_manifest.json"
+    if bundle_path.is_file():
+        from .run_evidence_bundle import verify_bundle
+        candidate_bundle = json.loads(bundle_path.read_text())
+        bundle = verify_bundle(directory, order_id=candidate_bundle["order_id"])
+        pathway = json.loads((directory/"pathway_result.json").read_text())
+        inventory.update(evidence_bundle_id=bundle["bundle_id"], component_revisions=bundle["revisions"], inference_mode=bundle.get("inference_mode"),
+                         pathway_result=pathway, validation_registry=json.loads((directory/"validation_registry.json").read_text()))
     return {"heatmap": result, "candidate_manifest": candidates, "evidence_inventory": inventory,
             "revision": revision, "source_directory": input_directory(root, revision["input_revision"])}

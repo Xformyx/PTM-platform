@@ -274,6 +274,7 @@ def _replicate_bootstrap_consensus(
     seed: int,
     correlation_threshold: float,
     soft_membership_threshold: float,
+    paired_biological_units: bool = False,
 ) -> Dict[str, Any]:
     """Estimate assignment stability against fixed deterministic Wave centroids.
 
@@ -297,24 +298,41 @@ def _replicate_bootstrap_consensus(
     assignment_counts: Dict[str, np.ndarray] = {
         key: np.zeros(len(waves), dtype=int) for key in site_keys
     }
-    usable_site_count = 0
+    usable_keys = set()
     for site_key in site_keys:
         per_timepoint = replicate_time_series.get(site_key) or {}
-        if any(len(list(per_timepoint.get(tp) or [])) >= 2 for tp in timepoints):
-            usable_site_count += 1
+        counts = [len([v for v in per_timepoint.get(tp, []) if v is not None and math.isfinite(float(v))]) for tp in timepoints]
+        # Paired rows must preserve positions; dropping a missing replicate
+        # independently at each time would silently pair different units.
+        paired_complete = all(count == len(per_timepoint.get(tp, [])) for tp,count in zip(timepoints,counts))
+        if counts and min(counts) >= 2 and (not paired_biological_units or len(set(counts)) == 1 and paired_complete):
+            usable_keys.add(site_key)
+    usable_site_count = len(usable_keys)
+    if not usable_keys:
+        for wave in waves:
+            wave["evidence_profile"].update(replicate_stability=None,
+                replicate_stability_status="not_evaluable",
+                replicate_stability_reason="insufficient_biological_replicates")
+        return {"contract": "temporal_wave_consensus.v2", "status": "not_evaluable",
+                "reason": "insufficient_biological_replicates", "usable_replicate_site_count": 0,
+                "bootstrap_repeats": repeats, "bootstrap_seed": seed,
+                "site_membership_probabilities": {}, "replicate_stability": None}
     for _ in range(repeats):
         for site_index, site_key in enumerate(site_keys):
+            if site_key not in usable_keys:
+                continue
             per_timepoint = replicate_time_series.get(site_key) or {}
+            paired_indices = rng.integers(len(per_timepoint[timepoints[0]]), size=len(per_timepoint[timepoints[0]])) if paired_biological_units else None
             values = []
             used_replicate = False
             for time_index, timepoint in enumerate(timepoints):
                 observed = [
                     _as_float(value)
                     for value in list(per_timepoint.get(timepoint) or [])
-                    if value is not None
+                    if value is not None and math.isfinite(float(value))
                 ]
                 if observed:
-                    sampled = rng.choice(observed, size=len(observed), replace=True)
+                    sampled = np.asarray(observed)[paired_indices] if paired_indices is not None else rng.choice(observed, size=len(observed), replace=True)
                     values.append(float(np.mean(sampled)))
                     used_replicate = used_replicate or len(observed) >= 2
                 else:
@@ -339,6 +357,8 @@ def _replicate_bootstrap_consensus(
     }
     site_probabilities: Dict[str, Dict[str, float]] = {}
     for site_key, counts in assignment_counts.items():
+        if site_key not in usable_keys:
+            continue
         probabilities = counts.astype(float) / max(repeats, 1)
         site_probabilities[site_key] = {
             wave_ids[index]: round(float(probability), 6)
@@ -353,6 +373,10 @@ def _replicate_bootstrap_consensus(
         hard_members = set(wave.get("members", []))
         hard_probabilities = []
         for detail in wave.get("member_details", []):
+            if detail["key"] not in usable_keys:
+                detail["wave_membership_probability"] = None
+                detail["wave_membership_class"] = "not_evaluable"
+                continue
             probability = float(site_probabilities.get(detail["key"], {}).get(wave_id, 0.0))
             detail["wave_membership_probability"] = round(probability, 6)
             if probability >= soft_membership_threshold:
@@ -380,13 +404,14 @@ def _replicate_bootstrap_consensus(
             }
             for site_key in boundary_members
         ]
-        stability = float(np.median(hard_probabilities)) if hard_probabilities else 0.0
-        wave["evidence_profile"]["replicate_stability"] = round(stability, 6)
-        wave["evidence_profile"]["consensus_contract"] = "temporal_wave_consensus.v1"
+        stability = float(np.median(hard_probabilities)) if hard_probabilities else None
+        wave["evidence_profile"]["replicate_stability"] = round(stability, 6) if stability is not None else None
+        wave["evidence_profile"]["replicate_stability_status"] = "evaluated" if stability is not None else "not_evaluable"
+        wave["evidence_profile"]["consensus_contract"] = "temporal_wave_consensus.v2"
     return {
-        "contract": "temporal_wave_consensus.v1",
+        "contract": "temporal_wave_consensus.v2",
         "status": "computed",
-        "method": "replicate_bootstrap_mean_to_fixed_deterministic_centroids",
+        "method": "paired_biological_unit_bootstrap_to_fixed_centroids" if paired_biological_units else "replicate_bootstrap_mean_to_fixed_deterministic_centroids",
         "bootstrap_repeats": repeats,
         "bootstrap_seed": seed,
         "soft_membership_threshold": soft_membership_threshold,
@@ -407,6 +432,7 @@ def analyze_temporal_waves(
     metadata: Optional[Mapping[str, Mapping[str, Any]]] = None,
     config: Optional[Mapping[str, Any]] = None,
     replicate_time_series: Optional[Mapping[str, Mapping[str, Sequence[Any]]]] = None,
+    paired_biological_units: bool = False,
 ) -> Dict[str, Any]:
     """Return a reproducible canonical Temporal Wave Contract.
 
@@ -492,7 +518,9 @@ def analyze_temporal_waves(
         wave_rows.append((indices, _build_wave(0, indices, matrix, site_keys, ordered_timepoints, correlation, metadata)))
     wave_rows.sort(key=lambda item: (-item[1]["member_count"], item[1]["members"]))
     retained = wave_rows[: effective_config["maximum_waves"]]
-    result["all_evaluated_waves"] = [{**wave, "downstream_selected": i < effective_config["maximum_waves"],
+    result["wave_inventory_contract"] = "temporal_wave_inventory.v2"
+    result["all_evaluated_waves"] = [{**wave, "wave_id":f"TW-{i+1:02d}", "cluster_id":i+1,
+        "downstream_selected": i < effective_config["maximum_waves"],
         "selection_reason": "within_frozen_maximum_waves_policy" if i < effective_config["maximum_waves"] else "outside_frozen_downstream_wave_scope"}
         for i, (_, wave) in enumerate(wave_rows)]
     for indices, _ in wave_rows[effective_config["maximum_waves"] :]:
@@ -510,6 +538,7 @@ def analyze_temporal_waves(
             seed=effective_config["bootstrap_seed"],
             correlation_threshold=effective_config["correlation_threshold"],
             soft_membership_threshold=effective_config["soft_membership_threshold"],
+            paired_biological_units=paired_biological_units,
         )
         result["consensus_membership"] = consensus
         if consensus.get("usable_replicate_site_count", 0) == 0:

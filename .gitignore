@@ -110,3 +110,6 @@ docs/implementation/*
 !docs/implementation/vector-tmm-validation.json
 !docs/implementation/scatter-recovery.md
 !docs/implementation/scatter-validation.json
+!docs/implementation/signaling-explorer-status.md
+!docs/implementation/signaling-explorer-contract.md
+!docs/implementation/signaling-explorer-validation.json

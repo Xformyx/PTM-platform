@@ -1039,6 +1039,9 @@ def build_kinase_profiles_from_data(
     *,
     min_exclusive_for_profile: int = MIN_EXCLUSIVE_FOR_PROFILE,
     gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
+    ptm_identities: dict | None = None,
+    profile_support_unit: str = "feature_legacy",
+    profile_prior_policy: str = "legacy_gaussian",
 ) -> dict[str, dict]:
     """Build per-kinase temporal activity profiles from exclusive substrates.
 
@@ -1062,6 +1065,10 @@ def build_kinase_profiles_from_data(
     min_exclusive_for_profile = max(1, int(min_exclusive_for_profile))
     gaussian_sigma_log = max(1e-6, float(gaussian_sigma_log))
     profiles: dict[str, dict] = {}
+    if profile_support_unit not in {"feature_legacy", "measurement_group.v1"}:
+        raise ValueError("unsupported_profile_support_unit")
+    if profile_prior_policy not in {"legacy_gaussian", "observed_support_only.v1"}:
+        raise ValueError("unsupported_profile_prior_policy")
 
     for km in kinase_modules:
         canonical = km.get("canonical", "").upper()
@@ -1076,15 +1083,19 @@ def build_kinase_profiles_from_data(
             pk for pk in all_keys
             if len(ptm_to_kinases.get(pk, [])) <= 1
         ]
+        from ptm_shared.kinase_trajectory_evidence import measurement_group_id
+        groups = {}
+        for pk in exclusive_keys:
+            identity = (ptm_identities or {}).get(pk, {})
+            group = (str(identity.get("fasta_taxonomy_id", "")), str(identity.get("isoform", "")), measurement_group_id(pk, identity)) if profile_support_unit == "measurement_group.v1" else pk
+            groups.setdefault(group, []).append(pk)
 
-        if len(exclusive_keys) >= min_exclusive_for_profile:
+        if len(groups) >= min_exclusive_for_profile:
             # ── Data-driven profile ──────────────────────────────────────────
             vectors = []
-            for pk in exclusive_keys:
-                ts = ptm_timeseries.get(pk, {})
-                if not ts:
-                    continue
-                row = _observed_vector(ts, conditions_sorted)
+            for keys in groups.values():
+                group_rows = np.stack([np.abs(_observed_vector(ptm_timeseries.get(pk, {}), conditions_sorted)) for pk in keys])
+                row = np.asarray([np.median(c[np.isfinite(c)]) if np.isfinite(c).any() else np.nan for c in group_rows.T])
                 if not np.isfinite(row).any():
                     continue
                 # Use absolute value — we care about the temporal shape, not direction
@@ -1108,7 +1119,9 @@ def build_kinase_profiles_from_data(
                     "observed_mask": observed.tolist(),
                     "support_by_condition": dict(zip(conditions_sorted, map(int, counts))),
                     "n_exclusive": len(vectors),
-                    "exclusive_keys": exclusive_keys[:20],  # cap for storage
+                    "n_exclusive_features": len(exclusive_keys),
+                    "support_unit": profile_support_unit,
+                    "exclusive_keys": exclusive_keys,
                     "peak_condition": peak_condition,
                     "peak_status": "unique_observed_complete_grid" if peak_condition else "withheld_partial_or_tied",
                     "profile_config": {
@@ -1149,6 +1162,9 @@ def build_kinase_profiles_from_data(
             },
             "peak_status": "prior_assumed",
             "n_exclusive": len(exclusive_keys),
+            "n_exclusive_features": len(exclusive_keys),
+            "n_independent_measurement_groups": len(groups),
+            "support_unit": profile_support_unit,
             "exclusive_keys": exclusive_keys,
             "peak_condition": conditions_sorted[peak_idx],
             "profile_config": {
@@ -1156,6 +1172,9 @@ def build_kinase_profiles_from_data(
                 "gaussian_sigma_log": gaussian_sigma_log,
             },
         }
+        if profile_prior_policy == "observed_support_only.v1":
+            profiles[canonical].update(profile=np.full(n_cond,np.nan),profile_type="insufficient_observed_profile",
+                peak_condition=None,peak_status="not_evaluable_insufficient_independent_support")
         _log.debug(
             f"[TMM] {canonical}: Gaussian fallback profile "
             f"(peak_min={peak_min:.0f}, only {len(exclusive_keys)} exclusive substrates)"
@@ -1632,6 +1651,8 @@ def compute_weighted_kinase_scores(
     ptm_qvalues: dict | None = None,
     guard_policy: str = GUARD_GROUP_SHARE,
     profile_min_exclusive: int = MIN_EXCLUSIVE_FOR_PROFILE,
+    profile_support_unit: str = "feature_legacy",
+    profile_prior_policy: str = "legacy_gaussian",
     gaussian_sigma_log: float = _GAUSSIAN_SIGMA_LOG,
     target_transform: str = TMM_TARGET_SIGNED,
     ptm_candidate_weights: dict[str, dict[str, float]] | None = None,
@@ -1705,6 +1726,7 @@ def compute_weighted_kinase_scores(
         ptm_to_kinases,
         conditions_sorted,
         min_exclusive_for_profile=profile_min_exclusive,
+        ptm_identities=ptm_identities, profile_support_unit=profile_support_unit, profile_prior_policy=profile_prior_policy,
         gaussian_sigma_log=gaussian_sigma_log,
     )
     kinase_profiles, iterative_profile_provenance = refine_kinase_profiles_iteratively(
@@ -1908,6 +1930,7 @@ def compute_weighted_kinase_scores(
                 for c in conditions_sorted:
                     w_shared_sums[c] += ts.get(c, 0.0) * ratio
 
+            detail["condition_evaluations"] = {}
             # Accumulate weighted sums
             site_profile = {condition: 0.0 for condition in ts}
             for c in conditions_sorted:
@@ -1916,6 +1939,14 @@ def compute_weighted_kinase_scores(
                 fc = ts[c]
                 q_val = ptm_qvalues.get(pk, {}).get(c)
                 passes = (q_val is not None and q_val < q_threshold) or (abs(fc) >= fc_threshold)
+                detail["condition_evaluations"][c] = {
+                    "observed": True, "allocation_evaluable": detail["resolution"] in {"exclusive", "resolved"},
+                    "passes_score_rule": bool(passes), "included_in_score": bool(passes and ratio != 0),
+                    "nonzero_contribution": bool(passes and fc * ratio != 0),
+                    "weighted_observation": fc * ratio if not detail.get("guard_scoring_excluded") else None,
+                    "score_contribution": fc * ratio if passes and not detail.get("guard_scoring_excluded") else None,
+                    "statistical_support": "tested" if q_val is not None else "effect_threshold_only",
+                }
                 if not passes:
                     continue
                 weighted_fc = fc * ratio
@@ -1974,6 +2005,8 @@ def compute_weighted_kinase_scores(
             "profile_peak_condition": (kinase_profiles.get(canonical) or {}).get("peak_condition"),
             "n_profile_substrates": _n_profile_substrates,
             "tmm_profile_config": {
+                "profile_support_unit": profile_support_unit,
+                "profile_prior_policy": profile_prior_policy,
                 "profile_min_exclusive": max(1, int(profile_min_exclusive)),
                 "gaussian_sigma_log": max(1e-6, float(gaussian_sigma_log)),
                 "target_transform": target_transform,
@@ -1989,6 +2022,8 @@ def compute_weighted_kinase_scores(
             "iterative_profile_provenance": iterative_profile_provenance,
             "kinase_profile_provenance": {
                 "profile_type": _profile_type,
+                "support_unit": profile_support_unit,
+                "independent_group_count": (kinase_profiles.get(canonical) or {}).get("n_independent_measurement_groups", (kinase_profiles.get(canonical) or {}).get("n_exclusive")),
                 "base_profile_type": (kinase_profiles.get(canonical) or {}).get("base_profile_type"),
                 "iterative_shared_support": int((kinase_profiles.get(canonical) or {}).get("iterative_shared_support") or 0),
                 "iterative_completed_round": int((kinase_profiles.get(canonical) or {}).get("iterative_completed_round") or 0),

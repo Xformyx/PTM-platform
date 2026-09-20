@@ -54,17 +54,26 @@ def read_revision(output_dir, revision_id=None):
 
 
 def verify_revision(output_dir, revision):
+    from .analysis_revision import _verify_immutable_file
     root = Path(output_dir).resolve()
     if not revision.get('registry_sha256') or _digest({k: v for k, v in revision.items() if k != 'registry_sha256'}) != revision['registry_sha256']:
         raise ValueError('revision_registry_integrity_mismatch')
     for artifact in revision.get('artifacts') or []:
         path = (root / artifact['filename']).resolve()
-        if not path.is_relative_to(root) or not path.is_file() or file_sha256(path) != artifact['sha256']:
+        if not path.is_relative_to(root) or not path.is_file():
             raise ValueError('revision_artifact_integrity_mismatch')
+        try:
+            _verify_immutable_file(path,artifact['sha256'])
+        except ValueError as exc:
+            raise ValueError('revision_artifact_integrity_mismatch') from exc
         if artifact.get('linked_asset'):
             asset = (root / artifact['linked_asset']).resolve()
-            if not asset.is_relative_to(root) or not asset.is_file() or file_sha256(asset) != artifact['sha256']:
+            if not asset.is_relative_to(root) or not asset.is_file():
                 raise ValueError('revision_linked_asset_integrity_mismatch')
+            try:
+                _verify_immutable_file(asset,artifact['sha256'])
+            except ValueError as exc:
+                raise ValueError('revision_linked_asset_integrity_mismatch') from exc
     return revision
 
 

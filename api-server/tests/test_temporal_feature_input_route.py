@@ -105,16 +105,16 @@ def test_production_tmm_dispatch_accepts_canonical_opaque_feature_ids():
     assert len(env["_tmm_modules"][0]["members"]) == 2
 
 
-def test_old_sidecar_is_preserved_but_not_reused_for_new_feature_values(tmp_path):
+def test_sidecar_reuse_requires_both_feature_values_and_analysis_signature(tmp_path):
     tree = ast.parse((Path(__file__).parents[1] / "app/api/orders.py").read_text())
     statement = next(n for n in ast.walk(tree) if isinstance(n, ast.If) and ast.unparse(n.test) == "unified_sidecar is not None")
     path = tmp_path / "sidecar.json"
-    old = {"provenance": {"temporal_input": {"feature_input_sha256": "old-input"}}}
+    old = {"provenance": {"temporal_input": {"feature_input_sha256": "old-input", "analysis_signature": "old-analysis"}}}
     path.write_text(json.dumps(old))
     def write_json(target, data, **_):
         target.write_text(json.dumps(data))
     env = {"unified_sidecar": old, "unified_path": path, "hashlib": hashlib,
-           "temporal_inputs": {"input_sha256": "new-input"}, "atomic_write_json": write_json}
+           "temporal_inputs": {"input_sha256": "new-input"}, "cache_hash": "new-analysis", "atomic_write_json": write_json}
     code = compile(ast.Module(body=[statement], type_ignores=[]), "sidecar_reuse_gate", "exec")
     exec(code, env)
     assert env["unified_sidecar"] is None
@@ -124,4 +124,14 @@ def test_old_sidecar_is_preserved_but_not_reused_for_new_feature_values(tmp_path
     env["unified_sidecar"] = old
     env["temporal_inputs"]["input_sha256"] = "old-input"
     exec(code, env)
+    assert env["unified_sidecar"] is None, "Same values cannot reuse different reference/configuration"
+    assert len(list(tmp_path.glob("*.previous-*.json"))) == 1
+    env["unified_sidecar"] = old
+    env["cache_hash"] = "old-analysis"
+    exec(code, env)
     assert env["unified_sidecar"] == old
+    legacy = {"provenance": {"temporal_input": {"feature_input_sha256": "old-input"}}}
+    env["unified_sidecar"] = legacy
+    path.write_text(json.dumps(legacy))
+    exec(code, env)
+    assert env["unified_sidecar"] is None, "Unrecorded configuration is not compatible"

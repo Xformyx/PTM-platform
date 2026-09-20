@@ -415,7 +415,7 @@ def _study_frame_card(state: Mapping[str, Any], synthesis: Mapping[str, Any]) ->
         "counterevidence": "Study-frame metadata define experimental scope rather than a mechanistic conclusion.",
         "analysis_scope_contract": {k:v for k,v in (state.get("analysis_evidence_inventory") or {}).items()
             if k in {"analysis_revision", "input_revision", "analysis_manifest_id", "coverage", "execution_status",
-                     "evaluation_status", "track_status", "artifact_directory", "input_scope"}},
+                     "evaluation_status", "track_status", "artifact_directory", "input_scope", "evidence_bundle_id", "component_revisions", "validation_registry"}},
         "study_metadata_contract": metadata,
         "timepoint_interpretation": metadata.get("timepoint_interpretation"),
         "control_design": metadata.get("control_design"),
@@ -788,6 +788,27 @@ def _protein_trajectory_cards(state: Mapping[str, Any], *, maximum: int = 3) -> 
 
 
 def _pathway_context_cards(state: Mapping[str, Any], *, maximum: int = 3) -> list[dict]:
+    inventory = state.get("analysis_evidence_inventory") or {}
+    pinned = inventory.get("pathway_result")
+    if pinned is not None:
+        cards = []
+        for row in pinned.get("pathways", []):
+            key = row["pathway_key"]
+            cards.append({"card_id":key, "category":"pathway_context", "evidence_type":"pathway_context",
+                "claim_tier":"O1", "evidence_ids":[key]+[key+":"+s["condition"] for s in row["scores"]], "citation_ids":[],
+                "reader_summary":f"{row['name']} has a descriptive protein-adjusted contrast of measured members. This is not an activation or enrichment test.",
+                "allowed_verbs":["measured", "summarized", "observed"],
+                "forbidden_interpretations":["pathway activation", "causal pathway", "significant enrichment"],
+                "counterevidence":"Opposing precursor responses and missing members remain in the full inventory; a mean of zero does not establish no response.",
+                "value_records":[typed_record(record_type="pathway_enrichment", entity_id=key,
+                    metric_id=row["metric"], value=score["value"], unit=row["unit"], condition=score["condition"],
+                    denominator={"hit_proteins":score["hit_proteins"],"background_proteins":score["background_proteins"]},
+                    estimator=row["method"],support_status=score["evaluation_status"],
+                    evidence_id=key+":"+score["condition"], source={"bundle_id":inventory.get("evidence_bundle_id"),
+                        "component_revision":(inventory.get("component_revisions") or {}).get("pathway"),
+                        "reference_sha256":pinned.get("source",{}).get("sha256"), "statistical_unit":row["statistical_unit"]})
+                    for score in row["scores"]]})
+        return cards
     facts = [
         _as_mapping(row) for row in state.get("pathway_statistical_evidence") or []
         if isinstance(row, Mapping) and row.get("pathway_name")
@@ -1371,7 +1392,7 @@ def _supporting_context_cards(cards: Iterable[Mapping[str, Any]], *, maximum: in
             continue
         if card.get("evidence_type") == "atlas_observation":
             continue
-        if card.get("category") == "kinase_context" or card.get("evidence_type") in {
+        if card.get("category") in {"kinase_context","pathway_context"} or card.get("evidence_type") in {
             "kinase_candidate", "multiform_comparison", "cluster_profile",
         }:
             ranked.append(dict(card))

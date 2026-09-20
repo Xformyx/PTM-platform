@@ -384,6 +384,8 @@ app.include_router(settings_api.router, prefix="/api")
 app.include_router(orders.router, prefix="/api")
 from app.api import analysis_jobs
 app.include_router(analysis_jobs.router, prefix="/api")
+from app.api import signaling_explorer
+app.include_router(signaling_explorer.router, prefix="/api")
 from app.api import vector_view
 app.include_router(vector_view.router, prefix="/api")
 app.include_router(benchmarks.router, prefix="/api")

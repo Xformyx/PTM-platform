@@ -19,6 +19,7 @@ def write_score_bundle(
     *,
     analysis_artifact_path: str | Path,
     run_metadata: Mapping[str, Any] | None = None,
+    publication_figures: bool = True,
 ) -> dict[str, str]:
     """Persist score JSON, anchor-level TSV, and content-hash provenance."""
 
@@ -50,7 +51,8 @@ def write_score_bundle(
     figure_paths = write_figure2_tsvs(destination, enriched["figure2"])
     artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
     publication = build_publication_sources(enriched, artifact, run_metadata)
-    publication_paths = write_publication_bundle(destination, publication)
+    publication_paths = write_publication_bundle(destination, publication) if publication_figures else {}
+    publication['publication_figure_status'] = 'rendered' if publication_figures else 'not_requested'
     publication_path = destination / "publication_bundle.json"
     publication_path.write_text(json.dumps(publication, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return {

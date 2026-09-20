@@ -22,6 +22,42 @@ from ptm_shared.pathway_expansion import (
 
 logger = logging.getLogger(__name__)
 
+
+def pinned_pathway_view(payload, output_dir):
+    """Render persisted member contrasts; never recalculate an enriched subset."""
+    paths = payload.get("pathways", [])
+    candidates = []
+    for row in paths:
+        finite = [s for s in row["scores"] if s["value"] is not None]
+        if not finite:
+            continue
+        peak = max(finite, key=lambda s:(abs(s["value"]),s["condition"]))
+        genes = sorted({m["gene"] for m in payload.get("memberships",[]) if m["pathway_key"]==row["pathway_key"] and m.get("gene")})
+        candidates.append({"name":row["name"], "pathway_key":row["pathway_key"], "genes":genes,
+            "gene_count":len(genes), "composite_score":abs(peak["value"]), "peak_nes":None, "peak_q":None,
+            "peak_timepoint":peak["condition"], "peak_member_contrast":peak["value"],
+            "metric":row["metric"], "term":"modulated", "template":None,
+            "relation_scope":"protein_membership_not_causal_graph"})
+    candidates.sort(key=lambda p:(-p["composite_score"],p["pathway_key"]))
+    selected = [next(p for p in paths if p["pathway_key"]==c["pathway_key"]) for c in candidates[:25]]
+    graph = None
+    if selected:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+        values = np.array([[s["value"] if s["value"] is not None else np.nan for s in p["scores"]] for p in selected])
+        bound = max(1.0,float(np.nanmax(np.abs(values))))
+        fig, ax = plt.subplots(figsize=(12,max(3,len(selected)*.35)))
+        palette=plt.get_cmap("RdBu_r").copy();palette.set_bad("lightgrey")
+        picture=ax.imshow(values,aspect="auto",cmap=palette,vmin=-bound,vmax=bound)
+        ax.set_yticks(range(len(selected)),[p["name"] for p in selected]);ax.set_xticks(range(values.shape[1]),[s["condition"] for s in selected[0]["scores"]])
+        ax.set_title("Measured pathway member contrasts (descriptive; not activation)")
+        fig.colorbar(picture,ax=ax,label="Mean of protein-median adjusted log2 contrast")
+        fig.tight_layout();target=Path(output_dir)/"pathway_member_contrasts.png";fig.savefig(target,dpi=150);plt.close(fig);graph=str(target)
+    return graph, [p["name"] for p in selected], {"candidates":candidates,"gene_data":{},"expansion":payload,
+        "figure_scope":{"displayed":len(selected),"evaluated_pathways":len(paths),"reason":"figure_budget_only"}}
+
 _DISEASE_KEYWORDS = (
     "infection", "virus", "viral", "cancer", "carcinogenesis",
     "lupus", "amoebiasis", "leishmaniasis", "tuberculosis",

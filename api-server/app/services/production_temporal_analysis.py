@@ -26,7 +26,7 @@ def effective_production_config(requested):
     defaults={k:p.default for k,p in parameters.items() if k not in RESERVED and p.default is not inspect.Parameter.empty}
     if set(requested)-set(defaults)-set(DISPLAY_DEFAULTS):
         raise ValueError("unsupported_tmm_configuration")
-    result={**defaults,**DISPLAY_DEFAULTS,**requested}
+    result={**defaults,**DISPLAY_DEFAULTS,"profile_support_unit":"measurement_group.v1","profile_prior_policy":"observed_support_only.v1",**requested}
     if result["activity_metric"] not in {"weighted_sum","weighted_mean","shrunken_mean"}:
         raise ValueError("invalid_activity_metric")
     if result["candidate_hierarchy_mode"] not in {"off","family_guard"}:
@@ -170,7 +170,7 @@ def render_result(scores, sidecar, manifest, inputs):
     return {"analysis_manifest_id": manifest["analysis_manifest_id"], "analysis_scope": manifest["analysis_scope"], "input_scope":manifest.get("input_scope", {}),
             "coverage": coverage, "conditions": manifest["conditions"], "kinase_scores": rows,
             "execution_status": "completed", "evaluation_status": scores["track_status"]["relative"],
-            "scoring_method": "temporal_mixture_model_full_precursor.v2", "allocation_version": ALLOCATION_VERSION,
+            "scoring_method": "temporal_mixture_model_full_precursor.v3", "allocation_version": ALLOCATION_VERSION,
             "track_status": scores["track_status"], "tmm_config":effective, "temporal_cascade":cascade, "evidence_inventory_artifact": "candidates.json",
             "allocation_artifact": "score.json", "trajectory_artifact": "trajectory_diagnostics.json",
             "temporal_ptm_protein_analysis": summarize_temporal_ptm_protein_analysis(sidecar, artifact_path="temporal_diagnostics.json"),
