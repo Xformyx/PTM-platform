@@ -2886,3 +2886,26 @@
 - **결정성:** 새 seed·solver·dtype 없음. 동일 양성 intensity 합과 기존
   PAIR_MIN_REPLICATES / TIMEPOINTS / COMPLETENESS.
 
+### [2026-09-20] Order 80 전처리 SIGKILL — mapping·gene map·vector 스캔
+
+- **분류:** 구현
+- **대상:** `workers/preprocessing/core/ptm_quantification.py`
+  (`_mapping_assertion`, `_build_diann_gene_map`,
+  `calculate_unadjusted_condition_comparisons`, `create_ptm_vector_data`,
+  `_protein_group_row`)
+- **구현 대상 설계:** 신규 — 운영 OOM 정정. 2026-09-20
+  `Insulin_Signaling_V3_260919_Codex` (Order 80) 가 site-level 이후
+  SIGKILL로 두 번 죽은 뒤 선언. 정량 공식·PAIR_MIN_* 불변.
+- **사전등록 상태:** 해당 없음 (실행 경로). primary 승격 금지.
+- **내용:** `_mapping_assertion`이 호출마다 54,495개 FASTA dict를 복사하지
+  않고 `fasta_reference_candidates`를 재사용하며 precursor 키로 캐시한다.
+  DIA-NN gene map은 PR 177k `iterrows` 대신 중복 제거 배열 순회.
+  unadjusted는 `_source_fields`를 treatment 루프 밖으로 올린다.
+  vector 조립의 조건별 DataFrame 재스캔을 lookup으로 바꾼다.
+  PG denominator는 Protein.Group 인덱스 조회.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 계산 순서·estimator·결측 규칙은 같다. 속도·메모리만 줄인다.
+  이 변경으로 occupancy나 Log2FC가 달라졌다고 주장하지 않는다.
+- **결정성:** 새 seed·solver·dtype 없음. 동일 입력은 동일 mapping payload와
+  동일 가중합 입력을 만든다.
+
