@@ -1,3 +1,4 @@
+import {SignalingEvidenceExplorer} from "../components/SignalingEvidenceExplorer";
 import {savedViewSettings} from "../lib/vectorView";
 import {VirtualFeatureList} from "../components/VirtualFeatureList";
 import {FullTrajectoryBrowser} from "../components/FullTrajectoryBrowser";
@@ -3119,7 +3120,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { o
   );
 }
 
-function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", orderStatus }: { orderId: number; singleTimePoint?: boolean; ptmType?: string; orderStatus?: string }) {
+function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", orderStatus, initialN }: { orderId: number; singleTimePoint?: boolean; ptmType?: string; orderStatus?: string; initialN?: unknown }) {
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3156,10 +3157,8 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
           <TabsTrigger
             value="timeseries"
             className="gap-2"
-            disabled={singleTimePoint}
-            title={singleTimePoint ? "Single time point — time-series not available" : undefined}
           >
-            <TrendingUp className="h-3.5 w-3.5" /> {isUbi ? "Top N Ubi Site Time-series" : "Top N PTM Time-series"}
+            <TrendingUp className="h-3.5 w-3.5" /> Signaling Explorer
           </TabsTrigger>
         </TabsList>
 
@@ -3199,16 +3198,14 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
-                <TrendingUp className="h-4 w-4" /> {isUbi ? "Top N Ubiquitylation Site Time-series" : "Top N PTM Time-series"}
+                <TrendingUp className="h-4 w-4" /> 신호전달 근거 탐색
               </CardTitle>
               <p className="text-xs text-muted-foreground">
-                {isUbi
-                  ? "시간별 Ubiquitylation site 변화 추이. 마우스를 올리면 site명과 값을 확인할 수 있습니다."
-                  : "시간별 PTM 변화 추이. 마우스를 올리면 PTM명과 값을 확인할 수 있습니다."}
+                완료된 분석의 경로·관측·조절 후보·근거를 탐색합니다. 시간점이 하나여도 유효한 관측을 조회할 수 있습니다.
               </p>
             </CardHeader>
             <CardContent>
-              <TopNTimeSeriesPlot key={orderId} orderId={orderId} ptmType={ptmType} />
+              <SignalingEvidenceExplorer key={orderId} orderId={orderId} initialN={initialN} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -5216,7 +5213,7 @@ export default function OrderDetail() {
         <TabsContent value="vector-plot" className="mt-4">
           <div className="flex gap-4">
             <div className={chatOpen ? "flex-1 min-w-0" : "w-full"}>
-              <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} orderStatus={order.status} />
+              <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} orderStatus={order.status} initialN={order.report_options?.top_n_ptms} />
             </div>
 
             <div className={`${chatOpen ? "w-[420px]" : "w-10"} flex-shrink-0 h-[calc(100vh-200px)] sticky top-4 rounded-xl border border-border shadow-lg overflow-hidden`}>

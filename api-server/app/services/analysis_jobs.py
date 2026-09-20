@@ -28,6 +28,7 @@ def _runtime_signature():
     shared = Path(ptm_shared.__file__).parent
     services = Path(__file__).parent
     paths = [("ptm_shared/" + p.name, p) for p in shared.glob("*.py")]
+    paths += [("ptm_shared/"+p.name,p) for p in shared.glob("*.R")]
     paths += [("services/" + name, services/name) for name in (
         "analysis_jobs.py", "analysis_job_recovery.py", "analysis_universe.py", "production_temporal_analysis.py",
         "production_tmm_executor.py", "temporal_kinase_scoring.py")]
@@ -37,7 +38,7 @@ def _runtime_signature():
 
 def reference_signature():
     return {key: file_sha256(path) if (path := os.getenv(key)) and Path(path).is_file() else "unavailable"
-            for key in ("PTM_MAPPING_SOURCE_BUNDLE_PATH", "PTM_RELATION_SOURCE_BUNDLE_PATH")}
+            for key in ("PTM_MAPPING_SOURCE_BUNDLE_PATH", "PTM_RELATION_SOURCE_BUNDLE_PATH", "PTM_PATHWAY_SOURCE_BUNDLE_PATH")}
 
 
 def job_payload(job):
@@ -69,14 +70,28 @@ async def submit_analysis(db, order, user_id, request, *, enqueue=True):
         effective_tmm = effective_production_config(request.get("tmm_config") or {})
     except (ValueError, TypeError) as exc:
         raise HTTPException(422, str(exc)) from exc
+    from ptm_shared.kinase_model_comparison import MODELS
+    from ptm_shared.discovery_context import discovery_context, VERSION as CONTEXT_VERSION
+    inference_mode=request.get("inference_mode","discovery_blind")
+    if inference_mode not in {"discovery_blind","context_assisted"}:
+        raise HTTPException(422,"unsupported_inference_mode")
+    if inference_mode=="discovery_blind" and effective_tmm["profile_prior_policy"]!="observed_support_only.v1":
+        raise HTTPException(422,"prior_profile_requires_context_assisted_revision")
+    comparisons = request.get("comparison_models", [])
+    if not isinstance(comparisons, list) or any(not isinstance(m,str) or m not in MODELS | {"tmm_magnitude.v1","proda_label_free.v1","time_window_nnls.v1"} for m in comparisons):
+        raise HTTPException(422, "unsupported_comparison_model")
+    context={**(frozen.get("config", {}).get("experimental_context") or {}),
+        **(frozen.get("config", {}).get("analysis_context") or {}), **(order.analysis_context or {}),
+        "sample_manifest":frozen.get("config", {}).get("sample_manifest") or (order.analysis_context or {}).get("sample_manifest", {})}
     config = {"analysis_scope": scope, "tmm_config": effective_tmm,
+              "inference_mode":inference_mode,"context_policy":CONTEXT_VERSION,
+              "comparison_models": sorted(set(comparisons)),
+              "comparison_package_versions":{"proDA":os.getenv("PTM_PRODA_VERSION")} if "proda_label_free.v1" in comparisons else {},
               "analysis_feature_ids": sorted(set(request.get("analysis_feature_ids") or [])) if scope == "explicit_subset" else [],
               "subset_reason": request.get("subset_reason") if scope == "explicit_subset" else None,
               "allocation_version": ALLOCATION_VERSION, "rng_policy": RNG_POLICY_VERSION,
               "runtime": runtime_signature(), "references": reference_signature(),
-              "analysis_context": {**(frozen.get("config", {}).get("experimental_context") or {}),
-                  **(frozen.get("config", {}).get("analysis_context") or {}), **(order.analysis_context or {}),
-                  "sample_manifest": frozen.get("config", {}).get("sample_manifest") or (order.analysis_context or {}).get("sample_manifest", {})},
+              "analysis_context": discovery_context(context) if inference_mode=="discovery_blind" else context,
               "parent_generation": frozen.get("parent_generation"), "input_options": frozen.get("config", {}).get("analysis_options", {}), "ptm_type": order.ptm_type}
     digest = signature({"order_id": order.id, "input_revision": frozen["input_revision"], "config": config})
     # An Order row already exists and is the admission lock even before its head

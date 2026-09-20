@@ -145,6 +145,11 @@ def _assigned_ids(plan: Mapping[str, Any] | None, section_type: str) -> tuple[se
         if not section_findings or finding.get("finding_id") in section_findings
         for evidence_id in finding.get("evidence_ids") or []
     }
+    # Supporting pathway/kinase cards are a separate scope from named findings.
+    # Their plan binding must survive the strongest compaction stage too.
+    categories=set((SECTION_STORY_CONTRACT.get(section_type) or {}).get("categories", ()))
+    evidence_ids.update(str(eid) for context in plan.get("supporting_contexts") or []
+        if context.get("category") in categories for eid in context.get("evidence_ids") or [])
     figure_keys = {
         str(key)
         for finding in plan.get("key_findings") or []

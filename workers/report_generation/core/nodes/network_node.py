@@ -1962,30 +1962,36 @@ def _run_network_analysis_inner(state: dict) -> dict:
     fig1_pathway_names = []
     pathway_expansion_payload = None
     expansion = None
-    try:
-        from .pathway_figure import run_pathway_expansion
-        expansion = run_pathway_expansion(
-            parsed_ptms,
-            enriched_data,
-            network_data,
-            output_dir,
-            _load_unified_protein_fc,
-        )
-        pathway_expansion_payload = expansion.to_payload()
-        pathway_graph_path, fig1_pathway_names, _payload = _generate_pathway_distribution_graph(
+    pinned_pathway = (state.get("analysis_evidence_inventory") or {}).get("pathway_result")
+    if pinned_pathway is not None:
+        from .pathway_figure import pinned_pathway_view
+        pathway_graph_path, fig1_pathway_names, pathway_candidates = pinned_pathway_view(pinned_pathway, output_dir)
+        pathway_expansion_payload = pinned_pathway
+    else:
+        try:
+            from .pathway_figure import run_pathway_expansion
+            expansion = run_pathway_expansion(
+                parsed_ptms,
+                enriched_data,
+                network_data,
+                output_dir,
+                _load_unified_protein_fc,
+            )
+            pathway_expansion_payload = expansion.to_payload()
+            pathway_graph_path, fig1_pathway_names, _payload = _generate_pathway_distribution_graph(
+                parsed_ptms, enriched_data, network_data, output_dir, expansion=expansion
+            )
+            if _payload:
+                pathway_expansion_payload = _payload
+        except Exception as pw_err:
+            logger.error(f"[NET-NODE] Pathway NES graph failed: {pw_err}", exc_info=True)
+            pathway_graph_path = None
+            fig1_pathway_names = []
+            expansion = None
+
+        pathway_candidates = _build_pathway_candidates(
             parsed_ptms, enriched_data, network_data, output_dir, expansion=expansion
         )
-        if _payload:
-            pathway_expansion_payload = _payload
-    except Exception as pw_err:
-        logger.error(f"[NET-NODE] Pathway NES graph failed: {pw_err}", exc_info=True)
-        pathway_graph_path = None
-        fig1_pathway_names = []
-        expansion = None
-
-    pathway_candidates = _build_pathway_candidates(
-        parsed_ptms, enriched_data, network_data, output_dir, expansion=expansion
-    )
     logger.info(
         f"[NET-NODE] Pathway candidates built: "
         f"{len(pathway_candidates.get('candidates', []))} candidates"

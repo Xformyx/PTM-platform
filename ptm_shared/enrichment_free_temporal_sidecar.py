@@ -915,6 +915,8 @@ def build_production_temporal_ptm_protein_analysis(
         ordered_conditions,
         metadata=metadata,
         config={**dict(WAVE_CONFIG), "threshold_source": CONTRACT_VERSION},
+        replicate_time_series=_paired_wave_replicates(raw_replicate_fc_series, ordered_conditions),
+        paired_biological_units=True,
     )
     wave_contract["analysis_scope"] = "shared_complete_case_no_imputation"
     wave_contract["input_projection_provenance"] = input_projection
@@ -982,6 +984,24 @@ def build_production_temporal_ptm_protein_analysis(
     sidecar["provenance"]["missing_value_treatment"] = input_projection["missing_value_policy"]
     sidecar["provenance"]["strict_production_parity"] = "shared_projection_contract_applied"
     return sidecar
+
+
+def _paired_wave_replicates(raw, conditions):
+    """Only verified paired biological units; never manufacture replicates from means."""
+    import numpy as np
+    from ptm_shared.probabilistic_cowave import _parse_timepoint_label
+    expected = [_parse_timepoint_label(c) for c in conditions]
+    result = {}
+    for key, record in (raw or {}).items():
+        units = record.get("biological_units", [])
+        matrix = np.asarray(record.get("matrix", []), dtype=float)
+        if (record.get("estimator_id") != "paired_biological_sample_ratio_contrast.v1"
+                or record.get("timepoints") != expected or None in expected
+                or matrix.ndim != 2 or matrix.shape != (len(units), len(conditions))
+                or len(set(units)) != len(units) or len(units) < 2 or not np.isfinite(matrix).all()):
+            continue
+        result[key] = {c: matrix[:, i].tolist() for i, c in enumerate(conditions)}
+    return result
 
 
 def _compact_temporal_precedence(sidecar: Mapping[str, Any]) -> dict[str, Any]:

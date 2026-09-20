@@ -1101,6 +1101,10 @@ def run_report_generation(self, order_id: int, config: dict):
         from report_generation.core.report_finalization import finalize_report_revision
         finalization = finalize_report_revision(
             register_immutable=True,
+            source_revisions=[{"role":"analysis", "revision_id":analysis_evidence_inventory["analysis_revision"],
+                "input_revision":analysis_evidence_inventory["input_revision"],
+                "evidence_bundle_id":analysis_evidence_inventory.get("evidence_bundle_id"),
+                "component_revisions":analysis_evidence_inventory.get("component_revisions")}] if analysis_evidence_inventory else [],
             source_paths=final_state.get("report_files") or [], output_dir=order_output,
             correctness=final_state.get("report_output_correctness"), manifest=artifact_manifest,
             figure_manifest=final_state.get("figure_manifest") or {}, reader_mode=reader_authoring_shadow,
@@ -1112,6 +1116,13 @@ def run_report_generation(self, order_id: int, config: dict):
         )
         artifact_manifest = finalization["manifest"]
         report_release = finalization["release"]
+        if analysis_evidence_inventory and analysis_evidence_inventory.get("evidence_bundle_id") and artifact_manifest.get("revision_id"):
+            from ptm_shared.run_evidence_bundle import publish_report_bundle
+            _completed_bundle = publish_report_bundle(order_output,
+                order_output/analysis_evidence_inventory["artifact_directory"], order_id=order_id,
+                report_revision=artifact_manifest["revision_id"],
+                before_publish=lambda: abort_if_superseded(order_id))
+            final_state["evidence_bundle_id"] = _completed_bundle["bundle_id"]
         final_export_allowed = report_artifact_export_allowed(report_release)
         final_state["pre_export_release"] = finalization["pre_export_release"]
         final_state["report_artifact_manifest"] = artifact_manifest

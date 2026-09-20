@@ -16,7 +16,9 @@ def prepare_analysis(output_dir, ptm_type, context=None, *, config=None, scope="
     from pathlib import Path
     frozen_path = Path(output_dir) / "manifest.json"
     frozen = json.loads(frozen_path.read_text()) if frozen_path.is_file() else {}
-    snapshot["input_scope"] = frozen.get("config", {}).get("analysis_options") or {"analysis_mode":"legacy_unknown"}
+    frozen_config = frozen.get("config", {})
+    snapshot["input_scope"] = {**(frozen_config.get("analysis_options") or {}),
+                              "analysis_mode": frozen_config.get("analysis_mode", "legacy_unknown")}
     modules, sources = build_full_candidate_modules(snapshot, **paths)
     from pathlib import Path
     references = {k: file_sha256(p) if p and Path(p).is_file() else "unavailable"
@@ -28,8 +30,13 @@ def prepare_analysis(output_dir, ptm_type, context=None, *, config=None, scope="
 
 
 def module_response(manifest, *, compact=False):
-    modules = [{**m, "total_count": len(m["members"]), "confirmed_count": 0,
-                "inferred_count": len(m["members"]), "source_count": len(m.get("sources", [])), "cowave_overlap": [],
+    def direct(member):
+        return "curated_site_candidate" in member.get("evidence_roles", [])
+    modules = [{**m, "total_count": len(m["members"]), "confirmed_count": sum(direct(x) for x in m["members"]),
+                "confirmed_count_semantics": "curated_site_candidates_not_current_experiment_confirmation",
+                "inferred_count": sum(not direct(x) for x in m["members"]),
+                "evidence_role_counts": {role:len({x["key"] for x in m["members"] if role in x.get("evidence_roles",[])}) for role in sorted({r for x in m["members"] for r in x.get("evidence_roles",[])})},
+                "source_count": len(m.get("sources", [])), "cowave_overlap": [],
                 "members": [] if compact else [{**x, "evidence": "; ".join(x.get("evidence_roles", []))} for x in m["members"]],
                 "members_status":"paged" if compact else "complete"}
                for m in manifest["candidate_modules"]]
@@ -40,7 +47,8 @@ def module_response(manifest, *, compact=False):
             "inventory_status":"paged" if compact else "complete",
             "annotation_details": [], "summary": {**manifest["coverage"], "analysis_scope": manifest["analysis_scope"],
                 "total_ptms":manifest["coverage"]["analysis_features"],"total_kinase_modules":len(modules),
-                "total_confirmed":0,"total_inferred":manifest["coverage"]["mapped_features"],
+                "total_confirmed":len({x["key"] for m in manifest["candidate_modules"] for x in m["members"] if direct(x)}),
+                "total_inferred":len({x["key"] for m in manifest["candidate_modules"] for x in m["members"] if not direct(x)}),
                 "total_unassigned":manifest["coverage"]["analysis_features"]-manifest["coverage"]["mapped_features"],
                 "status_counts":{"unassigned":manifest["coverage"]["analysis_features"]-manifest["coverage"]["mapped_features"]},
                 "top_kinases":[]},

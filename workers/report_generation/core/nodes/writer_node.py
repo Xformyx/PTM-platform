@@ -483,9 +483,15 @@ def run_section_writing(state: dict) -> dict:
         from ..finding_literature import cards_for_selected_findings, retrieve_finding_literature
         selected_ids = {c["feature_identity"]["reader_feature_id"] for c in authoring_packet.get("reader_cards") or [] if (c.get("feature_identity") or {}).get("reader_feature_id")}
         selected_cards = cards_for_selected_findings(authoring_packet.get("reader_cards") or [], selected_ids)
-        retrieval = retrieve_finding_literature(selected_cards, retriever, context,
+        retrieval_context=context
+        if (state.get("analysis_evidence_inventory") or {}).get("inference_mode")=="discovery_blind":
+            from ptm_shared.discovery_context import discovery_context
+            retrieval_context=discovery_context(context)
+        retrieval = retrieve_finding_literature(selected_cards, retriever, retrieval_context,
             llm=llm if llm_available else None, policy=report_config.get("finding_review_policy"))
-        finding_references = retrieval.pop("references")
+        # Keep the retrieved spans in the sealed packet even when citation
+        # formatting projects references down to bibliography metadata.
+        finding_references = retrieval.get("references", [])
         state["finding_literature_retrieval"] = retrieval
         authoring_packet = build_authoring_packet(state, temporal_evidence_packet=temporal_evidence_packet,
             biological_synthesis_packet=biological_synthesis_packet, references=finding_references + all_references)

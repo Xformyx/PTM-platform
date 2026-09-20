@@ -36,7 +36,7 @@ export function FullTrajectoryBrowser({orderId,axis}:{orderId:number;axis:QuantA
    manifest.conditions.forEach((condition,j)=>{const v=values.get(condition);if(v===undefined){previous=false;return;}const x=12+j*736/Math.max(1,manifest.conditions.length-1),y=308-(v-low)*296/Math.max(high-low,1e-9);if(previous)ctx.lineTo(x,y);else ctx.moveTo(x,y);previous=true;});ctx.stroke();
    manifest.conditions.forEach((condition,j)=>{const v=values.get(condition);if(v===undefined)return;const x=12+j*736/Math.max(1,manifest.conditions.length-1),y=308-(v-low)*296/Math.max(high-low,1e-9);ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();});}
  },[numericIndex,manifest,distribution,checked]);
- if(error)return <p role="alert">{error} · Scatter의 표시 인덱스 준비 버튼으로 과거 주문을 준비할 수 있습니다.</p>;
+ if(error)return <p role="alert">전체 trajectory 인덱스를 조회할 수 없습니다. 기존 TSV 관측은 Signaling Explorer의 구버전 관측 보기와 Scatter에서 확인할 수 있습니다.</p>;
  if(!manifest||!page||!distribution)return <p>전체 분포와 trajectory 페이지를 조회 중입니다.</p>;
  return <div className="space-y-3" data-testid="full-trajectory-browser"><p>전체 관측 feature {distribution.eligible_features} · 원본 행 {manifest.source_rows} · 현재 페이지 {page.feature_ids.length} · 체크 {Object.values(checked).filter(Boolean).length}</p>
  <p>측정값: 전처리 vector · {axis} log2 contrast · 전체 관측 분포는 집계이며 개별 precursor가 아닙니다.</p>

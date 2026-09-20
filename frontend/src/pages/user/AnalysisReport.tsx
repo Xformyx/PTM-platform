@@ -1,6 +1,6 @@
 import { VectorScatterPlots } from "../../components/VectorScatterPlots";
 import { finite } from "../../lib/quantitation";
-import { TopNTimeSeriesPlot } from "../OrderDetail";
+import {SignalingEvidenceExplorer} from "../../components/SignalingEvidenceExplorer";
 import { finiteExtent } from "../../lib/vectorView";
 /**
  * AnalysisReport — Result visualization + Mekii AI chat for general users.
@@ -347,7 +347,7 @@ export default function AnalysisReport() {
               </TabsTrigger>
               <TabsTrigger value="modules" className="gap-1.5">
                 <Boxes className="h-3.5 w-3.5" />
-                Modules
+                Signaling Explorer
               </TabsTrigger>
             </TabsList>
 
@@ -367,7 +367,7 @@ export default function AnalysisReport() {
               <TimelineTab orderId={order.id} order={order} />
             </TabsContent>
             <TabsContent value="modules">
-              <ModulesTab orderId={order.id} />
+              <ModulesTab orderId={order.id} initialN={order.report_options?.top_n_ptms} />
             </TabsContent>
           </Tabs>
         )}
@@ -735,7 +735,7 @@ function KinaseActivityTab({ orderId }: { orderId: number }) {
           <CardContent>
             <p className="text-sm text-muted-foreground">
               Within-cluster concordance analysis annotates observed sampled-interval trajectory patterns within fixed temporal phosphosite clusters.
-              See the Modules tab for cluster and footprint diagnostics; this does not establish shared regulation or causal order.
+              See the Signaling Explorer tab for cluster and footprint diagnostics; this does not establish shared regulation or causal order.
             </p>
           </CardContent>
         </Card>
@@ -838,118 +838,6 @@ function TimelineTab({ orderId, order }: { orderId: number; order: Order }) {
   );
 }
 
-function ModulesTab({ orderId }: { orderId: number }) {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api
-      .get<any>(`/orders/${orderId}/vector-plot-data?mode=all_observed`)
-      .then((d) => setData(d))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [orderId]);
-
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
-          <p className="text-sm text-muted-foreground">Loading module data...</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const topNPtms = data?.top_n_ptms || [];
-  const vectorData = data?.vector_data || [];
-  const receptors = data?.inferred_receptors || [];
-
-  if (!topNPtms.length) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center py-12">
-          <Boxes className="h-12 w-12 text-muted-foreground/40 mb-3" />
-          <p className="text-sm text-muted-foreground">
-            Kinase module data is not available for this analysis.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  // Show a summary of top PTMs and their protein classes
-  return (
-    <div className="space-y-4">
-      <TopNTimeSeriesPlot key={orderId} orderId={orderId} />
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Boxes className="h-4 w-4" />
-            Top N PTM Sites ({topNPtms.length})
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Measured precursor features; annotation does not establish statistical support
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="max-h-[400px] overflow-y-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-card">
-                <tr className="border-b">
-                  <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Gene</th>
-                  <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Position</th>
-                  <th className="text-left py-2 px-2 text-xs font-medium text-muted-foreground">Protein Class</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topNPtms.slice(0, 50).map((ptm: any, i: number) => (
-                  <tr key={i} className="border-b border-muted/50">
-                    <td className="py-1.5 px-2 font-mono text-xs">{ptm.gene}</td>
-                    <td className="py-1.5 px-2 font-mono text-xs">{ptm.position}</td>
-                    <td className="py-1.5 px-2">
-                      {ptm.protein_class ? (
-                        <Badge variant="outline" className="text-[10px]">
-                          {ptm.protein_class.role}
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {topNPtms.length > 50 && (
-            <p className="text-xs text-muted-foreground mt-2 text-center">
-              Showing 50 of {topNPtms.length} PTM sites
-            </p>
-          )}
-        </CardContent>
-      </Card>
-      {/* Receptor summary */}
-      {receptors.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Upstream Receptor Summary</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {receptors.slice(0, 8).map((rec: any, i: number) => (
-                <Badge key={i} variant="outline" className="text-xs gap-1">
-                  {rec.name} ({rec.downstream_ptm_count} PTMs)
-                </Badge>
-              ))}
-              {receptors.length > 8 && (
-                <Badge variant="secondary" className="text-xs">
-                  +{receptors.length - 8} more
-                </Badge>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
+function ModulesTab({ orderId, initialN }: { orderId: number; initialN?: unknown }) {
+  return <SignalingEvidenceExplorer key={orderId} orderId={orderId} initialN={initialN}/>;
 }

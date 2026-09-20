@@ -7,7 +7,7 @@ from .report_artifact_manifest import finalize_rendered_artifacts
 def finalize_report_revision(*, source_paths, output_dir, correctness, manifest, figure_manifest,
                              reader_mode, requested_formats=("docx", "html"), references=(), exporters=None,
                              report_mode_contract=None, writer_effective_mode=None, graph_effective_mode=None,
-                             register_immutable=False):
+                             register_immutable=False, source_revisions=()):
     release_kwargs = dict(
         report_mode_contract=report_mode_contract,
         writer_effective_mode=writer_effective_mode,
@@ -106,7 +106,7 @@ def finalize_report_revision(*, source_paths, output_dir, correctness, manifest,
     files = sources + [str(p) for p in source_paths if p and Path(p).suffix not in {".md", ".docx", ".html"} and Path(p).is_file()] + rendered
     if register_immutable:
         from ptm_shared.report_revision import register_revision
-        revision = register_revision(output_dir, files=files, manifest=sealed, release=final, references=references)
+        revision = register_revision(output_dir, files=files, manifest=sealed, release=final, references=references, source_revisions=source_revisions)
         files = [str(Path(output_dir) / a['filename']) for a in revision['artifacts'] if a['role'] == 'report']
         sealed['revision_id'] = revision['revision_id']
         final['revision_id'] = revision['revision_id']
