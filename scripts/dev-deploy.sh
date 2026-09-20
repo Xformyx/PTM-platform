@@ -49,6 +49,7 @@ APP_STACK_SERVICES=(
   celery-worker-preprocessing
   celery-worker-rag
   celery-worker-report
+  production-tmm-worker
   benchmark-tmm-runner
   benchmark-runner
   gateway
@@ -252,7 +253,7 @@ _image_input_changed() {
 _build_services_for() {
   local component="$1"
   case "$component" in
-    api-server)    echo "api-server benchmark-tmm-runner" ;;
+    api-server)    echo "api-server production-tmm-worker benchmark-tmm-runner" ;;
     mcp-server)    echo "mcp-server" ;;
     frontend)      echo "frontend" ;;
     workers-image|workers) echo "celery-worker-preprocessing" ;;
@@ -266,7 +267,7 @@ _build_services_for() {
 _restart_services_for() {
   local component="$1"
   case "$component" in
-    api-server)            echo "api-server benchmark-tmm-runner" ;;
+    api-server)            echo "api-server production-tmm-worker benchmark-tmm-runner" ;;
     mcp-server)            echo "mcp-server" ;;
     frontend)              echo "frontend" ;;
     worker-report)         echo "celery-worker-report" ;;
@@ -275,7 +276,7 @@ _restart_services_for() {
     workers-shared|workers-image|workers)
       echo "${WORKER_SERVICES[*]}" ;;
     ptm-shared)
-      echo "api-server ${WORKER_SERVICES[*]} benchmark-tmm-runner" ;;
+      echo "api-server ${WORKER_SERVICES[*]} production-tmm-worker benchmark-tmm-runner" ;;
     benchmarking)          echo "benchmark-runner" ;;
     gateway)               echo "gateway" ;;
     dotenv|compose-file)   echo "${APP_STACK_SERVICES[*]}" ;;
@@ -304,7 +305,10 @@ Worker trees restart only their queue:
   workers/preprocessing/**      -> celery-worker-preprocessing
   workers/rag_enrichment/**     -> celery-worker-rag
   workers/common/**             -> all three report/rag/preprocessing workers
-  ptm_shared/**                 -> API + the three workers + benchmark-tmm
+  ptm_shared/**                 -> API + the three workers + production-tmm + benchmark-tmm
+
+production-tmm-worker is always brought up (compose up -d, no restart)
+even when no source files changed. See docs/BUILD_AND_DEPLOY.md §5.
 EOF
       exit 0
       ;;
@@ -333,6 +337,48 @@ fi
 echo "=== PTM Platform Dev Deploy (버전 변경 없음) ==="
 $DRY_RUN && echo "Mode: dry-run (no build, restart, or marker update)"
 
+# VERSION 파일에서 플랫폼 SemVer 읽기 (올리지 않음). 모든 이미지가 동일 태그 사용.
+_v=$(cat "$VERSION_FILE" 2>/dev/null | tr -d ' \n\r' || echo "0.0.0")
+IFS='.' read -r _major _minor _patch _ <<< "$_v"
+_major=$(printf "%d" $((10#${_major//[^0-9]/:-0})))
+_minor=$(printf "%d" $((10#${_minor//[^0-9]/:-0})))
+_patch=$(printf "%d" $((10#${_patch//[^0-9]/:-0})))
+_v="${_major}.${_minor}.${_patch}"
+export VERSION="$_v"
+export VERSION_API="$_v"
+export VERSION_MCP="$_v"
+export VERSION_FRONTEND="$_v"
+export VERSION_WORKERS="$_v"
+
+COMPOSE_CMD=(docker compose)
+if [[ -f "$REPO_ROOT/docker-compose.gpu.yml" ]] && _use_gpu_compose; then
+  COMPOSE_CMD+=(--file docker-compose.yml --file docker-compose.gpu.yml)
+  echo "Compose: GPU overlay (NVIDIA)"
+elif [[ -f "$REPO_ROOT/docker-compose.gpu.yml" ]]; then
+  echo "Compose: base only (no NVIDIA — set COMPOSE_GPU=true on GPU servers)"
+fi
+
+# docs/BUILD_AND_DEPLOY.md §5 — start if missing; do not restart a live TMM job.
+_ensure_production_tmm_worker() {
+  local image="ptm-production-tmm-worker:${VERSION_API}"
+  local api_image="ptm-api-server:${VERSION_API}"
+  echo "Ensuring production-tmm-worker is up"
+  if $DRY_RUN; then
+    echo "  dry-run: compose up -d production-tmm-worker"
+    return 0
+  fi
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    if docker image inspect "$api_image" >/dev/null 2>&1; then
+      echo "  tagging $api_image -> $image"
+      docker tag "$api_image" "$image"
+    else
+      echo "  building production-tmm-worker (no API image to tag)"
+      "${COMPOSE_CMD[@]}" build production-tmm-worker
+    fi
+  fi
+  "${COMPOSE_CMD[@]}" up -d production-tmm-worker
+}
+
 # 변경된 컴포넌트
 if $FORCE_ALL; then
   # 이미지 4종 전체 빌드 + 게이트웨이까지 스택 재기동
@@ -346,6 +392,7 @@ else
       echo "  Last dev-deploy commit: $(cat "$LAST_DEV_COMMIT")"
     fi
     echo "  Current HEAD: $(git rev-parse --short HEAD 2>/dev/null || echo '?')"
+    _ensure_production_tmm_worker
     exit 0
   fi
   echo "Changed: ${CHANGED[*]}"
@@ -354,19 +401,6 @@ else
   fi
   echo "  Current HEAD: $(git rev-parse --short HEAD 2>/dev/null || echo '?')"
 fi
-
-# VERSION 파일에서 플랫폼 SemVer 읽기 (올리지 않음). 모든 이미지가 동일 태그 사용.
-_v=$(cat "$VERSION_FILE" 2>/dev/null | tr -d ' \n\r' || echo "0.0.0")
-IFS='.' read -r _major _minor _patch _ <<< "$_v"
-_major=$(printf "%d" $((10#${_major//[^0-9]/:-0})))
-_minor=$(printf "%d" $((10#${_minor//[^0-9]/:-0})))
-_patch=$(printf "%d" $((10#${_patch//[^0-9]/:-0})))
-_v="${_major}.${_minor}.${_patch}"
-export VERSION="$_v"
-export VERSION_API="$_v"
-export VERSION_MCP="$_v"
-export VERSION_FRONTEND="$_v"
-export VERSION_WORKERS="$_v"
 
 # GIT_HASH / GIT_DATE 를 빌드 전에 미리 기록 (docker bind mount가 파일을 필요로 함)
 if ! $DRY_RUN; then
@@ -385,14 +419,6 @@ for c in "${CHANGED[@]}"; do
   BUILD_SERVICES+=($(_build_services_for "$c"))
 done
 BUILD_SERVICES=($(printf '%s\n' "${BUILD_SERVICES[@]}" | awk 'NF && !seen[$0]++'))
-
-COMPOSE_CMD=(docker compose)
-if [[ -f "$REPO_ROOT/docker-compose.gpu.yml" ]] && _use_gpu_compose; then
-  COMPOSE_CMD+=(--file docker-compose.yml --file docker-compose.gpu.yml)
-  echo "Compose: GPU overlay (NVIDIA)"
-elif [[ -f "$REPO_ROOT/docker-compose.gpu.yml" ]]; then
-  echo "Compose: base only (no NVIDIA — set COMPOSE_GPU=true on GPU servers)"
-fi
 
 if [[ ${#BUILD_SERVICES[@]} -eq 0 ]]; then
   echo "Build: (skip — no image rebuild needed)"
@@ -419,6 +445,8 @@ else
     "${COMPOSE_CMD[@]}" up -d "${RESTART_SERVICES[@]}"
   fi
 fi
+
+_ensure_production_tmm_worker
 
 if $DRY_RUN; then
   echo "Dry-run complete. (Version: $_v)"

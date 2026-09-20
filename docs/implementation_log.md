@@ -2923,3 +2923,23 @@
 - **해석 한계:** 결측 gene은 이전과 같이 map에 넣지 않는다. 정량값을 바꾸지 않는다.
 - **결정성:** 새 임계 없음
 
+### [2026-09-21] production TMM 워커 부재 fail-fast와 대기 heartbeat
+
+- **분류:** 구현
+- **대상:** `workers/common/production_analysis.py`,
+  `scripts/dev-deploy.sh`, `scripts/deploy.sh`,
+  `docs/BUILD_AND_DEPLOY.md` §5
+- **구현 대상 설계:** `docs/BUILD_AND_DEPLOY.md` §5 (2026-09-21 선언)
+- **사전등록 상태:** 해당 없음 (운영 게이트). primary 승격 금지.
+- **내용:** `production_tmm` consumer가 30초 없으면 enqueue 전에 실패한다.
+  대기 중 consumer가 사라지면 같은 창으로 실패한다. 120초마다
+  `order_logs` running 한 줄을 남겨 워치독 60분 Halted 오인을 막는다.
+  `dev-deploy.sh`/`deploy.sh`는 소스 변경이 없어도
+  `compose up -d production-tmm-worker`를 실행한다. 실행 중 job은
+  restart하지 않는다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 워커 유무와 로그 heartbeat만 다룬다. TMM 점수·τ·kinase
+  귀속을 바꾸지 않는다.
+- **결정성:** 새 seed·solver·dtype 없음. `CONSUMER_WAIT_SECONDS=30`,
+  `HEARTBEAT_SECONDS=120`, `JOIN_TIMEOUT_SECONDS=21780`(기존).
+

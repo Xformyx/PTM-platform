@@ -45,6 +45,23 @@ export_image_tags() {
   export VERSION_WORKERS="$1"
 }
 
+# docs/BUILD_AND_DEPLOY.md §5 — start if missing; do not restart a live TMM job.
+_ensure_production_tmm_worker() {
+  local image="ptm-production-tmm-worker:${VERSION_API:-$VERSION}"
+  local api_image="ptm-api-server:${VERSION_API:-$VERSION}"
+  echo "Ensuring production-tmm-worker is up"
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    if docker image inspect "$api_image" >/dev/null 2>&1; then
+      echo "  tagging $api_image -> $image"
+      docker tag "$api_image" "$image"
+    else
+      echo "  building production-tmm-worker (no API image to tag)"
+      docker compose build production-tmm-worker
+    fi
+  fi
+  docker compose up -d production-tmm-worker
+}
+
 bump_semver() {
   local current="$1" kind="$2"
   local major minor patch
@@ -147,6 +164,7 @@ else
       echo "First deploy: building all components"
     else
       echo "No component changes detected. Use --all to force rebuild, or --bump/--set to release."
+      _ensure_production_tmm_worker
       exit 0
     fi
   else
@@ -183,6 +201,7 @@ RESTART_SERVICES=($(printf '%s\n' "${RESTART_SERVICES[@]}" | sort -u))
 
 echo "Restarting: ${RESTART_SERVICES[*]}"
 docker compose up -d "${RESTART_SERVICES[@]}"
+_ensure_production_tmm_worker
 
 git rev-parse HEAD > "$LAST_DEPLOY_FILE"
 git rev-parse --short HEAD > "$REPO_ROOT/GIT_HASH" 2>/dev/null || true

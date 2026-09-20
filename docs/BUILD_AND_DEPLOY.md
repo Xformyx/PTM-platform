@@ -25,6 +25,7 @@ docker compose down
 | **celery-worker-preprocessing** | `docker compose build celery-worker-preprocessing` | `docker compose up -d celery-worker-preprocessing` | `docker compose restart celery-worker-preprocessing` |
 | **celery-worker-rag** | `docker compose build celery-worker-rag` | `docker compose up -d celery-worker-rag` | `docker compose restart celery-worker-rag` |
 | **celery-worker-report** | `docker compose build celery-worker-report` | `docker compose up -d celery-worker-report` | `docker compose restart celery-worker-report` |
+| **production-tmm-worker** | API 이미지와 동일 Dockerfile. 태그 없으면 `ptm-api-server:$VERSION`에서 tag | `docker compose up -d production-tmm-worker` | `docker compose up -d production-tmm-worker` (실행 중 job을 끊지 않으려면 restart 금지) |
 | **gateway** | (이미지 사용, 빌드 없음) | `docker compose up -d gateway` | `docker compose restart gateway` |
 | **mysql** | (이미지 사용) | `docker compose up -d mysql` | `docker compose restart mysql` |
 | **redis** | (이미지 사용) | `docker compose up -d redis` | `docker compose restart redis` |
@@ -97,3 +98,23 @@ docker compose build && docker compose up -d
 ```
 
 > 실행 전 `cd ptm-platform` (또는 docker-compose.yml 있는 디렉터리)로 이동하세요.
+
+---
+
+## 5. production-tmm-worker 필수 (2026-09-21 선언)
+
+RAG → Report 사이에 canonical temporal sidecar를 만드는 큐는 `production_tmm`이다.
+이 워커가 없으면 RAG는 결과를 최대 6시간 기다리며 워치독이 Halted로 오인한다.
+측정 상수가 아니다. TMM 점수·τ를 바꾸지 않는다.
+
+| 이름 | 값 | 역할 |
+|------|----|------|
+| `CONSUMER_WAIT_SECONDS` | 30 | `production_tmm` consumer가 이 시간 동안 없으면 즉시 실패. enqueue 전에 검사하고, 대기 중 사라지면 같은 창으로 실패. |
+| `HEARTBEAT_SECONDS` | 120 | TMM 대기 중 `order_logs`에 running 한 줄을 남긴다. `WATCHDOG_NO_PROGRESS_STALL_MINUTES`(60)보다 짧아야 한다. |
+| `JOIN_TIMEOUT_SECONDS` | 21780 | 기존 join 상한. production TMM `time_limit`(21720)과 맞춤. |
+
+배포 규칙:
+
+- `./scripts/dev-deploy.sh`와 `./scripts/deploy.sh`는 소스 변경이 없어도 `docker compose up -d production-tmm-worker`를 실행한다.
+- 이미 떠 있는 워커는 재시작하지 않는다. 실행 중 analysis job을 끊지 않기 위함이다.
+- 이미지 `ptm-production-tmm-worker:$VERSION`이 없으면 같은 Dockerfile인 `ptm-api-server:$VERSION`을 tag한다.

@@ -73,6 +73,12 @@ def test_report_rerun_preparation_task_blocks_empty_packet_dispatch() -> None:
     assert "report_generation.tasks.run_report_generation" in rag_source
 
 
+def test_compose_defines_production_tmm_worker_queue() -> None:
+    compose = COMPOSE.read_text(encoding="utf-8")
+    assert "  production-tmm-worker:" in compose
+    assert "-Q production_tmm" in compose
+
+
 def test_rag_container_can_import_canonical_api_tmm_scorer() -> None:
     compose = COMPOSE.read_text(encoding="utf-8")
     rag_block = compose.split("  celery-worker-rag:", 1)[1].split("\n  celery-worker", 1)[0]
