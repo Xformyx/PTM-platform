@@ -2909,3 +2909,17 @@
 - **결정성:** 새 seed·solver·dtype 없음. 동일 입력은 동일 mapping payload와
   동일 가중합 입력을 만든다.
 
+### [2026-09-20] gene map NaN Genes — StringDtype `.lower` 정정
+
+- **분류:** 정정
+- **대상:** `workers/preprocessing/core/ptm_quantification.py` `_build_diann_gene_map`
+- **구현 대상 설계:** 직전 항목(Order 80 mapping·gene map·vector 스캔)의 운영 정정
+- **사전등록 상태:** 해당 없음
+- **내용:** DIA-NN `Genes` 결측은 float NaN이다. pandas StringDtype에서
+  `astype(str)`가 이를 `"nan"`으로 바꾸지 않아 Order 80 재실행이
+  `float.lower` 로 즉시 실패했다. 이전 iterrows와 같이 `str(value).strip()`
+  후 `"nan"`/`"unknown"`을 건너뛴다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 결측 gene은 이전과 같이 map에 넣지 않는다. 정량값을 바꾸지 않는다.
+- **결정성:** 새 임계 없음
+

@@ -286,12 +286,17 @@ class PTMQuantificationAnalyzer:
             if df is None or "Genes" not in df.columns or "Protein.Group" not in df.columns:
                 continue
             subset = df.loc[:, ["Protein.Group", "Genes"]].drop_duplicates("Protein.Group")
-            pgs = subset["Protein.Group"].astype(str).to_numpy()
-            genes = subset["Genes"].astype(str).str.strip().to_numpy()
-            for pg, gene in zip(pgs, genes):
+            # StringDtype leaves missing Genes as float NaN; pandas astype(str)
+            # does not stringify those.  Match the previous iterrows path:
+            # str(value).strip(), then skip "nan"/"unknown".
+            for pg, gene in zip(subset["Protein.Group"].to_numpy(), subset["Genes"].to_numpy()):
+                if pd.isna(pg) or pd.isna(gene):
+                    continue
+                pg = str(pg)
+                gene = str(gene).strip()
                 if pg in self.diann_genes:
                     continue
-                if gene and gene.lower() not in ("nan", "unknown"):
+                if gene and gene.lower() not in ("nan", "unknown", "<na>", "none"):
                     self.diann_genes[pg] = gene
         if self.diann_genes:
             logger.info(f"DIA-NN gene map: {len(self.diann_genes):,} protein groups")
@@ -352,7 +357,7 @@ class PTMQuantificationAnalyzer:
             # completion write below records the same rows once.
             return True
         except Exception as e:
-            logger.error(f"Data loading failed: {e}")
+            logger.error(f"Data loading failed: {e}", exc_info=True)
             return False
 
     def _write_observation_inventory(self, analysis_records=None):
@@ -458,7 +463,9 @@ class PTMQuantificationAnalyzer:
         CONTROL_ALIASES = frozenset({"con", "ctrl", "ctr", "control", "wt", "wildtype", "untreated", "baseline"})
         normalized_map = {}
         for sample, cond in self.condition_map.items():
-            normalized_map[sample] = "Control" if (cond and cond.strip().lower() in CONTROL_ALIASES) else cond
+            if not isinstance(cond, str):
+                cond = "" if cond is None or pd.isna(cond) else str(cond)
+            normalized_map[sample] = "Control" if cond.strip().lower() in CONTROL_ALIASES else cond
         self.condition_map = normalized_map
 
         condition_counts: Dict[str, int] = {}

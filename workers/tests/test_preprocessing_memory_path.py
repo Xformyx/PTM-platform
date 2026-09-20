@@ -39,6 +39,20 @@ def test_gene_map_does_not_use_iterrows_on_duplicate_groups():
     assert analyzer.diann_genes["P12345"] == "GENE1"
 
 
+def test_gene_map_skips_float_nan_genes_like_iterrows():
+    import numpy as np
+    import pandas as pd
+
+    analyzer = PTMQuantificationAnalyzer.__new__(PTMQuantificationAnalyzer)
+    analyzer.pg_matrix = pd.DataFrame({
+        "Protein.Group": ["P1", "P2"],
+        "Genes": pd.array(["GENE1", np.nan], dtype="string"),
+    })
+    analyzer.pr_matrix = analyzer.pg_matrix.copy()
+    analyzer._build_diann_gene_map()
+    assert analyzer.diann_genes == {"P1": "GENE1"}
+
+
 def test_paired_occupancy_still_qualified_after_lookup_helpers():
     matrix = _pair_matrix()
     analyzer = _analyzer(matrix)
