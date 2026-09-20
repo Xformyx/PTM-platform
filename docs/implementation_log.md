@@ -2866,3 +2866,23 @@
 - **결정성:** 새 seed·solver·dtype 없음. 동일 입력이 제한 시간 안에 끝나면
   기존 함수와 같은 값을 반환한다.
 
+### [2026-09-20] 전처리 inventory·paired occupancy 메모리 경로 축소
+
+- **분류:** 구현
+- **대상:** `workers/preprocessing/core/ptm_quantification.py`
+  (`_write_observation_inventory`, `calculate_paired_occupancy`,
+  `calculate_site_level_relative_quantification`)
+- **구현 대상 설계:** 신규 — 운영 OOM 정정. 2026-09-20 Insulin_Signaling_V3
+  전처리 SIGKILL 이후 선언. PAIR_MIN_* 와 apparent occupancy 공식은 유지.
+- **사전등록 상태:** 해당 없음 (직렬화·그룹화 경로). primary 승격 금지.
+- **내용:** load_data에서 339MB급 전 행 inventory JSON을 만들지 않는다.
+  완료 시에만 identity·status 레코드를 쓴다. sample intensity/QC는 PR TSV에
+  남긴다. paired occupancy는 행별 Series 복사 대신 양성 finite intensity의
+  form 합을 쓴다. site-level mapping은 precursor당 한 번 계산한다.
+- **논문에서의 용도:** methods (계산 경로) / 사용 안 함 (kinase 성능)
+- **해석 한계:** 메모리 경로를 바꿔도 분모·결측→0 금지·무보정 occupancy
+  해석을 바꾸지 않는다. inventory 파일에 sample 열을 복제하지 않는 것은
+  입력 전수 검열을 끝냈다는 주장이 아니다.
+- **결정성:** 새 seed·solver·dtype 없음. 동일 양성 intensity 합과 기존
+  PAIR_MIN_REPLICATES / TIMEPOINTS / COMPLETENESS.
+

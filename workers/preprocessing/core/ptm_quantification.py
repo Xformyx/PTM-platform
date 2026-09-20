@@ -334,50 +334,70 @@ class PTMQuantificationAnalyzer:
 
             self._build_diann_gene_map()
             self.create_condition_mapping()
-            self._write_observation_inventory()
+            # Full-row inventory JSON was written here and peaked memory before
+            # any contrast existed. Raw PR is kept on self.pr_matrix; the
+            # completion write below records the same rows once.
             return True
         except Exception as e:
             logger.error(f"Data loading failed: {e}")
             return False
 
     def _write_observation_inventory(self, analysis_records=None):
-        """Preserve input row/sample accounting before normalization or filtering.
+        """Record input-row accounting without duplicating the PR matrix.
 
-        Logical content IDs are row-order independent; source locators retain the
-        exact original row. Repeated identical rows share a content ID, not n.
+        구현 대상: docs/implementation/ptm-report-contract-map.md 원자료 전수 기록
+        사전등록: 2026-09-20 운영 정정. 측정값 변경 없음. 표시·회계 직렬화만 축소.
+        해석 한계: inventory는 입력 행 목록이며 정량 estimator가 아니다.
+        주장 금지: 이 파일 존재로 전수 검열 완료나 생물 재현성을 주장하지 않는다.
+
+        Sample intensities and per-sample QC stay in the source PR TSV. Records
+        keep identity, status and a content hash so Report can bind coverage
+        without loading a second copy of every intensity column.
         """
         import hashlib
         from ptm_shared.report_revision import file_sha256, _atomic_json
+        if self.pr_matrix is None or self.pr_matrix.empty:
+            return
         source_hash = file_sha256(self.pr_matrix_path)
         identity_cols = [c for c in ("Protein.Group", "Precursor.Id", "Modified.Sequence", "Precursor.Charge") if c in self.pr_matrix]
         distinct = self.pr_matrix.drop_duplicates()
         conflicts = distinct.loc[distinct.duplicated(identity_cols, keep=False), identity_cols]
         conflict_keys = {tuple(str(x) for x in row) for row in conflicts.itertuples(index=False, name=None)}
         seen, records = set(), []
+
         def logical_key(row):
             return tuple("" if pd.isna(row.get(c)) else str(row.get(c)) for c in identity_cols)
+
         processed_keys = {logical_key(row) for row in (analysis_records or [])}
         source_locators = self.pr_matrix.attrs.get("source_row_locators", [])
-        for row_index, row in enumerate(self.pr_matrix.to_dict('records')):
+        identity_frame = self.pr_matrix[identity_cols].copy()
+        sequences = identity_frame["Modified.Sequence"].astype(str) if "Modified.Sequence" in identity_frame else pd.Series("", index=self.pr_matrix.index)
+        target_pat = re.compile("|".join(rf"UniMod:{re.escape(str(uid))}\b" for uid in self.target_ptms)) if self.target_ptms else None
+        for row_index, ident in enumerate(identity_frame.itertuples(index=False, name=None)):
+            if row_index % 50000 == 0:
+                (getattr(self, "_progress", None) or (lambda _p, _m: None))(
+                    0.86, f"Observation inventory {row_index}/{len(identity_frame)}"
+                )
             row_number = source_locators[row_index]["start_line"] if row_index < len(source_locators) else row_index + 2
-            safe = {k: None if pd.isna(v) else v for k, v in row.items()}
-            content_id = hashlib.sha256(json.dumps(safe, sort_keys=True, default=str).encode()).hexdigest()
-            key = tuple(str(row[c]) for c in identity_cols)
-            target = any(re.search(rf"UniMod:{uid}\b", str(row.get('Modified.Sequence', ''))) for uid in self.target_ptms)
+            identity = {col: (None if pd.isna(val) else val) for col, val in zip(identity_cols, ident)}
+            content_id = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()
+            key = tuple("" if val is None else str(val) for val in identity.values())
+            target = bool(target_pat and target_pat.search(str(sequences.iloc[row_index])))
             reason = ('conflicting_duplicate' if key in conflict_keys else 'exact_duplicate' if content_id in seen
                       else 'not_requested_ptm' if not target else 'eligible_pending_analysis')
             seen.add(content_id)
-            records.append({'observation_content_id': content_id, 'source_row': row_number,
-                            'source_dataset_sha256': source_hash, 'identity': {c: safe[c] for c in identity_cols},
-                            'analysis_status': 'pending' if reason == 'eligible_pending_analysis' else 'excluded',
-                            'reason': reason, 'sample_observations': {s: safe.get(s) for s in self.sample_columns},
-                            'source_qc': {c: safe[c] for c in safe if 'Q.Value' in c or 'Localiz' in c or 'Probability' in c}})
+            record = {'observation_content_id': content_id, 'source_row': row_number,
+                      'source_dataset_sha256': source_hash, 'identity': identity,
+                      'analysis_status': 'pending' if reason == 'eligible_pending_analysis' else 'excluded',
+                      'reason': reason, 'sample_observations_ref': 'source_pr_matrix'}
             if reason == 'eligible_pending_analysis' and analysis_records is not None:
-                matched = logical_key(row) in processed_keys
-                records[-1].update(analysis_status='processed' if matched else 'not_evaluable',
-                                   reason='contrast_inventory_created' if matched else 'no_eligible_contrast')
-        inventory = {'schema_version': 'source_observation_inventory.v1', 'source_dataset_sha256': source_hash,
-                     'input_rows': len(records), 'input_sample_observations': len(records) * len(self.sample_columns),
+                matched = key in processed_keys
+                record.update(analysis_status='processed' if matched else 'not_evaluable',
+                              reason='contrast_inventory_created' if matched else 'no_eligible_contrast')
+            records.append(record)
+        inventory = {'schema_version': 'source_observation_inventory.v1', 'record_payload': 'identity_status_only',
+                     'source_dataset_sha256': source_hash, 'input_rows': len(records),
+                     'input_sample_observations': len(records) * len(self.sample_columns),
                      'normalization_policy': self.normalization_policy, 'records': records}
         inventory['import_accounting'] = self.pr_matrix.attrs.get('import_accounting', {})
         inventory['analysis_completed'] = analysis_records is not None
@@ -528,6 +548,7 @@ class PTMQuantificationAnalyzer:
                 self.pg_matrix_normalized["Protein.Group"] == protein_group
             ]
             protein_row = protein_rows.iloc[0] if not protein_rows.empty else {}
+            source_fields = self._source_fields(row)
             for sample in self.sample_columns:
                 ptm_intensity = row.get(sample, np.nan)
                 protein_intensity = protein_row.get(sample, np.nan)
@@ -536,7 +557,7 @@ class PTMQuantificationAnalyzer:
                 paired = pr_observed and pg_observed
 
                 results.append({
-                    **self._source_fields(row),
+                    **source_fields,
                     "Protein.Group": protein_group,
                     "Precursor.Id": precursor_id,
                     "Modified.Sequence": modified_sequence,
@@ -591,41 +612,59 @@ class PTMQuantificationAnalyzer:
     def calculate_paired_occupancy(self, ptm_precursors: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Build Track 1 paired modified/unmodified peptide evidence.
 
-        The returned occupancy is an *apparent paired occupancy* based on MS
-        intensity fraction.  It is not absolute physical occupancy because the
-        modified and unmodified peptide response factors are not calibrated here.
-        Missing modified or unmodified signals remain missing; they are never
-        converted to zero.
-        """
-        target_uid = str(self.ptm_mode_config["unimod_id"])
-        unmodified_index: Dict[Tuple[str, str], List[pd.Series]] = {}
-        for _, row in self.pr_matrix_normalized.iterrows():
-            sequence = row.get("Modified.Sequence", "")
-            if not self._is_unmodified_target_counterpart(sequence):
-                continue
-            backbone = self._clean_peptide_backbone(sequence)
-            protein_group = str(row.get("Protein.Group", ""))
-            if backbone and protein_group:
-                unmodified_index.setdefault((protein_group, backbone), []).append(row)
+        구현 대상: 기존 apparent paired occupancy (intensity fraction, uncalibrated).
+        사전등록: 2026-09-20 운영 정정. estimator·임계(PAIR_MIN_*)는 유지.
+        해석 한계: 반응계수 보정 없는 겉보기 occupancy이며 절대 occupancy가 아니다.
+        주장 금지: 이 값으로 점유율·kinase 활성을 주장하지 않는다.
 
+        Grouped sums replace per-row Series copies. Positive finite intensities
+        are still summed per peptide form; missing modified or unmodified values
+        remain missing and are never converted to zero.
+        """
+        if ptm_precursors is None or ptm_precursors.empty or self.pr_matrix_normalized is None:
+            return pd.DataFrame(), pd.DataFrame()
+        samples = [sample for sample in self.sample_columns if sample in self.pr_matrix_normalized.columns]
+        if not samples:
+            return pd.DataFrame(), pd.DataFrame()
+
+        def _positive(frame: pd.DataFrame) -> pd.DataFrame:
+            numeric = frame[samples].apply(pd.to_numeric, errors="coerce")
+            return numeric.where(np.isfinite(numeric) & (numeric > 0))
+
+        def _join_ids(series: pd.Series) -> str:
+            return ";".join(sorted({str(value) for value in series.dropna() if str(value) not in {"", "nan"}}))
+
+        pr = self.pr_matrix_normalized
+        pr_seq = pr["Modified.Sequence"].astype(str) if "Modified.Sequence" in pr.columns else pd.Series("", index=pr.index)
+        pr_pg = pr["Protein.Group"].astype(str) if "Protein.Group" in pr.columns else pd.Series("", index=pr.index)
+        counterpart = pr_seq.map(self._is_unmodified_target_counterpart)
+        backbone = pr_seq.map(self._clean_peptide_backbone)
+        unmod_work = pd.concat([
+            pr_pg.rename("_pg"), backbone.rename("_bb"),
+            pr["Precursor.Id"] if "Precursor.Id" in pr.columns else pd.Series(index=pr.index, dtype=object),
+            _positive(pr),
+        ], axis=1).loc[counterpart & backbone.ne("") & pr_pg.ne("")]
+        unmod_sums = unmod_work.groupby(["_pg", "_bb"], sort=False)[samples].sum(min_count=1)
+        unmod_ids = unmod_work.groupby(["_pg", "_bb"], sort=False)["Precursor.Id"].agg(_join_ids) if "Precursor.Id" in unmod_work.columns else pd.Series(dtype=object)
+
+        mod_work = pd.concat([
+            ptm_precursors["Protein.Group"].astype(str).rename("_pg"),
+            ptm_precursors["Modified.Sequence"].astype(str).rename("_seq"),
+            ptm_precursors["Precursor.Id"] if "Precursor.Id" in ptm_precursors.columns else pd.Series(index=ptm_precursors.index, dtype=object),
+            _positive(ptm_precursors),
+        ], axis=1)
+        mod_sums = mod_work.groupby(["_pg", "_seq"], sort=False)[samples].sum(min_count=1)
+        mod_ids = mod_work.groupby(["_pg", "_seq"], sort=False)["Precursor.Id"].agg(_join_ids) if "Precursor.Id" in mod_work.columns else pd.Series(dtype=object)
+
+        expected_conditions = sorted(set(self.condition_map.get(sample, "Unknown") for sample in samples))
         records: List[Dict[str, object]] = []
         audits: List[Dict[str, object]] = []
-        expected_conditions = sorted(set(self.condition_map.get(sample, "Unknown") for sample in self.sample_columns))
-        processed_forms: Set[Tuple[str, str]] = set()
-        for _, modified_row in ptm_precursors.iterrows():
-            modified_sequence = modified_row.get("Modified.Sequence", "")
-            protein_group = str(modified_row.get("Protein.Group", ""))
-            form_key = (protein_group, str(modified_sequence))
-            if form_key in processed_forms:
-                continue
-            processed_forms.add(form_key)
-            modified_form_rows = ptm_precursors[
-                (ptm_precursors["Protein.Group"].astype(str) == protein_group)
-                & (ptm_precursors["Modified.Sequence"].astype(str) == str(modified_sequence))
-            ]
-            modified_precursor_ids = ";".join(sorted(
-                str(value) for value in modified_form_rows["Precursor.Id"].dropna().unique()
-            ))
+        for form_index, ((protein_group, modified_sequence), mod_row) in enumerate(mod_sums.iterrows()):
+            if form_index % 2000 == 0:
+                (getattr(self, "_progress", None) or (lambda _p, _m: None))(
+                    0.40, f"Paired modified/unmodified audit {form_index}/{len(mod_sums)}"
+                )
+            modified_precursor_ids = str(mod_ids.get((protein_group, modified_sequence), ""))
             if self._target_modification_count(modified_sequence) != 1:
                 audits.append({
                     "Protein.Group": protein_group,
@@ -636,8 +675,8 @@ class PTMQuantificationAnalyzer:
                 })
                 continue
             backbone = self._clean_peptide_backbone(modified_sequence)
-            counterparts = unmodified_index.get((protein_group, backbone), [])
-            if not counterparts:
+            unmod_key = (protein_group, backbone)
+            if unmod_key not in unmod_sums.index:
                 audits.append({
                     "Protein.Group": protein_group,
                     "Modified_Precursor_Ids": modified_precursor_ids,
@@ -649,32 +688,24 @@ class PTMQuantificationAnalyzer:
                 continue
 
             pair_key = f"{protein_group}|{backbone}|{modified_sequence}"
+            unmod_row = unmod_sums.loc[unmod_key]
             condition_values: Dict[str, List[float]] = {}
-            condition_samples = {}
+            condition_samples: Dict[str, Dict[str, float]] = {}
             missing_reasons: Dict[str, str] = {}
-            for sample in self.sample_columns:
+            for sample in samples:
                 condition = self.condition_map.get(sample, "Unknown")
-                modified_values = [
-                    float(row.get(sample))
-                    for _, row in modified_form_rows.iterrows()
-                    if pd.notna(row.get(sample)) and row.get(sample) > 0
-                ]
-                modified_intensity = sum(modified_values) if modified_values else None
-                counterpart_values = [
-                    float(counterpart.get(sample))
-                    for counterpart in counterparts
-                    if pd.notna(counterpart.get(sample)) and counterpart.get(sample) > 0
-                ]
-                unmodified_intensity = sum(counterpart_values) if counterpart_values else None
-                if modified_intensity is None or unmodified_intensity is None:
-                    missing_reasons.setdefault(condition, "missing_modified" if modified_intensity is None else "missing_unmodified")
+                modified_intensity = mod_row[sample]
+                unmodified_intensity = unmod_row[sample]
+                if pd.isna(modified_intensity) or pd.isna(unmodified_intensity):
+                    missing_reasons.setdefault(condition, "missing_modified" if pd.isna(modified_intensity) else "missing_unmodified")
                     continue
-                denominator = modified_intensity + unmodified_intensity
+                denominator = float(modified_intensity) + float(unmodified_intensity)
                 if denominator <= 0:
                     missing_reasons.setdefault(condition, "invalid_pair_denominator")
                     continue
-                condition_values.setdefault(condition, []).append(modified_intensity / denominator)
-                condition_samples.setdefault(condition, {})[sample] = modified_intensity / denominator
+                ratio = float(modified_intensity) / denominator
+                condition_values.setdefault(condition, []).append(ratio)
+                condition_samples.setdefault(condition, {})[sample] = ratio
 
             observed_conditions = [condition for condition, values in condition_values.items() if len(values) >= PAIR_MIN_REPLICATES]
             expected_count = max(len(expected_conditions), 1)
@@ -688,7 +719,7 @@ class PTMQuantificationAnalyzer:
                 "Modified.Sequence": modified_sequence,
                 "Peptide_Backbone": backbone,
                 "Paired_Peptide_Key": pair_key,
-                "Unmodified_Precursor_Ids": ";".join(str(row.get("Precursor.Id", "")) for row in counterparts),
+                "Unmodified_Precursor_Ids": str(unmod_ids.get(unmod_key, "")),
                 "Pair_Status": status,
                 "Pair_Quality_Tier": tier,
                 "Expected_Timepoints": expected_count,
