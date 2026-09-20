@@ -72,6 +72,39 @@ class PipelineStatistics:
         self.stats["step1_input"] = stats
         print(f"[STATS] Step 1 통계 수집 완료: {stats['total_precursors']:,} precursors, "
               f"{stats['total_protein_groups']:,} protein groups, {stats['total_samples']} samples")
+
+    def collect_input_stats_lightweight(self, pr_row_count: int, pg_row_count: int,
+                                        fasta_path: str, condition_map: dict):
+        """[OPT-M1] Step 1: Lightweight input stats from row counts (no full DataFrame load).
+
+        Avoids reloading potentially large PR/PG matrices just for row counts.
+        Column-level stats (unique proteins, peptides) are deferred to Step 2
+        where the quantification output already contains this information.
+        """
+        stats = {}
+        stats["total_precursors"] = pr_row_count
+        stats["total_protein_groups"] = pg_row_count
+        stats["total_samples"] = len(condition_map) if condition_map else 0
+
+        condition_counts: dict = {}
+        for cond in (condition_map or {}).values():
+            condition_counts[cond] = condition_counts.get(cond, 0) + 1
+        stats["conditions"] = condition_counts
+        stats["total_conditions"] = len(set(condition_counts.keys()))
+        stats["control_samples"] = condition_counts.get("Control", 0)
+        stats["treatment_conditions"] = {k: v for k, v in condition_counts.items() if k != "Control"}
+
+        try:
+            fasta_count = sum(1 for line in open(fasta_path, "r") if line.startswith(">"))
+            stats["fasta_proteins"] = fasta_count
+        except Exception:
+            stats["fasta_proteins"] = 0
+
+        self.stats["step1_input"] = stats
+        logger.info(
+            f"[STATS] Step 1 lightweight stats: {pr_row_count:,} precursors, "
+            f"{pg_row_count:,} protein groups, {stats['total_samples']} samples"
+        )
     
     # ===== Step 2: PTM Quantification Statistics =====
     def collect_normalization_stats(self, pr_before: int, pr_after: int, pg_before: int, pg_after: int,

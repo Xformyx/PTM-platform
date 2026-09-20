@@ -4,12 +4,17 @@ Exact PMID coverage plus caller-scoped context/model/prompt keys are required.
 The historical best-match entry point now performs exact lookup only; smaller
 prior searches cannot satisfy a larger requested evidence scope. Errors are not
 stored as successful interpretations. Database failure remains a cache miss.
+
+[OPT-T7] Redis L1 cache (TTL 1h) sits in front of MySQL for Phase B lookups.
+[OPT-A2] SHA256 file hashes are cached per (path, mtime, size) to avoid
+          repeated hashing of the same unchanged file across stage fingerprints.
 """
 
 import hashlib
 import json
 import logging
 import os
+import threading
 
 from sqlalchemy import text
 
@@ -18,6 +23,61 @@ from common.db_engine import get_engine as _engine
 logger = logging.getLogger(__name__)
 
 CACHE_TTL_DAYS: int = int(os.getenv("PHASE_B_CACHE_TTL_DAYS", "30"))
+_REDIS_L1_TTL: int = int(os.getenv("PHASE_B_REDIS_TTL", "3600"))  # 1 hour
+
+# ──────────────────────────────────────────────────────────────────────────────
+# [OPT-T7] Redis L1 cache layer
+# ──────────────────────────────────────────────────────────────────────────────
+
+_redis_client = None
+_redis_init_lock = threading.Lock()
+_redis_init_done = False
+
+
+def _get_redis():
+    """Lazy-init a Redis client. Returns None if Redis is unavailable."""
+    global _redis_client, _redis_init_done
+    if _redis_init_done:
+        return _redis_client
+    with _redis_init_lock:
+        if _redis_init_done:
+            return _redis_client
+        try:
+            import redis
+            _url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+            _redis_client = redis.from_url(_url, decode_responses=True, socket_timeout=2)
+            _redis_client.ping()
+            logger.debug("[PhaseB-Cache] Redis L1 connected")
+        except Exception as e:
+            logger.debug(f"[PhaseB-Cache] Redis L1 unavailable (MySQL-only mode): {e}")
+            _redis_client = None
+        _redis_init_done = True
+        return _redis_client
+
+
+def _redis_get(key: str) -> dict | None:
+    """Try Redis L1 cache. Returns None on miss or unavailability."""
+    r = _get_redis()
+    if r is None:
+        return None
+    try:
+        raw = r.get(f"pb:{key}")
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
+    return None
+
+
+def _redis_set(key: str, result: dict) -> None:
+    """Store in Redis L1 cache with TTL."""
+    r = _get_redis()
+    if r is None:
+        return
+    try:
+        r.setex(f"pb:{key}", _REDIS_L1_TTL, json.dumps(result, ensure_ascii=False, default=str))
+    except Exception:
+        pass
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -45,8 +105,15 @@ def make_cache_key(gene: str, position: str, ptm_type: str, task_name: str, pmid
 # ──────────────────────────────────────────────────────────────────────────────
 
 def get_cached(gene: str, position: str, ptm_type: str, task_name: str, pmids: list) -> dict | None:
-    """정확한 PMID 조합으로 캐시 조회. 미스 시 None 반환."""
+    """정확한 PMID 조합으로 캐시 조회. Redis L1 → MySQL L2."""
     key = make_cache_key(gene, position, ptm_type, task_name, pmids)
+
+    # [OPT-T7] Try Redis L1 first
+    l1 = _redis_get(key)
+    if l1 is not None:
+        logger.debug(f"[PhaseB-Cache L1-HIT] {gene} {position} / {task_name}")
+        return l1
+
     try:
         engine = _engine()
         ttl_clause = ""
@@ -60,7 +127,8 @@ def get_cached(gene: str, position: str, ptm_type: str, task_name: str, pmids: l
             row = conn.execute(sql, params).fetchone()
         if row:
             result = json.loads(row[0])
-            logger.debug(f"[PhaseB-Cache HIT] {gene} {position} / {task_name} (key={key[:8]}…)")
+            logger.debug(f"[PhaseB-Cache L2-HIT] {gene} {position} / {task_name} (key={key[:8]}…)")
+            _redis_set(key, result)  # Promote to L1
             return result
         return None
     except Exception as e:
@@ -72,7 +140,6 @@ def get_cached_best_match(
     gene: str, position: str, ptm_type: str, task_name: str, pmids: list
 ) -> dict | None:
     """Compatibility adapter requiring identical context and evidence coverage."""
-    # Compatibility entry point: no scan can bypass schema/model/context keys.
     return get_cached(gene, position, ptm_type, task_name, pmids)
 
 
@@ -87,6 +154,10 @@ def set_cached(
     if not result or result.get("error") or result.get("query_status") in {"error", "timeout", "rate_limited", "api_error", "parse_failure"}:
         return
     key = make_cache_key(gene, position, ptm_type, task_name, pmids)
+
+    # [OPT-T7] Write to Redis L1
+    _redis_set(key, result)
+
     try:
         ph = _pmid_hash(pmids)
         pmid_list_json = json.dumps(sorted(str(p) for p in pmids if p))
@@ -114,29 +185,57 @@ def set_cached(
         logger.debug(f"[PhaseB-Cache] set failed ({gene}/{task_name}): {e}")
 
 
-def stage_fingerprint(source_paths, policy, code_paths=()):
-    """Content-addressed preprocessing dependency key, independent of mtimes."""
+# ──────────────────────────────────────────────────────────────────────────────
+# [OPT-A2] SHA256 file-hash cache (per mtime+size)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_file_hash_cache: dict[tuple, str] = {}
+_file_hash_lock = threading.Lock()
+
+
+def _cached_file_sha256(path) -> str | None:
+    """SHA256 with (mtime, size) keyed cache to avoid re-hashing unchanged files."""
     from pathlib import Path
     from ptm_shared.report_revision import file_sha256
+    p = Path(path)
+    if not p.is_file():
+        return None
+    stat = p.stat()
+    cache_key = (str(p.resolve()), stat.st_mtime_ns, stat.st_size)
+    with _file_hash_lock:
+        cached = _file_hash_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    digest = file_sha256(p)
+    with _file_hash_lock:
+        _file_hash_cache[cache_key] = digest
+    return digest
+
+
+def stage_fingerprint(source_paths, policy, code_paths=()):
+    """Content-addressed preprocessing dependency key, independent of mtimes.
+
+    [OPT-A2] Uses _cached_file_sha256 to avoid redundant hashing when the
+    same file is referenced by multiple stage fingerprints.
+    """
+    from pathlib import Path
     payload = {'schema_version': 'preprocessing_stage_cache.v1', 'policy': policy,
-               'sources': {role: file_sha256(path) if Path(path).is_file() else None for role, path in source_paths.items()},
-               'code': {Path(path).name: file_sha256(path) for path in code_paths}}
+               'sources': {role: _cached_file_sha256(path) for role, path in source_paths.items()},
+               'code': {Path(path).name: _cached_file_sha256(path) for path in code_paths}}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def stage_cache_valid(output_dir, stage, fingerprint, filenames):
     from pathlib import Path
     from datetime import datetime, timezone
-    from ptm_shared.report_revision import file_sha256
     path = Path(output_dir) / ('.stage_' + stage + '.json')
     try:
         record = json.loads(path.read_text())
         if record['fingerprint'] != fingerprint:
             return False
-        # Live source freshness cannot be inferred from a file's existence.
         if stage != 'quantification' and (datetime.now(timezone.utc).timestamp() - record['completed_at_epoch']) > 86400:
             return False
-        return all(record['outputs'].get(name) == file_sha256(Path(output_dir) / name) for name in filenames)
+        return all(record['outputs'].get(name) == _cached_file_sha256(Path(output_dir) / name) for name in filenames)
     except (OSError, ValueError, KeyError):
         return False
 

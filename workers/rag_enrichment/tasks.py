@@ -421,7 +421,8 @@ def _legacy_auto_run_global_analysis(order_id: int, enriched_data: list, config:
             k = min(MAX_CLUSTERS, max(2, n_valid // 100))
             k = min(k, n_valid)
 
-            def _simple_kmeans(data, k, n_init=10, max_iter=200, seed=42):
+            def _simple_kmeans(data, k, n_init=3, max_iter=100, seed=42):
+                """[OPT-T6] Reduced n_init 10→3, max_iter 200→100 with early-stop."""
                 rng = np.random.RandomState(seed)
                 n, d = data.shape
                 best_labels = np.zeros(n, dtype=int)
@@ -847,6 +848,9 @@ def _legacy_auto_run_global_analysis(order_id: int, enriched_data: list, config:
         kinase_result["temporal_ptm_protein_analysis"] = dict(temporal_sidecar_summary)
 
         # Persist to DB
+        # [OPT-M3] Serialize once, reuse the JSON strings to avoid double
+        # json.dumps → json.loads cycles. The sanitized dicts are kept for
+        # the chained report_config pass-through.
         import math as _math
         from common.db_engine import get_engine as _get_engine
         from common.run_control import abort_if_superseded as _abort_heatmap_db
@@ -861,6 +865,11 @@ def _legacy_auto_run_global_analysis(order_id: int, enriched_data: list, config:
                 return [_sanitize_mysql_json(value) for value in obj]
             return obj
 
+        _sanitized_kinase = _sanitize_mysql_json(kinase_result)
+        _sanitized_heatmap = _sanitize_mysql_json(heatmap_data)
+        _kad_json = json.dumps(_sanitized_kinase, default=str)
+        _kah_json = json.dumps(_sanitized_heatmap, default=str)
+
         _abort_heatmap_db(order_id)
         _engine = _get_engine()
         with _engine.connect() as _conn:
@@ -869,11 +878,7 @@ def _legacy_auto_run_global_analysis(order_id: int, enriched_data: list, config:
                     "UPDATE orders SET kinase_analysis_data = :kad, "
                     "kinase_activity_heatmap = :kah WHERE id = :oid"
                 ),
-                {
-                    "oid": order_id,
-                    "kad": json.dumps(_sanitize_mysql_json(kinase_result), default=str),
-                    "kah": json.dumps(_sanitize_mysql_json(heatmap_data), default=str),
-                },
+                {"oid": order_id, "kad": _kad_json, "kah": _kah_json},
             )
             _conn.commit()
 

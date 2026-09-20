@@ -11,12 +11,14 @@ Uses LangGraph StateGraph to orchestrate:
   7. Final report editing and compilation
 """
 
+import hashlib
 import json
 import logging
 import os
 import time
 import traceback
 from pathlib import Path
+from functools import lru_cache
 
 import redis as _redis
 
@@ -28,6 +30,51 @@ from common.progress import publish_analysis_log, publish_progress
 from common.webhook import send_step_webhook
 
 logger = logging.getLogger("ptm-workers.report-generation")
+
+
+# [OPT-M2] Lazy-load helper for heavy state fields. Wraps a callable that
+# produces the value, deferring actual computation until first iteration/access.
+# Compatible with LangGraph's state reducer (list concatenation, dict merge).
+class _LazyList(list):
+    """A list that materializes from a loader callable on first access.
+
+    It behaves like a regular list once any operation is performed on it.
+    Memory is only allocated when a LangGraph node actually reads the data.
+    """
+    __slots__ = ('_loader', '_loaded')
+
+    def __init__(self, loader):
+        super().__init__()
+        self._loader = loader
+        self._loaded = False
+
+    def _ensure_loaded(self):
+        if not self._loaded:
+            self._loaded = True
+            data = self._loader()
+            super().extend(data)
+            self._loader = None  # release reference
+
+    def __len__(self):
+        self._ensure_loaded()
+        return super().__len__()
+
+    def __iter__(self):
+        self._ensure_loaded()
+        return super().__iter__()
+
+    def __getitem__(self, idx):
+        self._ensure_loaded()
+        return super().__getitem__(idx)
+
+    def __bool__(self):
+        self._ensure_loaded()
+        return super().__bool__()
+
+    def __repr__(self):
+        if not self._loaded:
+            return f"<_LazyList(pending)>"
+        return super().__repr__()
 
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/data/outputs")
 _REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
@@ -450,26 +497,31 @@ def run_report_generation(self, order_id: int, config: dict):
         # Atlas context: optional GO cellular-component annotations.
         substrate_go_localization_from_db = {}
         # v10.1: Load vector_plot_raw_data (full TSV) for LLM access
+        # [OPT-M2] Defer actual TSV parsing until a node reads vector_plot_raw_data.
+        # Only the file hash (for provenance) is computed eagerly.
         vector_plot_raw_data = []
         vector_source_path = None
         ptm_type_for_suffix = (config.get("experimental_context") or {}).get("ptm_type", "phosphorylation")
         _vp_suffix = "_phospho" if ptm_type_for_suffix == "phosphorylation" else "_ubi"
+        _vp_resolved_path = None
         for _vp_name in (f"ptm_vector_data_normalized{_vp_suffix}.tsv", f"ptm_vector_data_with_motifs{_vp_suffix}.tsv"):
             _vp_path = order_output / _vp_name
             if _vp_path.exists():
                 vector_source_path = str(_vp_path)
                 input_source_hashes[str(_vp_path)] = file_sha256(_vp_path)
-                import csv as _csv
-                with open(_vp_path, "r", encoding="utf-8") as _vf:
-                    _reader = _csv.DictReader(_vf, delimiter="\t")
-                    for _row in _reader:
-                        from report_generation.core.vector_projection import project_report_vector_row
-
-                        # Do not turn missing values into zero or collapse modified
-                        # precursors by gene/residue before reader-card selection.
-                        vector_plot_raw_data.append(project_report_vector_row(_row))
-                logger.info(f"[Order {order_id}] Loaded {len(vector_plot_raw_data)} vector plot raw data rows from {_vp_name}")
+                _vp_resolved_path = _vp_path
                 break
+
+        if _vp_resolved_path is not None:
+            _vp_path_for_lazy = str(_vp_resolved_path)
+            def _load_vector_data(_path=_vp_path_for_lazy):
+                import pandas as _pd_vp
+                from report_generation.core.vector_projection import project_report_vector_row
+                _df = _pd_vp.read_csv(_path, sep="\t", dtype=str, keep_default_na=False)
+                rows = [project_report_vector_row(row) for row in _df.to_dict("records")]
+                logger.info(f"[Order {order_id}] Lazy-loaded {len(rows)} vector plot raw data rows")
+                return rows
+            vector_plot_raw_data = _LazyList(_load_vector_data)
 
         # v10.1: Load pipeline_statistics for Methods section
         pipeline_statistics = {}
@@ -496,36 +548,50 @@ def run_report_generation(self, order_id: int, config: dict):
         try:
             from common.db_engine import get_engine as _get_shared_engine
             from sqlalchemy import text as _text
-            _engine = _get_shared_engine()
-            with _engine.connect() as _conn:
-                _row = _conn.execute(
-                    _text(
-                        "SELECT receptor_inference_data, kinase_activity_heatmap, "
-                        "signal_propagation_data, ip_overlay_data, substrate_go_localization, kinase_analysis_data "
-                        "FROM orders WHERE id = :oid"
-                    ),
-                    {"oid": order_id},
-                ).fetchone()
-            if _row:
-                import json as _json
-                if _row[0]:
-                    _rid = _row[0] if isinstance(_row[0], dict) else _json.loads(_row[0])
-                    inferred_receptors_from_db = _rid.get("receptors", [])
-                    logger.info(f"[Order {order_id}] Loaded {len(inferred_receptors_from_db)} inferred receptors from DB")
-                if _row[1]:
-                    kinase_activity_heatmap_from_db = _row[1] if isinstance(_row[1], dict) else _json.loads(_row[1])
-                    logger.info(f"[Order {order_id}] Loaded kinase activity heatmap from DB ({len(kinase_activity_heatmap_from_db.get('kinase_scores', []))} kinases)")
-                if _row[2]:
-                    signal_propagation_from_db = _row[2] if isinstance(_row[2], dict) else _json.loads(_row[2])
-                    logger.info(f"[Order {order_id}] Loaded signal propagation data from DB")
-                if _row[3]:
-                    ip_overlay_from_db = _row[3] if isinstance(_row[3], dict) else _json.loads(_row[3])
-                    logger.info(f"[Order {order_id}] Loaded IP overlay data from DB (bait: {ip_overlay_from_db.get('bait', {}).get('gene', 'unknown')})")
-                if _row[4]:
-                    substrate_go_localization_from_db = _row[4] if isinstance(_row[4], dict) else _json.loads(_row[4])
-                    logger.info(f"[Order {order_id}] Loaded GO localization data from DB")
-                if _row[5]:
-                    db_kinase_analysis_data = _row[5] if isinstance(_row[5], dict) else _json.loads(_row[5])
+
+            # [OPT-A1] Skip DB round-trip when the RAG chain already passed all
+            # analysis data in config.  Only query DB for fields not in config.
+            _have_config_kinase = bool(config_kinase_analysis_data.get("kinase_modules"))
+            _have_config_heatmap = bool(config_kinase_activity_heatmap.get("kinase_scores"))
+            _have_config_receptors = bool(config.get("receptor_inference_data"))
+
+            if _have_config_kinase and _have_config_heatmap and _have_config_receptors:
+                # All analysis data passed directly from RAG chain — skip DB query
+                inferred_receptors_from_db = config.get("receptor_inference_data", {}).get("receptors", [])
+                kinase_activity_heatmap_from_db = config_kinase_activity_heatmap
+                db_kinase_analysis_data = config_kinase_analysis_data
+                logger.info(f"[Order {order_id}] [OPT-A1] Using chain-provided analysis data (skipped DB read)")
+            else:
+                _engine = _get_shared_engine()
+                with _engine.connect() as _conn:
+                    _row = _conn.execute(
+                        _text(
+                            "SELECT receptor_inference_data, kinase_activity_heatmap, "
+                            "signal_propagation_data, ip_overlay_data, substrate_go_localization, kinase_analysis_data "
+                            "FROM orders WHERE id = :oid"
+                        ),
+                        {"oid": order_id},
+                    ).fetchone()
+                if _row:
+                    import json as _json
+                    if _row[0]:
+                        _rid = _row[0] if isinstance(_row[0], dict) else _json.loads(_row[0])
+                        inferred_receptors_from_db = _rid.get("receptors", [])
+                        logger.info(f"[Order {order_id}] Loaded {len(inferred_receptors_from_db)} inferred receptors from DB")
+                    if _row[1]:
+                        kinase_activity_heatmap_from_db = _row[1] if isinstance(_row[1], dict) else _json.loads(_row[1])
+                        logger.info(f"[Order {order_id}] Loaded kinase activity heatmap from DB ({len(kinase_activity_heatmap_from_db.get('kinase_scores', []))} kinases)")
+                    if _row[2]:
+                        signal_propagation_from_db = _row[2] if isinstance(_row[2], dict) else _json.loads(_row[2])
+                        logger.info(f"[Order {order_id}] Loaded signal propagation data from DB")
+                    if _row[3]:
+                        ip_overlay_from_db = _row[3] if isinstance(_row[3], dict) else _json.loads(_row[3])
+                        logger.info(f"[Order {order_id}] Loaded IP overlay data from DB (bait: {ip_overlay_from_db.get('bait', {}).get('gene', 'unknown')})")
+                    if _row[4]:
+                        substrate_go_localization_from_db = _row[4] if isinstance(_row[4], dict) else _json.loads(_row[4])
+                        logger.info(f"[Order {order_id}] Loaded GO localization data from DB")
+                    if _row[5]:
+                        db_kinase_analysis_data = _row[5] if isinstance(_row[5], dict) else _json.loads(_row[5])
         except Exception as _rec_err:
             logger.warning(f"[Order {order_id}] Could not load analysis data from DB: {_rec_err}")
 
@@ -819,14 +885,15 @@ def run_report_generation(self, order_id: int, config: dict):
                 raise RuntimeError(error_msg)
 
             # Quick generation test — send a trivial prompt to confirm the model responds.
-            # Retry up to 3 times: Ollama may be busy with other requests (RAG Phase B).
+            # [OPT-T3] Progressive backoff: 3s → 6s → 10s (was 10s flat).
             test_response = None
             for _attempt in range(3):
                 test_response = preflight_llm.generate("Respond with OK.", max_tokens=100)
                 if test_response and not test_response.startswith("[LLM Error"):
                     break
-                logger.warning(f"[Order {order_id}] LLM pre-flight attempt {_attempt + 1}/3 failed, retrying in 10s…")
-                time.sleep(10)
+                _backoff = [3, 6, 10][_attempt]
+                logger.warning(f"[Order {order_id}] LLM pre-flight attempt {_attempt + 1}/3 failed, retrying in {_backoff}s…")
+                time.sleep(_backoff)
             if test_response is None or test_response.startswith("[LLM Error"):
                 response_text = test_response[:200] if test_response else "None"
                 if "429" in response_text or "TooManyRequests" in response_text:

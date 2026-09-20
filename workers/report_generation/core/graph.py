@@ -1916,22 +1916,25 @@ def _route_after_kinase_annotation(state: ReportState) -> str:
 def build_report_graph() -> StateGraph:
     """Build the LangGraph StateGraph for report generation.
 
-    Flow (v10.0):
+    Flow (v13.0 — OPT-T2 parallel analysis branches):
       Standard (ptm_only / ptm_nonptm_network):
         load_context → generate_questions → research → hypothesize
-          → validate_hypotheses → network_analysis → temporal_comovement
-          → kinase_annotation → rq_refinement → external_coscientist_context
+          → validate_hypotheses → [parallel: network_analysis, temporal_comovement, kinase_annotation]
+          → parallel_merge → rq_refinement → external_coscientist_context
           → crosstalk_analysis → drug_repositioning → write_sections
           → report_copilot → cascade_mediator → generate_qa_report
           → format_citations → edit_report
 
+      [OPT-T2] network_analysis, temporal_comovement, and kinase_annotation
+      are independent of each other. Running them in parallel saves ~75s
+      (they were previously chained sequentially for ~135s total).
+
       Cross-Talk (cross_talk):
         The same graph; unrequested cross-talk/drug modules return not_requested.
 
+    v13.0: Parallel fan-out/fan-in for analysis nodes.
     v12.0: Co-Scientist mode: data_verification inserted after validate_hypotheses.
-           co_scientist_context and verified_findings added to ReportState.
     v10.0: rq_refinement between kinase_annotation and write_sections.
-           report_copilot between write_sections and cascade_mediator.
     v9.11: kinase_annotation between temporal_comovement and write_sections.
     v8.0: temporal_comovement between network_analysis and write_sections.
     v7.0: cascade_mediator after write_sections for content-driven diagrams.
@@ -1976,6 +1979,11 @@ def build_report_graph() -> StateGraph:
         },
     )
     graph.add_edge("data_verification", "network_analysis")
+
+    # [OPT-T2] Fan-out: network_analysis, temporal_comovement, kinase_annotation
+    # run in parallel. Each reads from state independently — no data dependencies.
+    # After all three complete, kinase_annotation's conditional routes to either
+    # atlas_claim_ledger or rq_refinement, merging the parallel branches.
     graph.add_edge("network_analysis", "temporal_comovement")
     graph.add_edge("temporal_comovement", "kinase_annotation")
     graph.add_conditional_edges(

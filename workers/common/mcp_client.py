@@ -66,6 +66,29 @@ class MCPClient:
             return False
 
     # ------------------------------------------------------------------
+    # [OPT-T5] Parallel fallback for batch failures
+    # ------------------------------------------------------------------
+
+    def _parallel_fallback(self, single_fn, items: list, max_workers: int = 8) -> list:
+        """Run individual queries in parallel when a batch endpoint fails.
+
+        Replaces sequential list comprehension fallbacks to avoid O(n) serial
+        HTTP round-trips. Thread-safe via per-thread sessions.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        results = [None] * len(items)
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(items) or 1)) as executor:
+            future_to_idx = {executor.submit(single_fn, item): i for i, item in enumerate(items)}
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as e:
+                    logger.warning(f"Parallel fallback item {idx} failed: {e}")
+                    results[idx] = {}
+        return results
+
+    # ------------------------------------------------------------------
     # Generic tool caller — allows calling any MCP tool by name
     # ------------------------------------------------------------------
 
@@ -140,7 +163,7 @@ class MCPClient:
             return r.json()["results"]
         except Exception as e:
             logger.warning(f"MCP UniProt batch failed: {e}")
-            return [self.query_uniprot(pid) for pid in protein_ids]
+            return self._parallel_fallback(self.query_uniprot, protein_ids)
 
     # ------------------------------------------------------------------
     # KEGG
@@ -166,7 +189,7 @@ class MCPClient:
             return r.json()["results"]
         except Exception as e:
             logger.warning(f"MCP KEGG batch failed: {e}")
-            return [self.query_kegg(g, organism) for g in gene_names]
+            return self._parallel_fallback(lambda g: self.query_kegg(g, organism), gene_names)
 
     # ------------------------------------------------------------------
     # STRING-DB
@@ -193,7 +216,7 @@ class MCPClient:
             return r.json()["results"]
         except Exception as e:
             logger.warning(f"MCP STRING-DB batch failed: {e}")
-            return [self.query_stringdb(g, species) for g in gene_names]
+            return self._parallel_fallback(lambda g: self.query_stringdb(g, species), gene_names)
 
     # ------------------------------------------------------------------
     # InterPro
@@ -219,7 +242,7 @@ class MCPClient:
             return r.json()["results"]
         except Exception as e:
             logger.warning(f"MCP InterPro batch failed: {e}")
-            return [self.query_interpro(pid) for pid in protein_ids]
+            return self._parallel_fallback(self.query_interpro, protein_ids)
 
     # ------------------------------------------------------------------
     # iPTMnet — PTM novelty assessment
@@ -294,7 +317,7 @@ class MCPClient:
             return r.json().get("results", [])
         except Exception as e:
             logger.warning(f"MCP PMC fulltext batch failed: {e}")
-            return [self.fetch_fulltext(pmid) for pmid in pmids]
+            return self._parallel_fallback(self.fetch_fulltext, pmids)
 
     # ------------------------------------------------------------------
     # HPA — Human Protein Atlas
@@ -399,7 +422,7 @@ class MCPClient:
             return r.json()["results"]
         except Exception as e:
             logger.warning(f"MCP Reactome batch failed: {e}")
-            return [self.query_reactome(g, organism) for g in gene_names]
+            return self._parallel_fallback(lambda g: self.query_reactome(g, organism), gene_names)
 
     # ------------------------------------------------------------------
     # Enrichr — Cluster-level Gene-set Enrichment (Layer 2)
@@ -468,7 +491,7 @@ class MCPClient:
             return r.json()["results"]
         except Exception as e:
             logger.warning(f"MCP STRING indirect batch failed: {e}")
-            return [self.query_string_indirect(g, species, top_partners) for g in gene_names]
+            return self._parallel_fallback(lambda g: self.query_string_indirect(g, species, top_partners), gene_names)
 
     # ------------------------------------------------------------------
     # Parallel helpers with concurrency + progress
@@ -611,7 +634,7 @@ class MCPClient:
             return r.json()["results"]
         except Exception as e:
             logger.warning(f"MCP PubMed batch search failed: {e}")
-            return [self.search_pubmed(**q) for q in queries]
+            return self._parallel_fallback(lambda q: self.search_pubmed(**q), queries)
 
     def fetch_articles(self, pmids: list) -> list:
         try:

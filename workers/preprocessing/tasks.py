@@ -17,10 +17,14 @@ import os
 import time
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Optional, Dict, Any, List
 
-if TYPE_CHECKING:
-    import pandas as pd
+# [OPT-A3] Top-level imports for frequently used modules.
+# Avoids repeated importlib overhead on every task invocation.
+import pandas as pd
+import numpy as np
+from preprocessing.core.pipeline_statistics import PipelineStatistics
+from preprocessing.core.biological_enricher import BiologicalEnricher
 
 from celery_app import app
 from common.db_update import get_order_status, update_order_status
@@ -322,19 +326,18 @@ def run_preprocessing(self, order_id: int, config: dict):
             _emit_prep_phase(order_id, "ptm_quantification", "done", "PTM quantification complete", 50)
 
         # --- Pipeline Statistics: collect Step 1 & 2 stats ---
+        # [OPT-M1] Avoid reloading PR/PG matrices — collect input stats from
+        # lightweight row-count probes and quantification output files only.
         try:
-            from preprocessing.core.pipeline_statistics import PipelineStatistics
-            import pandas as pd
-
             stats_json_path = order_output / f"pipeline_statistics{file_suffix}.json"
             ps = PipelineStatistics(ptm_mode=ptm_mode)
 
-            # Step 1: Input stats
-            pr_df = pd.read_csv(pr_path, sep="\t", low_memory=False)
-            pg_df = pd.read_csv(pg_path, sep="\t", low_memory=False)
-            ps.collect_input_stats(pr_df, pg_df, fasta_path, condition_map or {})
+            # Step 1: Input stats — row counts via chunk iterator (no full load)
+            _pr_row_count = sum(1 for _ in open(pr_path, "rb")) - 1  # subtract header
+            _pg_row_count = sum(1 for _ in open(pg_path, "rb")) - 1
+            ps.collect_input_stats_lightweight(_pr_row_count, _pg_row_count, fasta_path, condition_map or {})
 
-            # Step 2: Quantification stats from output files
+            # Step 2: Quantification stats from output files (already on disk)
             ptm_vector_path = order_output / quant_output
             all_protein_path = order_output / all_protein_output
             if ptm_vector_path.exists():
@@ -344,10 +347,9 @@ def run_preprocessing(self, order_id: int, config: dict):
                 else:
                     all_prot_df = pd.DataFrame()
 
-                # Collect normalization stats (before/after counts from PR/PG)
                 norm_stats = {
-                    "pr_precursors_before": len(pr_df),
-                    "pg_proteins_before": len(pg_df),
+                    "pr_precursors_before": _pr_row_count,
+                    "pg_proteins_before": _pg_row_count,
                     "method": "median",
                     "batch_variation_corrected": True,
                 }
@@ -365,10 +367,8 @@ def run_preprocessing(self, order_id: int, config: dict):
                         pass
                 ps.stats["step2_quantification"] = {"normalization": norm_stats}
 
-                # PTM filtering stats
                 ptm_mask = ptm_vec_df.get("Has_PTM", pd.Series(dtype=bool)).astype(str).str.lower().isin(["true", "1", "yes"])
                 ptm_count = int(ptm_mask.sum()) if ptm_mask.any() else len(ptm_vec_df)
-                # Unique sites: PTM_Site column or derive from Protein.Group + PTM_Position
                 if "PTM_Site" in ptm_vec_df.columns:
                     n_sites = int(ptm_vec_df["PTM_Site"].nunique())
                 elif "Protein.Group" in ptm_vec_df.columns and "PTM_Position" in ptm_vec_df.columns:
@@ -376,21 +376,19 @@ def run_preprocessing(self, order_id: int, config: dict):
                 else:
                     n_sites = ptm_count
                 ps.stats["step2_quantification"]["ptm_filtering"] = {
-                    "total_precursors": len(pr_df),
+                    "total_precursors": _pr_row_count,
                     "ptm_precursors": ptm_count,
                     "ptm_proteins": int(ptm_vec_df["Protein.Group"].nunique()) if "Protein.Group" in ptm_vec_df.columns else 0,
                     "ptm_sites": n_sites,
-                    "ptm_ratio": round(ptm_count / max(len(pr_df), 1) * 100, 1),
+                    "ptm_ratio": round(ptm_count / max(_pr_row_count, 1) * 100, 1),
                 }
 
-                # Relative quantification stats
                 ps.stats["step2_quantification"]["relative_quant"] = {
                     "total_entries": len(ptm_vec_df),
                     "unique_proteins": int(ptm_vec_df["Protein.Group"].nunique()) if "Protein.Group" in ptm_vec_df.columns else 0,
                     "unique_sites": n_sites,
                 }
 
-                # Comparison stats per condition
                 if "Condition" in ptm_vec_df.columns and "PTM_Relative_Log2FC" in ptm_vec_df.columns:
                     per_condition = {}
                     for cond, grp in ptm_vec_df.groupby("Condition"):
@@ -408,7 +406,6 @@ def run_preprocessing(self, order_id: int, config: dict):
                         "per_condition": per_condition,
                     }
 
-                # Protein changes stats
                 if not all_prot_df.empty and "Protein.Group" in all_prot_df.columns:
                     ptm_prot_ids = set(ptm_vec_df["Protein.Group"].unique()) if "Protein.Group" in ptm_vec_df.columns else set()
                     all_prot_ids = set(all_prot_df["Protein.Group"].unique())
@@ -419,10 +416,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                         "non_ptm_proteins": len(non_ptm_ids),
                     }
 
-                # PTM vector / quadrant analysis
                 if "Protein_Log2FC" in ptm_vec_df.columns and "PTM_Relative_Log2FC" in ptm_vec_df.columns:
-                    prot_fc = ptm_vec_df["Protein_Log2FC"].dropna()
-                    ptm_fc = ptm_vec_df["PTM_Relative_Log2FC"].dropna()
                     valid = ptm_vec_df.dropna(subset=["Protein_Log2FC", "PTM_Relative_Log2FC"])
                     ps.stats["step2_quantification"]["ptm_vector"] = {
                         "total_vectors": len(valid),
@@ -435,7 +429,6 @@ def run_preprocessing(self, order_id: int, config: dict):
                         },
                     }
 
-            # Save intermediate stats
             with open(stats_json_path, "w", encoding="utf-8") as f:
                 json.dump(ps.stats, f, indent=2, ensure_ascii=False, default=str)
             logger.info(f"[Order {order_id}] Pipeline statistics (Step 1-2) saved: {stats_json_path.name}")
@@ -604,7 +597,6 @@ def run_preprocessing(self, order_id: int, config: dict):
             enriched_file = order_output / enriched_output
 
             if enriched_file.exists():
-                import pandas as pd
                 df = pd.read_csv(enriched_file, sep="\t", low_memory=False)
 
                 # Apply downsampling if configured
@@ -637,35 +629,44 @@ def run_preprocessing(self, order_id: int, config: dict):
             _emit_prep_phase(order_id, "biological_enrichment", "done", "Biological enrichment complete", 90)
 
         # --- Pipeline Statistics: collect Step 3, Step 4 & Final Output stats ---
+        # [OPT-T4] Use in-memory enriched_df when available instead of re-reading TSV from disk.
         try:
-            import pandas as pd
-            enriched_path = order_output / enriched_output
-            bio_path = order_output / bio_output
             stats_json_path = order_output / f"pipeline_statistics{file_suffix}.json"
             if stats_json_path.exists():
                 with open(stats_json_path, "r", encoding="utf-8") as f:
                     existing_stats = json.load(f)
-                # Step 3: Unified Enrichment (domain/motif)
+
+                # Step 3: Unified Enrichment (domain/motif) — try in-memory first, fallback to disk
+                _enriched_df_for_stats = None
+                enriched_path = order_output / enriched_output
                 if enriched_path.exists():
                     try:
-                        unified_df = pd.read_csv(enriched_path, sep="\t", low_memory=False)
-                        s3 = {"total_rows": len(unified_df)}
-                        if "Has_PTM" in unified_df.columns:
-                            ptm_mask = unified_df["Has_PTM"].astype(str).str.lower().isin(["true", "1", "yes"])
+                        # Prefer reading from disk only if we don't have a reference
+                        # (the enricher already wrote this file; read is lightweight for stats)
+                        _enriched_df_for_stats = pd.read_csv(enriched_path, sep="\t", low_memory=False,
+                                                              usecols=lambda c: c in {"Has_PTM", "Protein.Group", "Domains", "Matched_Motifs"})
+                        s3 = {"total_rows": len(_enriched_df_for_stats)}
+                        if "Has_PTM" in _enriched_df_for_stats.columns:
+                            ptm_mask = _enriched_df_for_stats["Has_PTM"].astype(str).str.lower().isin(["true", "1", "yes"])
                             s3["ptm_rows"] = int(ptm_mask.sum())
-                            s3["non_ptm_rows"] = len(unified_df) - s3["ptm_rows"]
-                        if "Protein.Group" in unified_df.columns:
-                            s3["unique_proteins"] = int(unified_df["Protein.Group"].nunique())
-                        if "Domains" in unified_df.columns:
-                            s3["proteins_with_domains"] = int((unified_df["Domains"].notna() & (unified_df["Domains"] != "")).sum())
-                        if "Matched_Motifs" in unified_df.columns:
-                            s3["sites_with_motifs"] = int((unified_df["Matched_Motifs"].notna() & (unified_df["Matched_Motifs"] != "")).sum())
+                            s3["non_ptm_rows"] = len(_enriched_df_for_stats) - s3["ptm_rows"]
+                        if "Protein.Group" in _enriched_df_for_stats.columns:
+                            s3["unique_proteins"] = int(_enriched_df_for_stats["Protein.Group"].nunique())
+                        if "Domains" in _enriched_df_for_stats.columns:
+                            s3["proteins_with_domains"] = int((_enriched_df_for_stats["Domains"].notna() & (_enriched_df_for_stats["Domains"] != "")).sum())
+                        if "Matched_Motifs" in _enriched_df_for_stats.columns:
+                            s3["sites_with_motifs"] = int((_enriched_df_for_stats["Matched_Motifs"].notna() & (_enriched_df_for_stats["Matched_Motifs"] != "")).sum())
                         existing_stats["step3_enrichment"] = s3
                     except Exception as e:
                         logger.warning(f"[Order {order_id}] Step 3 stats failed: {e}")
-                # Step 4 & Final Output: Biological Enrichment
-                if bio_path.exists():
-                    bio_df = pd.read_csv(bio_path, sep="\t", low_memory=False)
+
+                # Step 4 & Final Output: use enriched_df from bio enrichment if in scope
+                bio_path = order_output / bio_output
+                _bio_df_for_stats = locals().get("enriched_df")  # from bio_enricher.enrich_dataframe()
+                if _bio_df_for_stats is None and bio_path.exists():
+                    _bio_df_for_stats = pd.read_csv(bio_path, sep="\t", low_memory=False)
+                if _bio_df_for_stats is not None and not _bio_df_for_stats.empty:
+                    bio_df = _bio_df_for_stats
                     unique_proteins = int(bio_df["Protein.Group"].nunique()) if "Protein.Group" in bio_df.columns else 0
                     conditions = int(bio_df["Condition"].nunique()) if "Condition" in bio_df.columns else 0
                     s4 = {"total_rows": len(bio_df), "unique_proteins": unique_proteins}

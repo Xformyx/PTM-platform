@@ -99,12 +99,13 @@ class BiologicalEnricher:
         Enrich a dataframe with UniProt, STRING-DB, and KEGG annotations.
         All API calls go through the MCP Server.
         Column names match ptm-preprocessing_v2_260131 output.
+
+        [OPT-M4] Caller already provides a copy (or owns the DataFrame).
+        Skip redundant df.copy() — columns are added in-place.
         """
         if not self.mcp:
             logger.warning("No MCP client — skipping biological enrichment")
             return df
-
-        df = df.copy()
 
         # v2 column names
         str_cols = [

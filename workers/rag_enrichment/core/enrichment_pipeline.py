@@ -74,7 +74,24 @@ MCP_WORKERS = int(_os.getenv("RAG_MCP_WORKERS", "6"))
 # Default 2: each PTM runs abstract+kinase+functional in parallel inside Phase B,
 # so 4 workers → up to 12 simultaneous Ollama requests which causes queue buildup.
 # Set RAG_PTM_WORKERS env var in docker-compose to tune for your hardware.
-PTM_WORKERS = int(_os.getenv("RAG_PTM_WORKERS", "2"))
+# [OPT-T1] Auto-detect: Cloud LLMs (Gemini/OpenAI) handle concurrency well,
+# so default to 4 workers for cloud and 2 for local Ollama.
+def _default_ptm_workers() -> int:
+    explicit = _os.getenv("RAG_PTM_WORKERS", "").strip()
+    if explicit:
+        return int(explicit)
+    provider = _os.getenv("LLM_PROVIDER", "auto").lower()
+    rag_model = (_os.getenv("RAG_ENRICHMENT_LLM_MODEL", "")
+                 or _os.getenv("RAG_LLM_MODEL", "")
+                 or _os.getenv("LLM_MODEL", "")).lower()
+    is_cloud = (
+        provider in ("gemini", "openai")
+        or rag_model.startswith("gemini-")
+        or rag_model.startswith("gpt-")
+    )
+    return 4 if is_cloud else 2
+
+PTM_WORKERS = _default_ptm_workers()
 # Abstract batch mode: analyze all articles in a single LLM call instead of one-by-one.
 # Reduces PTM-level LLM calls from N to 1 for abstract analysis.
 # Falls back to per-article mode automatically if batch parsing fails.
@@ -158,19 +175,41 @@ def _phase_b_context_signature(context: Optional[dict], ptm: dict) -> str:
 class _GeneCache:
     """Thread-safe cache for gene-level MCP results.
 
-    Many PTMs share the same gene (e.g. MAPK1 S189, MAPK1 T185).
-    Gene-level queries (KEGG, STRING-DB, UniProt, HPA, GTEx, BioGRID, Reactome)
-    return identical results regardless of the specific PTM site.
-    This cache stores those results so they are fetched only once per gene.
+    [OPT-T8] Two-tier: Redis (TTL 24h) for cross-order persistence,
+    in-memory dict for per-task fast path. Same gene across different
+    orders reuses Redis-cached parsed results instead of re-querying MCP.
     """
+
+    _REDIS_TTL = int(os.getenv("RAG_GENE_CACHE_TTL", "86400"))  # 24 hours
 
     def __init__(self):
         self._store: Dict[str, dict] = {}
         self._lock = threading.Lock()
+        self._redis = None
+        try:
+            import redis
+            _url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+            self._redis = redis.from_url(_url, decode_responses=True, socket_timeout=2)
+            self._redis.ping()
+        except Exception:
+            self._redis = None
 
     def get(self, key: str) -> Optional[dict]:
         with self._lock:
-            return self._store.get(key)
+            mem = self._store.get(key)
+        if mem is not None:
+            return mem
+        if self._redis:
+            try:
+                raw = self._redis.get(f"gc:{key}")
+                if raw:
+                    val = json.loads(raw)
+                    with self._lock:
+                        self._store[key] = val
+                    return val
+            except Exception:
+                pass
+        return None
 
     def set(self, key: str, value: dict) -> None:
         def failed(item):
@@ -181,10 +220,22 @@ class _GeneCache:
             return
         with self._lock:
             self._store[key] = value
+        if self._redis:
+            try:
+                self._redis.setex(f"gc:{key}", self._REDIS_TTL, json.dumps(value, ensure_ascii=False, default=str))
+            except Exception:
+                pass
 
     def has(self, key: str) -> bool:
         with self._lock:
-            return key in self._store
+            if key in self._store:
+                return True
+        if self._redis:
+            try:
+                return bool(self._redis.exists(f"gc:{key}"))
+            except Exception:
+                pass
+        return False
 
 
 class RAGEnrichmentPipeline:
