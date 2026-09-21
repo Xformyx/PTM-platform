@@ -158,12 +158,22 @@ NODE_SHAPES = {
 # ---------------------------------------------------------------------------
 
 def _observation_node_id(ptm):
+    """Stable network node key for one measured form.
+
+    구현 대상: report network identity. complete feature_id, else gene-site.
+    사전등록: 해당 없음 (표시·그래프 키). 2026-09-21 정정.
+    해석 한계: 네트워크 노드 식별이지 TMM 기여 비율이 아니다.
+    주장 금지: 이 키로 kinase 귀속을 주장하지 않는다.
+    """
     from ptm_shared.feature_identity import canonical_feature_identity
     gene = ptm.get('gene') or ptm.get('Gene.Name') or 'Unknown'
     site = ptm.get('position') or ptm.get('PTM_Position') or ''
+    fallback = f'{gene}-{site}'
     if any(ptm.get(key) for key in ('Precursor.Id', 'precursor_id', 'Modified.Sequence', 'modified_sequence')):
-        return canonical_feature_identity(ptm)['feature_id']
-    return f'{gene}-{site}'
+        feature_id = canonical_feature_identity(ptm).get('feature_id')
+        if feature_id:
+            return feature_id
+    return fallback
 
 
 def _scoped_relation_view(nodes, edges):
@@ -368,11 +378,14 @@ def _validate_network(nodes: list, edges: list) -> dict:
     - Orphan nodes (no edges)
     - Edge type distribution
     """
-    node_ids = {n["id"] for n in nodes}
+    node_ids = {n["id"] for n in nodes if n.get("id") is not None}
     edge_node_ids = set()
     for e in edges:
-        edge_node_ids.add(e["source"])
-        edge_node_ids.add(e["target"])
+        source, target = e.get("source"), e.get("target")
+        if source is not None:
+            edge_node_ids.add(source)
+        if target is not None:
+            edge_node_ids.add(target)
 
     missing_nodes = edge_node_ids - node_ids
     orphan_nodes = node_ids - edge_node_ids
@@ -388,9 +401,9 @@ def _validate_network(nodes: list, edges: list) -> dict:
         "non_ptm_nodes": len([n for n in nodes if n.get("type") == "Non-PTM"]),
         "connected_nodes": len(edge_node_ids & node_ids),
         "orphan_nodes": len(orphan_nodes),
-        "orphan_node_ids": sorted(list(orphan_nodes))[:20],
+        "orphan_node_ids": sorted(str(oid) for oid in orphan_nodes)[:20],
         "missing_nodes": len(missing_nodes),
-        "missing_node_ids": sorted(list(missing_nodes))[:20],
+        "missing_node_ids": sorted(str(mid) for mid in missing_nodes)[:20],
         "edge_types": dict(edge_types),
         "is_valid": len(missing_nodes) == 0,
     }
@@ -3092,7 +3105,9 @@ def generate_network_figure_section(
             supp_section += "The following PTM nodes had no interaction edges in the network:\n\n"
             supp_section += "| Node ID | Type |\n|---------|------|\n"
             for oid in orphan_ids[:20]:
-                node_type = "PTM" if "-" in oid else "Non-PTM"
+                if oid is None:
+                    continue
+                node_type = "PTM" if "-" in str(oid) else "Non-PTM"
                 supp_section += f"| {oid} | {node_type} |\n"
             if len(orphan_ids) > 20:
                 supp_section += f"| ... | ({len(orphan_ids) - 20} more) |\n"

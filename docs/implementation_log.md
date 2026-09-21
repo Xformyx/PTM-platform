@@ -3051,3 +3051,23 @@
 - **해석 한계:** None은 미측정이다. TF 비활성이 아니다.
 - **결정성:** 새 seed 없음. `THRESHOLD = 0.3`은 기존 선언.
 
+### [2026-09-21] Report Isolated Nodes — None node id TypeError
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/nodes/network_node.py`
+  (`_observation_node_id`, `_validate_network`, `generate_network_figure_section`)
+- **구현 대상 설계:** 신규 — 운영 정정. 2026-09-21
+  `Insulin_Signaling_V3_260919_Codex` (Order 80) report가 Isolated Nodes
+  표에서 `'-' in None` 으로 죽은 뒤 선언. 정량·TMM 불변.
+- **사전등록 상태:** 해당 없음 (표시·그래프 키). primary 승격 금지.
+- **내용:** `canonical_feature_identity`는 incomplete row에서
+  `feature_id=None`을 반환한다. Modified.Sequence만 있고 charge가 없으면
+  이 경로다. `_observation_node_id`는 그때 gene-site로 폴백한다.
+  `_validate_network`는 None id를 노드 집합에서 빼고, Isolated Nodes 표는
+  None을 건너뛴다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** gene-site 폴백은 그래프 키다. 불완전 identity를
+  complete FEATURE id로 승격하지 않는다.
+- **결정성:** 새 seed·임계 없음. complete feature_id 규칙은
+  `ptm_shared.feature_identity` 기존 선언을 따른다.
+
