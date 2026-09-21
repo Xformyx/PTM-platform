@@ -3071,3 +3071,20 @@
 - **결정성:** 새 seed·임계 없음. complete feature_id 규칙은
   `ptm_shared.feature_identity` 기존 선언을 따른다.
 
+### [2026-09-21] Report explorer index — 256MB ORDER BY OOM
+
+- **분류:** 정정
+- **대상:** `ptm_shared/report_explorer_index.py`,
+  `ptm_shared/signaling_evidence_index.py`, `docs/BUILD_AND_DEPLOY.md` §5.1
+- **구현 대상 설계:** `docs/BUILD_AND_DEPLOY.md` §5.1 (Report 인덱스
+  청크 COPY 선언 후 구현)
+- **사전등록 상태:** 해당 없음 (인덱스 작성). primary 승격 금지.
+- **내용:** `Insulin_Signaling_V3_260919_Codex_0921` report 봉인이
+  `COPY ... ORDER BY kind,record_id` 를 DuckDB 256MB에서 실행하다
+  244MiB/244MiB OOM. Explorer records와 같이 32MB jsonl 청크 COPY로
+  바꾸고 `records-part-*.parquet`를 조회가 glob한다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 봉인 패킷 조회 레이아웃만 나눈다. TMM NNLS·τ를
+  바꾸지 않는다.
+- **결정성:** `EXPLORER_JSONL_CHUNK_BYTES = 32MiB` 기존 값. 새 seed 없음.
+

@@ -131,4 +131,7 @@ Explorer parquet는 jsonl을 **한 줄씩** observation으로 펼친 뒤 `COPY`�
 `ORDER BY`와 `json_each` 전체 정렬은 작성 단계에서 쓰지 않는다. 페이지 조회가 `record_id`로 정렬한다.
 records jsonl이 32MB(`EXPLORER_JSONL_CHUNK_BYTES`)를 넘으면 `explorer_records-part-*.parquet`로 나눈다.
 부분 파일을 DuckDB로 다시 합치지 않는다. `record_json` VARCHAR 전체를 한 번에 올리면 512MB에서 OOM이다.
-페이지 조회는 그 glob을 256MB로 읽는다. TMM NNLS·τ를 바꾸지 않는다.
+페이지 조회는 그 glob을 256MB로 읽는다.
+Report 봉인 인덱스(`report_explorer_index.v2`)도 같은 청크 COPY를 쓴다.
+256MB + `ORDER BY kind,record_id`는 Insulin-scale sealed packet에서 OOM이다.
+부분 파일은 `records-part-*.parquet`이고 조회가 glob한다. TMM NNLS·τ를 바꾸지 않는다.

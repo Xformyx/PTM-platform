@@ -7,7 +7,6 @@ import json
 import os
 import tempfile
 from pathlib import Path
-import duckdb
 from .analysis_universe import signature
 from .report_revision import file_sha256, _atomic_json
 
@@ -36,6 +35,13 @@ def public_source_run(record):
 
 
 def build_report_explorer_index(root, report, destination):
+    """Write sealed-report Explorer rows with the same chunked COPY as §5.1.
+
+    구현 대상: docs/BUILD_AND_DEPLOY.md §5.1 report_explorer_index.v2
+    사전등록: 해당 없음 (인덱스 작성, 2026-09-21).
+    해석 한계: 봉인 패킷 조회 인덱스다. TMM 입력이 아니다.
+    주장 금지: 이 파일로 kinase 귀속이나 τ를 논하지 않는다.
+    """
     root, destination = Path(root), Path(destination)
     metadata=destination.with_suffix(".manifest.json")
     if metadata.exists():
@@ -98,14 +104,21 @@ def build_report_explorer_index(root, report, destination):
     emit("source-runs","sealed_report",{"source":"sealed_report_packets","status":"available" if packets else "unavailable",
         "reason":None if packets else "no_sealed_evidence_packets","packet_roles":sorted(packets)})
     destination.parent.mkdir(parents=True,exist_ok=True)
+    from .signaling_evidence_index import _copy_jsonl_to_parquet
     with tempfile.TemporaryDirectory(dir=destination.parent) as work:
         temporary=Path(work)/"records.jsonl"
         with temporary.open("x") as stream:
             for row in rows: stream.write(json.dumps(row,allow_nan=False)+"\n")
-        with duckdb.connect(config={"threads":1,"memory_limit":"256MB"}) as db:
-            db.read_json(str(temporary),format="newline_delimited",columns={key:"VARCHAR" for key in rows[0]}).create_view("records")
-            db.execute("COPY (SELECT * FROM records ORDER BY kind,record_id) TO ? (FORMAT PARQUET)",[str(Path(work)/"records.parquet")])
-        os.replace(Path(work)/"records.parquet",destination)
+        work_parquet=Path(work)/destination.name
+        _copy_jsonl_to_parquet(
+            temporary,
+            work_parquet,
+            {key:"VARCHAR" for key in rows[0]},
+            spill=Path(work)/"spill",
+        )
+        for part in sorted(Path(work).glob(f"{destination.stem}-part-*.parquet")):
+            os.replace(part, destination.parent / part.name)
+        os.replace(work_parquet,destination)
     result={"schema_version":VERSION,"filename":str(destination.relative_to(root)),"sha256":file_sha256(destination),
         "annotation_snapshot":signature(bindings) if bindings else None,"packet_roles":sorted(packets),
         "source_scope":"sealed_report_packets","record_count":len(rows)}

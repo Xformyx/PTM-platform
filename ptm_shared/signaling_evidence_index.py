@@ -118,13 +118,18 @@ def _copy_one_jsonl_to_parquet(jsonl, parquet, columns, *, spill=None):
         )
 
 
+def parquet_files_for_index(path):
+    """Prefer sibling part parquet files. Do not merge them in DuckDB."""
+    path = Path(path)
+    parts = sorted(path.parent.glob(f"{path.stem}-part-*.parquet"))
+    if parts:
+        return [str(part) for part in parts]
+    return [str(path)]
+
+
 def explorer_record_parquet_files(directory):
     """Parquet sources for Explorer pages. Prefer parts; do not merge them."""
-    directory = Path(directory)
-    parts = sorted(directory.glob("explorer_records-part-*.parquet"))
-    if parts:
-        return [str(path) for path in parts]
-    return [str(directory / "explorer_records.parquet")]
+    return parquet_files_for_index(Path(directory) / "explorer_records.parquet")
 
 
 def _write_records_layout(parquet, part_count):
@@ -178,7 +183,7 @@ def iter_explorer_records(directory, *, report_index=None):
     """Stream the same complete, joined inventory used by page queries."""
     files = explorer_record_parquet_files(directory)
     if report_index:
-        files.append(str(report_index))
+        files.extend(parquet_files_for_index(report_index))
     with duckdb.connect(config={"threads": 1, "memory_limit": "256MB"}) as db:
         db.read_parquet(files).create_view("all_records")
         where = " WHERE NOT (kind='source-runs' AND record_id='literature')" if report_index else ""
@@ -348,7 +353,7 @@ def explorer_page(directory, bundle_id, *, kind, pathway_key=None, feature_id=No
     where = " AND ".join(clauses)
     with duckdb.connect(config={"threads":1,"memory_limit":"256MB"}) as db:
         files=explorer_record_parquet_files(directory)
-        if report_index: files.append(str(report_index))
+        if report_index: files.extend(parquet_files_for_index(report_index))
         db.read_parquet(files).create_view("all_records")
         # The base run did not request literature. Its descendant's actual
         # sealed retrieval ledger supersedes that placeholder, not the results.
