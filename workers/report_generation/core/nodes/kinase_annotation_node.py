@@ -52,6 +52,7 @@ from common.kinase_utils import (
     KINASE_ALIAS_MAP,
 )
 from common.temporal_utils import tp_to_minutes
+from report_generation.core.reader_authoring import numeric_or_zero, peak_score_magnitude
 
 logger = logging.getLogger(__name__)
 
@@ -1973,15 +1974,16 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
         parts.append("")
 
         # Top 25 kinases by absolute peak score
-        sorted_ks = sorted(ks_list, key=lambda x: abs(x.get("peak_score", 0)), reverse=True)
+        sorted_ks = sorted(ks_list, key=peak_score_magnitude, reverse=True)
         for ks in sorted_ks[:25]:
             kinase_name = ks.get("kinase", "")
             sub_count = ks.get("substrate_count", 0)
             confidence = ks.get("confidence", 0)
-            peak_cond = ks.get("peak_condition", "")
-            peak_score = ks.get("peak_score", 0)
+            peak_cond = ks.get("peak_condition") or "no-call"
+            peak_score = ks.get("peak_score")
+            peak_txt = f"{peak_score:+.2f}" if peak_score is not None else "no-call"
             direction = ks.get("direction", "neutral")
-            coherence = ks.get("coherence", 0)
+            coherence = numeric_or_zero(ks.get("coherence"))
             cw_group = ks.get("cowave_group", -1)
             cw_str = f"CW-G{cw_group}" if cw_group >= 0 else "ungrouped"
 
@@ -1989,7 +1991,10 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
             scores = ks.get("scores", {})
             score_parts = []
             for c in conditions[:6]:  # Max 6 conditions
-                v = scores.get(c, 0)
+                v = scores.get(c)
+                if v is None:
+                    continue
+                v = numeric_or_zero(v)
                 if abs(v) >= 0.01:
                     score_parts.append(f"{c}:{v:+.2f}")
             score_str = ", ".join(score_parts) if score_parts else "flat"
@@ -2037,7 +2042,7 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
             raw_dn = ks.get("raw_down_sums") or ks.get("down_sums", {})
             raw_score_parts = []
             for c in conditions[:6]:
-                net = raw_up.get(c, 0) + raw_dn.get(c, 0)
+                net = numeric_or_zero(raw_up.get(c)) + numeric_or_zero(raw_dn.get(c))
                 if abs(net) >= 0.01:
                     raw_score_parts.append(f"{c}:{net:+.2f}")
             raw_score_str = ", ".join(raw_score_parts) if raw_score_parts else ""
@@ -2047,9 +2052,7 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
             tmm_w_dn = ks.get("down_sums", {})
             tmm_score_parts = []
             for c in conditions[:6]:
-                wu = tmm_w_up.get(c, 0)
-                wd = tmm_w_dn.get(c, 0)
-                net = wu + wd
+                net = numeric_or_zero(tmm_w_up.get(c)) + numeric_or_zero(tmm_w_dn.get(c))
                 if abs(net) >= 0.01:
                     tmm_score_parts.append(f"{c}:{net:+.2f}")
             tmm_score_str = ", ".join(tmm_score_parts) if tmm_score_parts else ""
@@ -2070,7 +2073,7 @@ def _build_frontend_kinase_llm_context(frontend_kinase: dict, ptm_type: str, kin
 
             parts.append(
                 f"**{kinase_name}** [{cw_str}] — {sub_count} substrates, "
-                f"conf={confidence:.0%}, peak={peak_cond} ({peak_score:+.2f}), "
+                f"conf={numeric_or_zero(confidence):.0%}, peak={peak_cond} ({peak_txt}), "
                 f"direction={direction}, coherence={coherence:.2f}{pattern_str}{nuc_str}{self_ptm_str}{tmm_str}"
             )
             parts.append(f"  Temporal profile (winsorized mean score): [{score_str}]")

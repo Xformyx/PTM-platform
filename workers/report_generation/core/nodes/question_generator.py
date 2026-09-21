@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from common.llm_client import LLMClient
+from report_generation.core.reader_authoring import peak_score_magnitude
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +192,8 @@ def _get_co_scientist_questions(state: dict) -> list:
     # Q2: Candidate contexts remain data-derived; literature/pathway claims are
     # added later only when the report has traceable reference identity.
     top_ks = sorted(
-        [ks for ks in kinase_scores if not ks.get("is_sub_pattern")],
-        key=lambda x: abs(x.get("peak_score", 0)), reverse=True
+        [ks for ks in kinase_scores if not ks.get("is_sub_pattern") and ks.get("peak_score") is not None],
+        key=peak_score_magnitude, reverse=True
     )[:3]
     if top_ks:
         k_names = ", ".join(ks.get("kinase", "") for ks in top_ks)

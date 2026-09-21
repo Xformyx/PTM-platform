@@ -2943,3 +2943,111 @@
 - **결정성:** 새 seed·solver·dtype 없음. `CONSUMER_WAIT_SECONDS=30`,
   `HEARTBEAT_SECONDS=120`, `JOIN_TIMEOUT_SECONDS=21780`(기존).
 
+### [2026-09-21] TMM parent_generation = 요청 run_gen, Explorer DuckDB 4GB
+
+- **분류:** 정정
+- **대상:** `api-server/app/services/analysis_jobs.py`,
+  `ptm_shared/signaling_evidence_index.py`, `docs/BUILD_AND_DEPLOY.md` §5.1
+- **구현 대상 설계:** `docs/BUILD_AND_DEPLOY.md` §5.1 (2026-09-21 선언)
+- **사전등록 상태:** 해당 없음 (운영 펜스). primary 승격 금지.
+- **내용:** TMM job의 `parent_generation`을 스냅샷 publish 값이 아니라
+  submit 시점 `order_run_gen`으로 기록한다. RAG-only 재실행이 같은
+  input revision에서 즉시 superseded 되던 경로를 닫는다. Explorer
+  parquet COPY DuckDB `memory_limit` 기본값을 512MB → 4GB.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 펜스와 인덱스 작성 메모리만 바꾼다. TMM NNLS·τ를
+  바꾸지 않는다. 새 start가 run_gen을 올리면 TMM은 여전히 superseded.
+- **결정성:** 새 seed·solver 없음. `EXPLORER_INDEX_MEMORY_LIMIT` 기본 `4GB`.
+
+### [2026-09-21] Explorer parquet — jsonl 스트리밍, 작성 시 ORDER BY 제거
+
+- **분류:** 정정
+- **대상:** `ptm_shared/signaling_evidence_index.py`, `docs/BUILD_AND_DEPLOY.md` §5.1
+- **구현 대상 설계:** `docs/BUILD_AND_DEPLOY.md` §5.1 (2026-09-21, 4GB 한도 폐기)
+- **사전등록 상태:** 해당 없음 (인덱스 작성). primary 승격 금지.
+- **내용:** Order 80 explorer_records.jsonl 806MB를 DuckDB `json_each`+
+  `ORDER BY`로 펼치다 3.7GiB/4GB에서 OOM. feature trajectory는 jsonl을
+  한 줄씩 숫자 jsonl로 펼친 뒤 `COPY (SELECT * FROM src)`만 한다.
+  페이지 조회가 `record_id` 정렬을 유지한다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** Explorer 투영 작성 경로만 바꾼다. TMM NNLS·τ·kinase
+  점수를 바꾸지 않는다.
+- **결정성:** 새 seed·solver 없음. COPY 한도 기본 512MB(정렬 없음).
+
+### [2026-09-21] Explorer parquet — 32MB jsonl 청크 COPY
+
+- **분류:** 정정
+- **대상:** `ptm_shared/signaling_evidence_index.py`, `docs/BUILD_AND_DEPLOY.md` §5.1
+- **구현 대상 설계:** `docs/BUILD_AND_DEPLOY.md` §5.1 (청크 선언 후 구현)
+- **사전등록 상태:** 해당 없음 (인덱스 작성). primary 승격 금지.
+- **내용:** observation flatten 후에도 records jsonl 806MB를 512MB
+  DuckDB에 한 번에 COPY하면 OOM. 32MB 경계로 줄을 나누고 부분
+  parquet를 `read_parquet`로 합친다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 파일 분할만 한다. TMM NNLS·τ를 바꾸지 않는다.
+- **결정성:** `EXPLORER_JSONL_CHUNK_BYTES = 32MiB`. 새 seed 없음.
+
+### [2026-09-21] Explorer parquet — 부분 파일 유지, DuckDB merge 폐기
+
+- **분류:** 정정
+- **대상:** `ptm_shared/signaling_evidence_index.py`, `docs/BUILD_AND_DEPLOY.md` §5.1
+- **구현 대상 설계:** `docs/BUILD_AND_DEPLOY.md` §5.1 (merge 금지 선언 후 구현)
+- **사전등록 상태:** 해당 없음 (인덱스 작성). primary 승격 금지.
+- **내용:** 32MB 청크 COPY는 성공(25 part parquet). 이어서
+  `read_parquet` 전체 merge / disk table INSERT가 `record_json`
+  VARCHAR를 다시 올려 488MiB/512MB OOM. 부분 파일을
+  `explorer_records-part-*.parquet`로 두고 조회가 glob한다.
+  `explorer_records.parquet`는 part_count layout만 기록한다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** Explorer 파일 레이아웃만 바꾼다. TMM NNLS·τ를 바꾸지 않는다.
+- **결정성:** 새 seed 없음. 조회 memory_limit 256MB는 기존과 같다.
+
+### [2026-09-21] Report — TMM no-call `peak_score` is None
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/reader_authoring.py`, question/hypothesis/kinase/signal-flow nodes
+- **구현 대상 설계:** `production_temporal_analysis.render_result` (evaluable 조건이 없으면 `peak_score=None`)
+- **사전등록 상태:** 해당 없음 (정렬·표시). primary 승격 금지.
+- **내용:** `dict.get("peak_score", 0)`은 키가 None이면 None을 돌려
+  `abs(None)`으로 Report가 죽는다. 순위 키는 no-call을 0으로 두고,
+  질문 후보에서는 None을 제외한다. 점수를 바꾸지 않는다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** None은 no-call이다. 비활성 증거가 아니다.
+- **결정성:** 새 seed·임계 없음.
+
+### [2026-09-21] Report — 단백질 Log2FC None은 round 하지 않음
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/dynamic_prompt_generator.py`
+- **구현 대상 설계:** write_sections 표 작성. 측정 없는 조건은 no-call.
+- **사전등록 상태:** 해당 없음 (표시). primary 승격 금지.
+- **내용:** `non_ptm_nodes`의 `protein_log2fc`가 None인데 `round(plog2fc, 2)`로
+  Report가 70%에서 죽었다. 유한값만 반올림하고 빈 칸은 미측정으로 둔다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 빈 칸은 미측정이다. 변화가 0이라는 뜻이 아니다.
+- **결정성:** 새 seed·임계 없음.
+
+### [2026-09-21] Report — Non-PTM temporal `float(None)` 방지
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/dynamic_prompt_generator.py`
+- **구현 대상 설계:** write_sections Non-PTM 표. 측정 없는 조건은 no-call.
+- **사전등록 상태:** 해당 없음 (표시). primary 승격 금지.
+- **내용:** `build_nonptm_temporal_analysis`가 `protein_log2fc=None`을
+  `float()`에 넣어 70%에서 죽음. 유한값만 넣고 빈 칸은 미측정으로 둔다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 빈 칸은 미측정이다. 변화가 0이라는 뜻이 아니다.
+- **결정성:** 새 seed·임계 없음.
+
+### [2026-09-21] Report — TF inference `abs(None)` 방지
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/dynamic_prompt_generator.py`
+- **구현 대상 설계:** write_sections TF 추론 블록. 측정 없는 조건은 no-call.
+- **사전등록 상태:** 해당 없음 (표시). primary 승격 금지.
+- **내용:** `build_tf_activity_inference`가 `protein_log2fc=None`을
+  `abs(fc)`에 넣어 70%에서 죽음. 유한값만 비교한다. 임계 0.3은 기존 값.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** None은 미측정이다. TF 비활성이 아니다.
+- **결정성:** 새 seed 없음. `THRESHOLD = 0.3`은 기존 선언.
+

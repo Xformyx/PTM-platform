@@ -629,6 +629,29 @@ BAD EXAMPLE (NEVER write this):
 # v98: Structured Protein Data Builder for LLM Prompts
 # ---------------------------------------------------------------------------
 
+def _finite_round(value, digits=2):
+    """Round a measured contrast. None is missing, not 0.
+
+    구현 대상: write_sections 표 작성. 측정 없는 조건은 no-call.
+    사전등록: 해당 없음 (표시, 2026-09-21).
+    해석 한계: 빈 칸은 미측정이다. 변화가 없다는 뜻이 아니다.
+    주장 금지: 이 반올림으로 효과 크기를 새로 만들지 않는다.
+    """
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or abs(number) == float("inf"):
+        return None
+    return round(number, digits)
+
+
+def _cell(value):
+    return f"{value:.2f}" if value is not None else "\u2014"
+
+
 def build_structured_protein_data_for_llm(
     results: dict,
     timepoints: list,
@@ -665,19 +688,22 @@ def build_structured_protein_data_for_llm(
                 gene = node.get("gene", node.get("id", "Unknown"))
                 site = node.get("site", "")
                 key = f"{gene}({site})" if site else gene
-                ptm_log2fc = node.get("value", node.get("ptm_log2fc", node.get("log2fc", 0)))
-                protein_log2fc = node.get("protein_log2fc", 0)
+                ptm_log2fc = _finite_round(node.get("value", node.get("ptm_log2fc", node.get("log2fc"))))
+                protein_log2fc = _finite_round(node.get("protein_log2fc"))
+                if ptm_log2fc is None and protein_log2fc is None:
+                    continue
 
                 if key not in ptm_data:
                     ptm_data[key] = {"gene": gene, "site": site}
                 ptm_data[key][tp] = {
-                    "ptm_log2fc": round(ptm_log2fc, 2),
-                    "protein_log2fc": round(protein_log2fc, 2),
+                    "ptm_log2fc": ptm_log2fc,
+                    "protein_log2fc": protein_log2fc,
                 }
                 protein_names.append(gene)
-                log2fc_values.append(round(ptm_log2fc, 2))
-                if protein_log2fc != 0:
-                    log2fc_values.append(round(protein_log2fc, 2))
+                if ptm_log2fc is not None:
+                    log2fc_values.append(ptm_log2fc)
+                if protein_log2fc is not None:
+                    log2fc_values.append(protein_log2fc)
 
     # Collect Non-PTM proteins
     nonptm_data: Dict[str, dict] = {}
@@ -691,13 +717,14 @@ def build_structured_protein_data_for_llm(
             gene = node.get("gene", node.get("id", "Unknown"))
             if not gene or gene == "Unknown":
                 continue
-            plog2fc = node.get("protein_log2fc", node.get("log2fc", 0))
+            plog2fc = _finite_round(node.get("protein_log2fc", node.get("log2fc")))
+            if plog2fc is None:
+                continue
             if gene not in nonptm_data:
                 nonptm_data[gene] = {}
-            nonptm_data[gene][tp] = round(plog2fc, 2)
+            nonptm_data[gene][tp] = plog2fc
             protein_names.append(gene)
-            if plog2fc != 0:
-                log2fc_values.append(round(plog2fc, 2))
+            log2fc_values.append(plog2fc)
 
     if not ptm_data:
         return ("", [], [])
@@ -743,10 +770,10 @@ def build_structured_protein_data_for_llm(
         max_abs = 0
         for tp in timepoints:
             if tp in data and isinstance(data[tp], dict):
-                ptm_val = data[tp]["ptm_log2fc"]
-                prot_val = data[tp].get("protein_log2fc", 0)
-                row += f" {ptm_val:.2f} | {prot_val:.2f} |"
-                if abs(ptm_val) > max_abs:
+                ptm_val = data[tp].get("ptm_log2fc")
+                prot_val = data[tp].get("protein_log2fc")
+                row += f" {_cell(ptm_val)} | {_cell(prot_val)} |"
+                if ptm_val is not None and abs(ptm_val) > max_abs:
                     max_abs = abs(ptm_val)
             else:
                 row += " \u2014 | \u2014 |"
@@ -758,7 +785,7 @@ def build_structured_protein_data_for_llm(
     if nonptm_data:
         sorted_nonptm = sorted(
             nonptm_data.items(),
-            key=lambda x: max(abs(v) for v in x[1].values()) if x[1] else 0,
+            key=lambda x: max((abs(v) for v in x[1].values() if v is not None), default=0),
             reverse=True,
         )
         lines.append("### Table B: Verified Non-PTM Effector Protein Abundance Data")
@@ -778,9 +805,9 @@ def build_structured_protein_data_for_llm(
             row = f"| {i} | **{gene}** |"
             max_abs = 0
             for tp in timepoints:
-                val = tp_data.get(tp, 0)
-                row += f" {val:.2f} |"
-                if abs(val) > max_abs:
+                val = tp_data.get(tp)
+                row += f" {_cell(val)} |"
+                if val is not None and abs(val) > max_abs:
                     max_abs = abs(val)
             row += f" {max_abs:.2f} |"
             lines.append(row)
@@ -1573,7 +1600,9 @@ def build_nonptm_temporal_analysis(
             gene = node.get("gene", node.get("id", ""))
             if not gene:
                 continue
-            plog2fc = float(node.get("protein_log2fc", node.get("log2fc", 0)))
+            plog2fc = _finite_round(node.get("protein_log2fc", node.get("log2fc")))
+            if plog2fc is None:
+                continue
             if gene not in nonptm_temporal:
                 nonptm_temporal[gene] = {}
             nonptm_temporal[gene][tp] = plog2fc
@@ -1594,7 +1623,9 @@ def build_nonptm_temporal_analysis(
                 gene = node.get("gene", node.get("id", ""))
                 if not gene:
                     continue
-                ptm_fc = float(node.get("value", node.get("ptm_log2fc", node.get("ptm_relative_log2fc", 0))))
+                ptm_fc = _finite_round(node.get("value", node.get("ptm_log2fc", node.get("ptm_relative_log2fc"))))
+                if ptm_fc is None:
+                    continue
                 if gene not in ptm_temporal:
                     ptm_temporal[gene] = {}
                 ptm_temporal[gene][tp] = ptm_fc
@@ -1657,16 +1688,18 @@ def build_nonptm_temporal_analysis(
             return "No comparable PTM context"
 
         # Compare temporal patterns: does PTM change precede Non-PTM change?
-        nonptm_values = [tp_data.get(tp, 0) for tp in timepoints]
+        nonptm_values = [tp_data.get(tp) for tp in timepoints]
         nonptm_first_change_idx = next(
-            (i for i, v in enumerate(nonptm_values) if abs(v) > 0.3), len(timepoints)
+            (i for i, v in enumerate(nonptm_values) if v is not None and abs(v) > 0.3),
+            len(timepoints),
         )
 
         ptm_first_change_idx = len(timepoints)
         for ptm_gene in connected_ptms:
             ptm_vals = ptm_temporal.get(ptm_gene, {})
             for i, tp in enumerate(timepoints):
-                if abs(ptm_vals.get(tp, 0)) > 0.3:
+                ptm_val = ptm_vals.get(tp)
+                if ptm_val is not None and abs(ptm_val) > 0.3:
                     ptm_first_change_idx = min(ptm_first_change_idx, i)
                     break
 
@@ -1681,7 +1714,7 @@ def build_nonptm_temporal_analysis(
     # Sort by max absolute change
     sorted_nonptm = sorted(
         nonptm_temporal.items(),
-        key=lambda x: max(abs(v) for v in x[1].values()),
+        key=lambda x: max((abs(v) for v in x[1].values() if v is not None), default=0),
         reverse=True,
     )
 
@@ -1716,9 +1749,10 @@ def build_nonptm_temporal_analysis(
         row = f"| {i} | **{gene}** | {role} | {directionality} |"
         values = []
         for tp in timepoints:
-            val = tp_data.get(tp, 0)
-            row += f" {val:.2f} |"
-            values.append(val)
+            val = tp_data.get(tp)
+            row += f" {_cell(val)} |"
+            if val is not None:
+                values.append(val)
         # Determine trend
         if len(values) >= 2:
             if values[-1] > values[0] + 0.3:
@@ -1802,8 +1836,10 @@ def build_ptm_protein_timelag_analysis(
                 gene = node.get("gene", node.get("id", ""))
                 site = node.get("site", node.get("position", ""))
                 key = f"{gene}({site})" if site else gene
-                ptm_fc = float(node.get("value", node.get("ptm_log2fc", node.get("ptm_relative_log2fc", 0))))
-                prot_fc = float(node.get("protein_log2fc", 0))
+                ptm_fc = _finite_round(node.get("value", node.get("ptm_log2fc", node.get("ptm_relative_log2fc"))))
+                prot_fc = _finite_round(node.get("protein_log2fc"))
+                if ptm_fc is None and prot_fc is None:
+                    continue
                 if key not in ptm_temporal:
                     ptm_temporal[key] = {"gene": gene, "site": site}
                 ptm_temporal[key][tp] = {"ptm": ptm_fc, "prot": prot_fc}
@@ -1824,9 +1860,9 @@ def build_ptm_protein_timelag_analysis(
         first_ptm_sig = None
         first_prot_sig = None
         for tp, vals in tp_values:
-            if first_ptm_sig is None and abs(vals["ptm"]) > 0.5:
+            if first_ptm_sig is None and vals.get("ptm") is not None and abs(vals["ptm"]) > 0.5:
                 first_ptm_sig = tp
-            if first_prot_sig is None and abs(vals["prot"]) > 0.5:
+            if first_prot_sig is None and vals.get("prot") is not None and abs(vals["prot"]) > 0.5:
                 first_prot_sig = tp
 
         if first_ptm_sig and first_prot_sig:
@@ -2193,9 +2229,12 @@ def build_structured_crosstalk_data_for_llm(
 
             for tp in sorted_tps:
                 comp = dp.get("temporal_comparison", {}).get(tp, {})
-                p_val = comp.get("primary_ptm_log2fc", 0)
-                s_val = comp.get("secondary_ptm_log2fc", 0)
-                log2fc_values.extend([round(p_val, 2), round(s_val, 2)])
+                p_val = _finite_round(comp.get("primary_ptm_log2fc"))
+                s_val = _finite_round(comp.get("secondary_ptm_log2fc"))
+                if p_val is not None:
+                    log2fc_values.append(p_val)
+                if s_val is not None:
+                    log2fc_values.append(s_val)
 
                 if comp.get("concordant") is True:
                     status = "CONC"
@@ -2203,7 +2242,7 @@ def build_structured_crosstalk_data_for_llm(
                     status = "DISC"
                 else:
                     status = "NEUT"
-                row += f" {p_val:.2f} | {s_val:.2f} | {status} |"
+                row += f" {_cell(p_val)} | {_cell(s_val)} | {status} |"
             lines.append(row)
         lines.append("")
 
@@ -2303,7 +2342,9 @@ def build_tf_activity_inference(
             gene = node.get("gene", node.get("id", "Unknown"))
             if not gene or gene == "Unknown":
                 continue
-            protein_log2fc = node.get("protein_log2fc", node.get("log2fc", 0))
+            protein_log2fc = _finite_round(node.get("protein_log2fc", node.get("log2fc")))
+            if protein_log2fc is None:
+                continue
             if gene not in nonptm_temporal:
                 nonptm_temporal[gene] = {}
             nonptm_temporal[gene][tp] = protein_log2fc

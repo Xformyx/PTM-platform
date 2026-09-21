@@ -118,3 +118,17 @@ RAG → Report 사이에 canonical temporal sidecar를 만드는 큐는 `product
 - `./scripts/dev-deploy.sh`와 `./scripts/deploy.sh`는 소스 변경이 없어도 `docker compose up -d production-tmm-worker`를 실행한다.
 - 이미 떠 있는 워커는 재시작하지 않는다. 실행 중 analysis job을 끊지 않기 위함이다.
 - 이미지 `ptm-production-tmm-worker:$VERSION`이 없으면 같은 Dockerfile인 `ptm-api-server:$VERSION`을 tag한다.
+
+### 5.1 TMM `parent_generation`과 Explorer DuckDB (2026-09-21)
+
+`order_run_gen`은 preprocessing / RAG / Report 재실행마다 증가한다.
+분석 입력 스냅샷의 `parent_generation`은 **전처리 publish 시점**이다.
+TMM job은 스냅샷 값이 아니라 **submit 시점의 `order_run_gen`**을 `parent_generation`으로 기록한다.
+그래야 RAG-only 재실행이 같은 input revision에서 즉시 `superseded` 되지 않는다.
+이후 새 start가 `order_run_gen`을 다시 올리면 기존 TMM은 여전히 superseded다.
+
+Explorer parquet는 jsonl을 **한 줄씩** observation으로 펼친 뒤 `COPY`한다.
+`ORDER BY`와 `json_each` 전체 정렬은 작성 단계에서 쓰지 않는다. 페이지 조회가 `record_id`로 정렬한다.
+records jsonl이 32MB(`EXPLORER_JSONL_CHUNK_BYTES`)를 넘으면 `explorer_records-part-*.parquet`로 나눈다.
+부분 파일을 DuckDB로 다시 합치지 않는다. `record_json` VARCHAR 전체를 한 번에 올리면 512MB에서 OOM이다.
+페이지 조회는 그 glob을 256MB로 읽는다. TMM NNLS·τ를 바꾸지 않는다.

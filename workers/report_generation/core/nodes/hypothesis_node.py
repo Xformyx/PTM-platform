@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
 from common.llm_client import LLMClient
+from report_generation.core.reader_authoring import peak_score_magnitude
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,7 @@ def _build_multi_source_context(state: dict) -> dict:
     # ── Top kinases by peak score ─────────────────────────────────────────────
     top_kinases = sorted(
         [ks for ks in kinase_scores if not ks.get("is_sub_pattern")],
-        key=lambda x: abs(x.get("peak_score", 0)),
+        key=peak_score_magnitude,
         reverse=True
     )[:10]
     ctx["top_kinases"] = top_kinases

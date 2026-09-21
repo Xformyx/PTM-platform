@@ -14,6 +14,29 @@ from ptm_shared.tmm_feature_allocation import ALLOCATION_VERSION, RNG_POLICY_VER
 from ptm_shared.report_revision import file_sha256
 
 
+def requesting_parent_generation(order_id, frozen_parent):
+    """Use the run token that requested this job, not preprocessing publish time.
+
+    구현 대상: docs/BUILD_AND_DEPLOY.md §5.1
+    사전등록: 해당 없음 (운영 펜스, 2026-09-21).
+    해석 한계: 같은 input revision의 RAG/Report 재실행을 허용한다.
+    새 start가 order_run_gen을 올리면 execute()는 여전히 superseded다.
+    주장 금지: 이 값으로 TMM 점수나 kinase 귀속을 논하지 않는다.
+    """
+    try:
+        from redis import Redis
+        value = Redis.from_url(
+            os.getenv("REDIS_URL", "redis://redis:6379/0"),
+            socket_connect_timeout=5,
+            socket_timeout=5,
+        ).get(f"order_run_gen:{order_id}")
+        if value is not None:
+            return int(value)
+    except Exception:
+        pass
+    return frozen_parent
+
+
 def runtime_signature():
     return _runtime_signature()
 
@@ -92,7 +115,8 @@ async def submit_analysis(db, order, user_id, request, *, enqueue=True):
               "allocation_version": ALLOCATION_VERSION, "rng_policy": RNG_POLICY_VERSION,
               "runtime": runtime_signature(), "references": reference_signature(),
               "analysis_context": discovery_context(context) if inference_mode=="discovery_blind" else context,
-              "parent_generation": frozen.get("parent_generation"), "input_options": frozen.get("config", {}).get("analysis_options", {}), "ptm_type": order.ptm_type}
+              "parent_generation": requesting_parent_generation(order.id, frozen.get("parent_generation")),
+              "input_options": frozen.get("config", {}).get("analysis_options", {}), "ptm_type": order.ptm_type}
     digest = signature({"order_id": order.id, "input_revision": frozen["input_revision"], "config": config})
     # An Order row already exists and is the admission lock even before its head
     # row is created. This avoids the race of locking a nonexistent head.

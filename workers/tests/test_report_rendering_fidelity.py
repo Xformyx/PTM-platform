@@ -9,7 +9,12 @@ from report_generation.core.biological_synthesis import (
     build_biological_synthesis_packet,
     format_candidate_discovery_packet_for_report,
 )
-from report_generation.core.dynamic_prompt_generator import build_temporal_evidence_packet
+from report_generation.core.dynamic_prompt_generator import (
+    build_nonptm_temporal_analysis,
+    build_structured_protein_data_for_llm,
+    build_temporal_evidence_packet,
+    build_tf_activity_inference,
+)
 from report_generation.core.graph import format_citations
 from report_generation.core.citation_formatter import ReportPostProcessor
 from report_generation.core.nodes.kinase_annotation_node import _direct_attribution_figure_allowed
@@ -1195,6 +1200,82 @@ def test_postprocessor_enforces_actual_report_claim_and_contrast_boundaries():
     assert "Largest positive measured contrasts" not in processed
     assert "Top higher measured PTM-abundance contrasts" not in processed
     assert "CFLAR(T231)" not in processed
+
+
+def test_co_scientist_questions_tolerate_tmm_no_call_peak_score():
+    questions = _get_co_scientist_questions({
+        "experimental_context": {"cell_type": "generic cells", "treatment": "compound X"},
+        "kinase_activity_heatmap": {
+            "kinase_scores": [
+                {"kinase": "NOCALL", "peak_score": None},
+                {"kinase": "MAPK1", "peak_score": 0.7},
+            ],
+        },
+    })
+    joined = "\n".join(questions)
+    assert "MAPK1" in joined
+    assert "NOCALL" not in joined
+
+
+def test_structured_protein_table_skips_none_log2fc():
+    block, names, values = build_structured_protein_data_for_llm(
+        {
+            "networks": {
+                "5min": {
+                    "active_nodes": [
+                        {"gene": "IRS1", "site": "S307", "ptm_log2fc": 1.25, "protein_log2fc": None},
+                    ],
+                    "non_ptm_nodes": [
+                        {"gene": "AKT1", "protein_log2fc": None},
+                        {"gene": "MAPK1", "protein_log2fc": 0.8},
+                    ],
+                }
+            }
+        },
+        ["5min"],
+    )
+    assert "IRS1" in block
+    assert "MAPK1" in names
+    assert "AKT1" not in names
+    assert 1.25 in values
+    assert 0.8 in values
+    assert all(v is not None for v in values)
+
+
+def test_nonptm_temporal_analysis_skips_none_log2fc():
+    block = build_nonptm_temporal_analysis(
+        {
+            "networks": {
+                "5min": {
+                    "non_ptm_nodes": [
+                        {"gene": "AKT1", "protein_log2fc": None},
+                        {"gene": "MAPK1", "protein_log2fc": 0.9},
+                    ],
+                }
+            }
+        },
+        ["5min"],
+    )
+    assert "MAPK1" in block
+    assert "AKT1" not in block
+
+
+def test_tf_activity_inference_skips_none_log2fc():
+    context, payload = build_tf_activity_inference(
+        {
+            "networks": {
+                "5min": {
+                    "non_ptm_nodes": [
+                        {"gene": "AKT1", "protein_log2fc": None},
+                        {"gene": "MAPK1", "protein_log2fc": 0.1},
+                    ],
+                }
+            }
+        },
+        ["5min"],
+    )
+    assert context == ""
+    assert payload == {}
 
 
 def test_co_scientist_questions_do_not_presume_kinase_activation_or_wave_function():

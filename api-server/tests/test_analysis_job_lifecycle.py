@@ -20,6 +20,25 @@ from app.services import analysis_jobs, production_tmm_executor as executor
 from ptm_shared.analysis_revision import publish_analysis_input, verify_result
 
 
+def test_requesting_parent_generation_uses_current_run_not_snapshot(monkeypatch):
+    class _Redis:
+        def get(self, key):
+            assert key == "order_run_gen:80"
+            return b"6"
+
+    monkeypatch.setattr("redis.Redis.from_url", lambda *args, **kwargs: _Redis())
+    assert analysis_jobs.requesting_parent_generation(80, 5) == 6
+
+
+def test_requesting_parent_generation_falls_back_to_snapshot(monkeypatch):
+    class _Redis:
+        def get(self, key):
+            return None
+
+    monkeypatch.setattr("redis.Redis.from_url", lambda *args, **kwargs: _Redis())
+    assert analysis_jobs.requesting_parent_generation(80, 5) == 5
+
+
 def setup_order(tmp_path, monkeypatch):
     async def setup():
         engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path/'jobs.sqlite'}")

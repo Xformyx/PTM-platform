@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ptm_shared.de_novo_representation import conventional_quantitation_eligibility, is_de_novo_representation
+from report_generation.core.reader_authoring import numeric_or_zero, peak_score_magnitude
 
 logger = logging.getLogger(__name__)
 
@@ -641,7 +642,7 @@ def _generate_directional_heatmap(
         except ValueError:
             idx = len(pattern_order)
         # Secondary sort: by peak_score descending
-        return (idx, -abs(ks.get("peak_score", 0)))
+        return (idx, -peak_score_magnitude(ks))
 
     # Sort and limit
     sorted_scores = sorted(kinase_scores, key=pattern_sort_key)
@@ -667,7 +668,7 @@ def _generate_directional_heatmap(
         pattern_labels.append(ks.get("temporal_pattern", "mixed"))
         scores = ks.get("scores", {})
         for j, c in enumerate(conditions):
-            matrix[i, j] = scores.get(c, 0)
+            matrix[i, j] = numeric_or_zero(scores.get(c))
 
     # ── Figure layout: main heatmap + pattern sidebar ──
     fig_width = max(10, min(18, 4 + n_conds * 1.5 + 3))  # +3 for pattern column

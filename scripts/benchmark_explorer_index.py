@@ -45,7 +45,8 @@ def run(output, count):
     assert page['total_count']==count
     import duckdb
     with duckdb.connect() as db:
-        read=db.read_parquet(str(output/'explorer_records.parquet'));read.create_view('r')
+        from ptm_shared.signaling_evidence_index import explorer_record_parquet_files
+        read=db.read_parquet(explorer_record_parquet_files(output));read.create_view('r')
         exact=db.execute("SELECT count(*),count(distinct feature_id) FROM r WHERE kind='features'").fetchone()
         assert exact==(count,count)
     artifact={'schema_version':'explorer_query_benchmark.v1','fixture':'synthetic', 'feature_count':count,

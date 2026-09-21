@@ -1,6 +1,7 @@
 """Immutable, derived Explorer index. None of its projections feed computation."""
 import base64
 import json
+import os
 from pathlib import Path
 import duckdb
 from .analysis_universe import signature
@@ -12,11 +13,170 @@ from .temporal_feature_input import finite
 VERSION = "signaling_explorer.v1"
 KINDS = {"features", "pathways", "members", "kinases", "contributions", "evidence", "source-runs", "model-results", "report-claims",
          "unmapped-modules", "validations", "model-comparisons", "mechanism-hypotheses", "experiment-suggestions"}
+OBSERVATION_TRACKS = ("relative", "unadjusted", "occupancy")
+EXPLORER_COPY_MEMORY_DEFAULT = "512MB"
+"""DuckDB COPY ceiling after streaming flatten.
+
+docs/BUILD_AND_DEPLOY.md §5.1, 2026-09-21. Not a measurement threshold.
+"""
+
+EXPLORER_JSONL_CHUNK_BYTES = 32 * 1024 * 1024
+"""Max jsonl bytes per DuckDB COPY.
+
+docs/BUILD_AND_DEPLOY.md §5.1, 2026-09-21. Order 80 records jsonl is 806MB.
+"""
+
+
+def write_explorer_observation_jsonl(records_jsonl, dest):
+    """Flatten feature trajectories one jsonl line at a time.
+
+    구현 대상: docs/BUILD_AND_DEPLOY.md §5.1
+    사전등록: 해당 없음 (인덱스 작성 경로, 2026-09-21).
+    해석 한계: Explorer 조회용 숫자 투영이다. TMM 점수 입력이 아니다.
+    주장 금지: 이 파일로 kinase 활성이나 τ를 논하지 않는다.
+    """
+    count = 0
+    with Path(records_jsonl).open(encoding="utf-8") as src, Path(dest).open("w", encoding="utf-8") as out:
+        for line in src:
+            row = json.loads(line)
+            if row.get("kind") != "features":
+                continue
+            payload = json.loads(row["record_json"])
+            feature_id = row.get("feature_id") or payload.get("feature_id") or ""
+            trajectories = payload.get("trajectories") or {}
+            for track in OBSERVATION_TRACKS:
+                series = trajectories.get(track)
+                if not isinstance(series, dict):
+                    continue
+                for condition, value in series.items():
+                    if value is None or isinstance(value, (dict, list)):
+                        continue
+                    try:
+                        number = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if number != number:
+                        continue
+                    out.write(json.dumps({
+                        "feature_id": feature_id,
+                        "track": track,
+                        "condition": str(condition),
+                        "value": number,
+                    }, allow_nan=False) + "\n")
+                    count += 1
+    return count
+
+
+def _duckdb_copy_config(spill=None):
+    config = {"threads": 1, "memory_limit": os.getenv("EXPLORER_INDEX_MEMORY_LIMIT", EXPLORER_COPY_MEMORY_DEFAULT)}
+    if spill is not None:
+        Path(spill).mkdir(parents=True, exist_ok=True)
+        config["temp_directory"] = str(spill)
+    return config
+
+
+def split_jsonl_by_bytes(jsonl, dest_dir, max_bytes=EXPLORER_JSONL_CHUNK_BYTES):
+    """Split jsonl on line boundaries so each DuckDB COPY stays under max_bytes."""
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    parts = []
+    handle = None
+    size = 0
+    index = 0
+
+    def rotate():
+        nonlocal handle, size, index
+        if handle is not None:
+            handle.close()
+        path = dest_dir / f"part-{index:05d}.jsonl"
+        parts.append(path)
+        handle = path.open("w", encoding="utf-8")
+        size = 0
+        index += 1
+
+    rotate()
+    with Path(jsonl).open(encoding="utf-8") as src:
+        for line in src:
+            encoded = line if line.endswith("\n") else line + "\n"
+            nbytes = len(encoded.encode("utf-8"))
+            if size and size + nbytes > max_bytes:
+                rotate()
+            handle.write(encoded)
+            size += nbytes
+    if handle is not None:
+        handle.close()
+    return parts
+
+
+def _copy_one_jsonl_to_parquet(jsonl, parquet, columns, *, spill=None):
+    with duckdb.connect(config=_duckdb_copy_config(spill)) as db:
+        db.execute("SET preserve_insertion_order=false")
+        db.read_json(str(jsonl), format="newline_delimited", columns=columns).create_view("src")
+        db.execute(
+            "COPY (SELECT * FROM src) TO ? (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 4096)",
+            [str(parquet)],
+        )
+
+
+def explorer_record_parquet_files(directory):
+    """Parquet sources for Explorer pages. Prefer parts; do not merge them."""
+    directory = Path(directory)
+    parts = sorted(directory.glob("explorer_records-part-*.parquet"))
+    if parts:
+        return [str(path) for path in parts]
+    return [str(directory / "explorer_records.parquet")]
+
+
+def _write_records_layout(parquet, part_count):
+    parquet = Path(parquet)
+    payload = json.dumps({"part_count": part_count, "part_glob": f"{parquet.stem}-part-*.parquet"})
+    with duckdb.connect(config=_duckdb_copy_config()) as db:
+        db.execute(
+            """
+            CREATE TABLE layout(
+              kind VARCHAR, record_id VARCHAR, feature_id VARCHAR,
+              pathway_key VARCHAR, kinase VARCHAR, track VARCHAR, record_json VARCHAR
+            )
+            """
+        )
+        db.execute(
+            "INSERT INTO layout VALUES ('layout','parts','','','','',?)",
+            [payload],
+        )
+        db.execute(
+            "COPY layout TO ? (FORMAT PARQUET, COMPRESSION ZSTD)",
+            [str(parquet)],
+        )
+
+
+def _copy_jsonl_to_parquet(jsonl, parquet, columns, *, spill=None):
+    """Copy jsonl to parquet in bounded chunks. Page queries sort.
+
+    구현 대상: docs/BUILD_AND_DEPLOY.md §5.1 EXPLORER_JSONL_CHUNK_BYTES
+    사전등록: 해당 없음 (인덱스 작성, 2026-09-21).
+    해석 한계: Explorer 파일 레이아웃만 나눈다. TMM 입력이 아니다.
+    주장 금지: 청크 수로 분석 규모를 주장하지 않는다.
+    """
+    jsonl = Path(jsonl)
+    parquet = Path(parquet)
+    if jsonl.stat().st_size <= EXPLORER_JSONL_CHUNK_BYTES:
+        _copy_one_jsonl_to_parquet(jsonl, parquet, columns, spill=spill)
+        return
+    parts_dir = jsonl.parent / f"{jsonl.stem}-parts"
+    parts = split_jsonl_by_bytes(jsonl, parts_dir, EXPLORER_JSONL_CHUNK_BYTES)
+    for i, part in enumerate(parts):
+        _copy_one_jsonl_to_parquet(
+            part,
+            parquet.parent / f"{parquet.stem}-part-{i:05d}.parquet",
+            columns,
+            spill=spill,
+        )
+    _write_records_layout(parquet, len(parts))
 
 
 def iter_explorer_records(directory, *, report_index=None):
     """Stream the same complete, joined inventory used by page queries."""
-    files = [str(Path(directory)/"explorer_records.parquet")]
+    files = explorer_record_parquet_files(directory)
     if report_index:
         files.append(str(report_index))
     with duckdb.connect(config={"threads": 1, "memory_limit": "256MB"}) as db:
@@ -111,14 +271,23 @@ def build_explorer_index(directory, manifest, inputs, scores, sidecar, result, *
                 emit("unmapped-modules", f"wave-{i}", {**row, "members": members,
                     "module_id": f"wave-{i}", "membership_scope": "pathway_unmapped" if source["status"] in {"available", "empty"} else "pathway_mapping_not_evaluable",
                     "interpretation": "temporal_response_module_not_new_pathway"})
-    with duckdb.connect(config={"threads": 1, "memory_limit": "512MB", "temp_directory": str(root/"explorer-spill")}) as db:
-        db.read_json(str(root/"explorer_records.jsonl"), format="newline_delimited", columns={
-            k:"VARCHAR" for k in ("kind", "record_id", "feature_id", "pathway_key", "kinase", "track", "record_json")}).create_view("records")
-        db.execute("COPY (SELECT * FROM records ORDER BY kind,record_id) TO ? (FORMAT PARQUET,COMPRESSION ZSTD,ROW_GROUP_SIZE 2048)", [str(root/"explorer_records.parquet")])
-        numeric = " UNION ALL ".join(
-            f"SELECT r.feature_id,'{track}' AS track,j.key AS condition,CAST(j.value AS DOUBLE) AS value FROM records r, json_each(r.record_json,'$.trajectories.{track}') j WHERE r.kind='features' AND j.type NOT IN ('NULL','OBJECT','ARRAY')"
-            for track in ("relative","unadjusted","occupancy"))
-        db.execute(f"COPY (SELECT * FROM ({numeric}) ORDER BY track,condition,feature_id) TO ? (FORMAT PARQUET,COMPRESSION ZSTD,ROW_GROUP_SIZE 4096)", [str(root/"explorer_observations.parquet")])
+    # docs/BUILD_AND_DEPLOY.md §5.1 — stream flatten, then COPY without ORDER BY.
+    observation_jsonl = root / "explorer_observations.jsonl"
+    write_explorer_observation_jsonl(root / "explorer_records.jsonl", observation_jsonl)
+    spill = root / "explorer-spill"
+    spill.mkdir(exist_ok=True)
+    _copy_jsonl_to_parquet(
+        root / "explorer_records.jsonl",
+        root / "explorer_records.parquet",
+        {k: "VARCHAR" for k in ("kind", "record_id", "feature_id", "pathway_key", "kinase", "track", "record_json")},
+        spill=spill,
+    )
+    _copy_jsonl_to_parquet(
+        observation_jsonl,
+        root / "explorer_observations.parquet",
+        {"feature_id": "VARCHAR", "track": "VARCHAR", "condition": "VARCHAR", "value": "DOUBLE"},
+        spill=spill,
+    )
     return {"schema_version": VERSION, "coverage": {**result["coverage"], **pathway["coverage"]},
             "inference_mode":manifest.get("config",{}).get("inference_mode","legacy_unrecorded"),
             "pathway_source": source, "conditions": manifest["conditions"], "analysis_scope": manifest["analysis_scope"],
@@ -178,7 +347,7 @@ def explorer_page(directory, bundle_id, *, kind, pathway_key=None, feature_id=No
             params.append(value)
     where = " AND ".join(clauses)
     with duckdb.connect(config={"threads":1,"memory_limit":"256MB"}) as db:
-        files=[str(Path(directory)/"explorer_records.parquet")]
+        files=explorer_record_parquet_files(directory)
         if report_index: files.append(str(report_index))
         db.read_parquet(files).create_view("all_records")
         # The base run did not request literature. Its descendant's actual

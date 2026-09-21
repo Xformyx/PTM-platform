@@ -61,6 +61,37 @@ from ptm_shared.quantitation_estimator_contract import (
 AUTHORING_PACKET_VERSION = "reader_authoring_packet.v5"
 VALID_CLAIM_TIERS = {"O1", "O2", "C1", "L1", "H1", "D1"}
 
+
+def peak_score_magnitude(row: Mapping[str, Any] | None) -> float:
+    """Absolute peak_score for ranking only.
+
+    구현 대상: api-server/app/services/production_temporal_analysis.py render_result
+    (`peak_score` is None when no condition is evaluable).
+    사전등록: 해당 없음 (정렬 키, 2026-09-21).
+    해석 한계: None은 no-call이다. 활성 없음이 아니다.
+    주장 금지: 이 값으로 kinase 활성을 주장하지 않는다.
+    """
+    value = (row or {}).get("peak_score")
+    if value is None:
+        return 0.0
+    try:
+        return abs(float(value))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def numeric_or_zero(value: Any) -> float:
+    """Coerce TMM None placeholders so abs()/format do not raise."""
+    if value is None:
+        return 0.0
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if number != number:
+        return 0.0
+    return number
+
 # The reader-facing manuscript has one stable story arc.  These are authoring
 # obligations, not evidence and not a claim-promotion mechanism.  Keeping them
 # beside the card contract prevents every section from becoming an inventory of
@@ -566,11 +597,7 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
         return []
 
     def sort_key(row: Mapping[str, Any]) -> tuple[float, str]:
-        try:
-            magnitude = abs(float(row.get("peak_score") or 0.0))
-        except (TypeError, ValueError):
-            magnitude = 0.0
-        return (-magnitude, str(row.get("canonical") or row.get("kinase") or ""))
+        return (-peak_score_magnitude(row), str(row.get("canonical") or row.get("kinase") or ""))
 
     computed = [
         row for row in scores
