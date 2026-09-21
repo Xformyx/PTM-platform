@@ -21,7 +21,7 @@ import {
   ChevronDown, ChevronUp, Download, FileSpreadsheet, FileJson, File, FolderOpen,
   Copy, Check, Eye, ArrowRightCircle, Sparkles, Plus, X, Trash2,
   MessageSquare, Loader2, ToggleLeft, ToggleRight, Square, StopCircle,
-  ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge, BarChart3,
+  ChartScatter, TrendingUp, ZoomIn, ZoomOut, GitMerge, BarChart3, Network,
   LayoutDashboard, FileOutput, Share2, CopyPlus, ChevronLeft, ChevronRight,
   Presentation, FlaskConical,
 } from "lucide-react";
@@ -3150,15 +3150,20 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
   return (
     <div className="space-y-6">
       <Tabs defaultValue="scatter">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+        <TabsList className="grid w-full max-w-2xl grid-cols-3">
           <TabsTrigger value="scatter" className="gap-2">
             <ChartScatter className="h-3.5 w-3.5" /> Scatter Plots
           </TabsTrigger>
           <TabsTrigger
             value="timeseries"
             className="gap-2"
+            disabled={singleTimePoint}
+            title={singleTimePoint ? "Single time point — time-series not available" : undefined}
           >
-            <TrendingUp className="h-3.5 w-3.5" /> Signaling Explorer
+            <TrendingUp className="h-3.5 w-3.5" /> {isUbi ? "Top N Ubi Site Time-series" : "Top N PTM Time-series"}
+          </TabsTrigger>
+          <TabsTrigger value="explorer" className="gap-2">
+            <Network className="h-3.5 w-3.5" /> Signaling Explorer
           </TabsTrigger>
         </TabsList>
 
@@ -3198,7 +3203,25 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
-                <TrendingUp className="h-4 w-4" /> 신호전달 근거 탐색
+                <TrendingUp className="h-4 w-4" /> {isUbi ? "Top N Ubiquitylation Site Time-series" : "Top N PTM Time-series"}
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                {isUbi
+                  ? "시간별 Ubiquitylation site 변화 추이. 마우스를 올리면 site명과 값을 확인할 수 있습니다."
+                  : "시간별 PTM 변화 추이. 마우스를 올리면 PTM명과 값을 확인할 수 있습니다."}
+              </p>
+            </CardHeader>
+            <CardContent>
+              <TopNTimeSeriesPlot key={orderId} orderId={orderId} ptmType={ptmType} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="explorer" className="mt-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Network className="h-4 w-4" /> 신호전달 근거 탐색
               </CardTitle>
               <p className="text-xs text-muted-foreground">
                 완료된 분석의 경로·관측·조절 후보·근거를 탐색합니다. 시간점이 하나여도 유효한 관측을 조회할 수 있습니다.
