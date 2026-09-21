@@ -25,11 +25,11 @@ with sync_playwright() as p:
   return r.fulfill(content_type='text/html',body='<html><body><div id="root" style="width:1380px;height:1100px"></div></body></html>')
  page.route('**/*',route);page.goto('http://fixture.local/')
  page.add_script_tag(path=str(root/'browser.js'))
- page.get_by_test_id('selection-label').wait_for()
+ page.get_by_test_id('top-n-setting').wait_for()
  page.locator('.recharts-wrapper').first.wait_for()
  page.screenshot(path=str(root/'chart.png'),full_page=True)
  dots=page.locator('.recharts-line-dots circle').count()
- summary={'labels':page.get_by_test_id('coverage').inner_text(),'selection':page.get_by_test_id('selection-label').inner_text(),'dots':dots,'errors':errors,'lines':page.locator('.recharts-line').count()}
+ summary={'setting':page.get_by_test_id('top-n-setting').inner_text(),'dots':dots,'errors':errors,'lines':page.locator('.recharts-line').count()}
  (root/'browser-result.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
  print(json.dumps(summary,ensure_ascii=False))
  assert not errors
@@ -37,30 +37,11 @@ with sync_playwright() as p:
  paths=page.locator('.recharts-line-curve').evaluate_all('(xs)=>xs.map(x=>x.getAttribute("d"))')
  # A missing middle observation must not produce a connecting segment.
  assert sum(('L' in path or 'C' in path) for path in paths if path)==1, paths
- selection=page.get_by_test_id('selection-label').inner_text()
  box=page.locator('input[type=checkbox]').first;box.uncheck()
  page.wait_for_function("document.querySelectorAll('.recharts-line-dots circle').length < 5")
- assert page.get_by_test_id('selection-label').inner_text()==selection
  box.check()
  page.wait_for_function("document.querySelectorAll('.recharts-line-dots circle').length === 5")
  summary.update(gap_paths=paths, checkbox_preserves_selection=True)
- (root/'browser-result.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
- pending=[]
- def delayed_view(route):
-  from urllib.parse import urlparse,parse_qs
-  query=parse_qs(urlparse(route.request.url).query);n=int(query.get('n',['50'])[0])
-  if n==2: pending.append(route);return
-  route.fulfill(json=json.loads((root/f'response_global_{n}.json').read_text()))
- page.route('**/vector-plot-data*',delayed_view)
- page.get_by_label('표시 선택',exact=True).select_option('global_top_n')
- page.get_by_label('표시 N',exact=True).fill('2');page.wait_for_timeout(100)
- assert pending
- page.get_by_label('표시 N',exact=True).fill('1')
- page.wait_for_function("document.querySelector('[data-testid=selection-label]')?.textContent?.includes('전체 Top 1')")
- pending.pop().fulfill(json=json.loads((root/'response_global_2.json').read_text()))
- page.wait_for_timeout(200)
- assert '전체 Top 1' in page.get_by_test_id('selection-label').inner_text()
- summary['late_response_preserves_latest_selection']=True
  (root/'browser-result.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
  page2=browser.new_page(viewport={'width':1440,'height':1200});kinase_errors=[]
  page2.on('pageerror',lambda e:kinase_errors.append(str(e)))

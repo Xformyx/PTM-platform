@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile, File, Form, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select, text, func as sqlfunc, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -2563,13 +2563,14 @@ async def get_vector_plot_data(
     ranking_metric: str = Query("abs_effect"),
     lock_receptor: bool = Query(False),
     force_refresh: bool = Query(False),
+    classic: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
     """Select measured precursors, then attach independent annotation context."""
     import asyncio
     from app.config import get_settings
-    from app.services.vector_view import load_vector_view
+    from app.services.vector_view import load_classic_top_n_plot, load_vector_view
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
     if not order:
@@ -2577,6 +2578,21 @@ async def get_vector_plot_data(
     await _check_order_access_async(order, user, db)
     if force_refresh:
         raise HTTPException(status_code=409, detail="Use POST receptor-inference-refresh; view reads do not run analysis")
+    if classic:
+        suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+        payload = await asyncio.to_thread(
+            load_classic_top_n_plot, Path(get_settings().OUTPUT_DIR) / order.order_code, suffix,
+            order.report_options,
+            design=(getattr(order, "analysis_context", None) or {}).get("sample_manifest"),
+        )
+        cached = getattr(order, "receptor_inference_data", None) or {}
+        payload.update(
+            inferred_receptors=cached.get("receptors", []),
+            cowave_analysis=None,
+            divergence_pairs=[],
+            receptor_inference_status="legacy_context" if cached else "not_requested",
+        )
+        return JSONResponse(payload)
     suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
     try:
         view = await asyncio.to_thread(

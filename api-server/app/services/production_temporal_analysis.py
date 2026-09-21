@@ -21,6 +21,32 @@ RESERVED = {"kinase_modules", "ptm_timeseries", "ptm_to_kinases", "conditions_so
     "ptm_candidate_weights", "kinase_hierarchy"}
 
 
+def _sidecar_identity_audits(source_dir, vector_rows):
+    """Copy site-form and enriched-vector audits into the TMM sidecar.
+
+    구현 대상: report_artifact_manifest temporal_input identity audits
+    사전등록: 해당 없음 (sidecar 메타, 2026-09-21). TMM 점수 변경 아님.
+    해석 한계: 감사 상태만 기록한다. 교차검증 통과가 귀속 정확도가 아니다.
+    주장 금지: 이 필드로 kinase 예측 개선을 주장하지 않는다.
+    """
+    from ptm_shared.site_form_provenance import (
+        audit_enriched_site_form_records,
+        audit_enriched_vector_crosswalk,
+    )
+    order_root = Path(source_dir).resolve().parent.parent
+    enriched_path = next(sorted(order_root.glob("enriched_ptm_data_*.json")), None)
+    enriched_rows = []
+    if enriched_path and enriched_path.is_file():
+        payload = json.loads(enriched_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            payload = next((value for value in payload.values() if isinstance(value, list)), [])
+        enriched_rows = [row for row in (payload or []) if isinstance(row, dict)]
+    return {
+        "site_form_provenance_audit": audit_enriched_site_form_records(enriched_rows or vector_rows),
+        "enriched_vector_crosswalk_audit": audit_enriched_vector_crosswalk(enriched_rows, vector_rows),
+    }
+
+
 def effective_production_config(requested):
     parameters=inspect.signature(compute_weighted_kinase_scores).parameters
     defaults={k:p.default for k,p in parameters.items() if k not in RESERVED and p.default is not inspect.Parameter.empty}
@@ -120,11 +146,17 @@ def temporal_diagnostics(scores, manifest, inputs, source_dir, result_dir, ptm_t
         if not target.exists(): shutil.copyfile(path, target)
     raw = [row["source_record"] for row in load_vector_snapshot(source_dir, suffix)["rows"]]
     context, _ = resolve_study_temporal_context(experimental_context=manifest["study_context"], declared_conditions=manifest["conditions"], study_id=manifest["analysis_manifest_id"])
+    temporal_input_provenance = {
+        "analysis_signature": manifest["analysis_manifest_id"],
+        "feature_input_sha256": inputs["input_sha256"],
+        "biological_replicate_adapter": audit,
+    }
+    temporal_input_provenance.update(_sidecar_identity_audits(source_dir, raw))
     return build_production_temporal_ptm_protein_analysis(output_dir=Path(result_dir), ptm_type=ptm_type,
         ptm_timeseries=inputs["ptm_timeseries"], conditions=manifest["conditions"], study_context=context,
         tmm_result={"relative_site_contribution_matrix": build_tmm_site_contribution_matrix(scores["relative"])},
         raw_replicate_fc_series=replicate, feature_provenance_rows=raw, feature_identities=inputs["features"],
-        temporal_input_provenance={"analysis_signature": manifest["analysis_manifest_id"], "feature_input_sha256": inputs["input_sha256"], "biological_replicate_adapter": audit},
+        temporal_input_provenance=temporal_input_provenance,
         mapping_source_bundle_path=os.getenv("PTM_MAPPING_SOURCE_BUNDLE_PATH"), mapping_snapshot_root=os.getenv("PTM_MAPPING_SNAPSHOT_ROOT"),
         relation_source_bundle_path=os.getenv("PTM_RELATION_SOURCE_BUNDLE_PATH"), relation_snapshot_root=os.getenv("PTM_RELATION_SNAPSHOT_ROOT"))
 

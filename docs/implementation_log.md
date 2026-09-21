@@ -3088,3 +3088,56 @@
   바꾸지 않는다.
 - **결정성:** `EXPLORER_JSONL_CHUNK_BYTES = 32MiB` 기존 값. 새 seed 없음.
 
+### [2026-09-21] Report companion — PF 누출과 cluster 값 바인딩
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/companion_evidence.py`,
+  `api-server/app/services/production_temporal_analysis.py`
+- **구현 대상 설계:** identity projection §4.A-1, report sidecar temporal_input
+  audits. 2026-09-21 Codex_0921 blocked_final 열람 후 정정.
+- **사전등록 상태:** 해당 없음 (표시·sidecar 메타). exploratory.
+  primary 승격 금지.
+- **내용:** multiform 카드가 `reader_feature_id`(PF-)를 본문에 넣던 경로를
+  `reader_display_identity`로 바꾼다. cluster 문장은 entity/metric이
+  문장에 보이도록 해 typed record에 묶는다. production TMM sidecar는
+  enriched JSON과 vector snapshot의 site-form·crosswalk audit를
+  `temporal_input`에 기록한다. TMM NNLS는 그대로다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 누출 제거와 감사 필드 기록이다. fallback 본문의 과학
+  완결이나 LLM 실패를 고치지 않는다.
+- **결정성:** 새 seed·임계 없음.
+
+### [2026-09-21] Top N Time-series — 고전 LineChart 경로 복원
+
+- **분류:** 정정
+- **대상:** `frontend/src/pages/OrderDetail.tsx` (`TopNTimeSeriesPlot`),
+  `api-server/app/services/vector_view.py` (`load_classic_top_n_plot`),
+  `api-server/app/api/orders.py` (`classic=true`)
+- **구현 대상 설계:** 원본 GET `/vector-plot-data` (0ac2338 도입, 선정은
+  b150a01까지). 2026-09-21 탭만 되돌린 뒤 도형이 v2와 달라 보인 뒤에 복원.
+- **사전등록 상태:** 해당 없음 (표시). exploratory. primary 승격 금지.
+- **내용:** 67867a7 `vector-view.v2`는 조건별 `|adjusted log2FC|` 재순위,
+  conventional contrast만, de-novo LOD 곡선을 빼고 VectorViewControls /
+  FullTrajectoryBrowser로 도형을 바꿨다. Top N 탭은 다시 `classic=true`로
+  고전 선정을 읽고 `axisValue` + de-novo LOD/intensity를 그린다.
+  RAG 파일이 조건별 Top N 합집합보다 크면 TSV 순위(`ranking_score` 또는
+  `|ptm_relative_log2fc|`, 기본 N=20)로 되돌린다. Signaling Explorer와
+  v2 기본 GET은 그대로다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 화면 복원이다. identity-projected v2 선정이나 kinase
+  귀속을 대체하지 않는다. 전수 enriched JSON을 Top N으로 취급하지 않는다.
+- **결정성:** `CLASSIC_TOP_N_DEFAULT = 20` (b150a01). 새 seed 없음.
+
+### [2026-09-21] Classic Top N HTTP — NaN JSON 500
+
+- **분류:** 정정
+- **대상:** `api-server/app/services/vector_view.py` (`jsonable_classic_payload`)
+- **구현 대상 설계:** 고전 Top N 표시 직렬화. Starlette `allow_nan=False`.
+- **사전등록 상태:** 해당 없음 (직렬화). exploratory.
+- **내용:** enriched annotation_match.source에 NaN이 있어
+  `JSONResponse`가 500. 프론트는 실패를 전처리 미완료로 보여줬다.
+  비유한 float는 None, `source_record`는 응답에서 뺀다. 측정값은 그대로다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** None은 JSON에 못 넣는 비유한값이다. 0이 아니다.
+- **결정성:** 새 seed·임계 없음.
+

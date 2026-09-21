@@ -330,14 +330,25 @@ def multiform_cards(observations: list[dict], *, maximum: int = 3) -> list[dict]
         if len(ids) < 2:
             continue
         left, right = group[0], group[1]
-        left_id = _mapping(left.get("feature_identity")).get("reader_feature_id")
-        right_id = _mapping(right.get("feature_identity")).get("reader_feature_id")
+        left_identity = _mapping(left.get("feature_identity"))
+        right_identity = _mapping(right.get("feature_identity"))
+        left_label = str(left_identity.get("reader_display_identity") or "").strip()
+        right_label = str(right_identity.get("reader_display_identity") or "").strip()
+        if not left_label:
+            left_label = canonical_feature_identity(left_identity).get("reader_display_identity") or gene
+        if not right_label:
+            right_label = canonical_feature_identity(right_identity).get("reader_display_identity") or gene
+        pair_label = f"{left_label} and {right_label}"
         cards.append(_as_card({
             "card_id": f"multiform.{gene}.{len(cards) + 1}",
             "category": "quantitation_comparison",
             "evidence_type": "multiform_comparison",
+            "feature_identity": {
+                "gene": gene,
+                "reader_display_identity": pair_label,
+            },
             "reader_summary": (
-                f"{gene} had at least two measured precursor forms ({left_id} and {right_id}). "
+                f"{gene} had at least two measured precursor forms ({pair_label}). "
                 "The forms are compared only on jointly observed conditions and are not a whole-protein activity."
             ),
             "claim_tier": "O2",
@@ -420,14 +431,15 @@ def cluster_profile_cards(state: Mapping[str, Any], *, maximum: int = 3) -> list
         ]
         if not members:
             continue
-        entity = f"temporal-profile-{len(cards) + 1}"
+        pattern_label = pattern.replace("_", " ")
+        entity = pattern_label
         cards.append(_as_card({
             "card_id": f"cluster.profile.{len(cards) + 1}",
             "category": "temporal_profile",
             "evidence_type": "cluster_profile",
             "reader_summary": (
-                f"A temporal profile cluster with pattern {pattern.replace('_', ' ')} included "
-                f"{len(members)} conventionally quantified members. Cluster membership is a "
+                f"Among conventionally quantified members, a temporal profile cluster "
+                f"with pattern {pattern_label} included {len(members)}. Cluster membership is a "
                 "sampled-shape grouping, not common regulation."
             ),
             "claim_tier": "O2",
@@ -437,7 +449,7 @@ def cluster_profile_cards(state: Mapping[str, Any], *, maximum: int = 3) -> list
                 typed_record(
                     record_type="cluster_profile",
                     entity_id=entity,
-                    metric_id="n_members",
+                    metric_id="members",
                     value=len(members),
                     unit="feature_count",
                     estimator="temporal_profile_cluster.v1",

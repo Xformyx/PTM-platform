@@ -236,6 +236,43 @@ def test_kinase_cards_emit_without_computed_footprint():
     assert any(record["record_type"] == "kinase_trajectory" for record in candidate["value_records"])
 
 
+def test_multiform_and_cluster_summaries_bind_without_pf_ids():
+    from report_generation.core.quantitative_claims import validate_quantitative_sentence
+
+    observations = [
+        {"feature_identity": {
+            "gene": "PLEC",
+            "position": "S2898",
+            "reader_feature_id": "PF-F1B6FB08",
+            "reader_display_identity": "PLEC modified-precursor feature annotated at S2898",
+        }},
+        {"feature_identity": {
+            "gene": "PLEC",
+            "position": "S4707",
+            "reader_feature_id": "PF-E73570A3",
+            "reader_display_identity": "PLEC modified-precursor feature annotated at S4707",
+        }},
+    ]
+    multi = multiform_cards(observations)
+    assert multi
+    assert "PF-" not in multi[0]["reader_summary"]
+    assert "FEATURE-" not in multi[0]["reader_summary"]
+    packet = {"reader_cards": multi, "figure_cards": []}
+    assert validate_quantitative_sentence(multi[0]["reader_summary"], packet) == []
+
+    clusters = cluster_profile_cards({
+        "comovement_analysis": {
+            "clusters": [{
+                "pattern": "transient_burst",
+                "member_details": [{"gene": "PLEC", "activity_class": "regulated"}] * 3,
+            }],
+        },
+    })
+    assert clusters
+    packet = {"reader_cards": clusters, "figure_cards": []}
+    assert validate_quantitative_sentence(clusters[0]["reader_summary"], packet) == []
+
+
 def test_p2_cards_and_typed_dispatch():
     observations = [
         {"feature_identity": {"gene": "IRS1", "reader_feature_id": "PF-AAAAAAAA"}},
