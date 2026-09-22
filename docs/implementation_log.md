@@ -3141,3 +3141,166 @@
 - **해석 한계:** None은 JSON에 못 넣는 비유한값이다. 0이 아니다.
 - **결정성:** 새 seed·임계 없음.
 
+### [2026-09-22] Report 봉인 — unbound 문장·sidecar audit·Gemma 분할
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/companion_evidence.py`
+  (`multiform_cards`),
+  `workers/report_generation/core/report_artifact_manifest.py`
+  (`_identity_audits_from_artifacts`),
+  `workers/report_generation/core/reader_authoring.py`
+  (`_study_context_with_override`),
+  `workers/report_generation/core/nodes/writer_node.py`
+  (`GEMMA_PARTITION_CHARS`)
+- **구현 대상 설계:** identity projection §4.A-1, report sidecar
+  temporal_input audits, reader named-feature ceiling. Codex_0921
+  `blocked_final` 열람 후 정정.
+- **사전등록 상태:** 해당 없음 (표시·sidecar 메타·LLM 컨텍스트).
+  exploratory. primary 승격 금지.
+- **내용:** multiform 카드는 유전자만 말하고 "had more than one
+  measured precursor form"을 쓴다. 두 표시 정체성을 "A and B"로
+  이어 붙이지 않는다. sidecar에 identity audit가 없으면 이미
+  검증된 enriched JSON과 vector TSV에서 같은 감사를 다시 계산한다.
+  주문에 기록된 species/organism은 study context로만 복사한다.
+  대조 설계는 만들지 않는다. 로컬 Gemma는 80,000자에서 분할하고
+  max_tokens를 4,096으로 제한한다. Gemini 상한은 그대로다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** 하드 블록(`unbound_quantitative_claim`, 누락
+  identity audit)을 푼다. 대조·반복 메타가 없으면 봉인은
+  `draft_review_required`로 남는다. Gemma 분할은 컨텍스트 한도
+  대응이며 원고 품질 주장이 아니다.
+- **결정성:** `GEMMA_PARTITION_CHARS = 80_000`,
+  `GEMMA_MAX_TOKENS = 4096`. 새 측정 seed 없음.
+
+### [2026-09-22] Preprocessing→RAG 파이프라인 설명 덱 추가
+
+- **분류:** 구현
+- **대상:** `docs/presentations/build_preprocessing_to_rag_deck.py`,
+  `docs/presentations/ptm_preprocessing_to_rag.pptx`
+- **구현 대상 설계:** 신규 — 설명 자료 전용. 측정 경로에 없다.
+- **사전등록 상태:** 해당 없음 (측정되는 양을 계산하지 않고 판정
+  임계를 새로 도입하지 않는다).
+- **내용:** PG/PR 입력부터 RAG Enrichment까지 11개 실행 단계의
+  입력·출력·컬럼 계약을 26장 덱으로 정리. 예시 값은
+  `Insulin_Signaling_V3_260919_Codex` 산출물에서 읽은 실제 값이며
+  새로 계산하지 않았다. 덱에 인용한 규칙은 코드에 이미 있는 것뿐이다 —
+  선별 임계(q<0.05 AND |Log2FC|≥1.0, pass-2 폴백 |Log2FC|≥0.8),
+  `Ranking_Score` 순위(`docs/de_novo_representation_contract_v1.md` §8),
+  Phase A 8개 소스, evidence route(db_only / abstract_targeted /
+  fulltext_escalated).
+- **논문에서의 용도:** 사용 안 함 (내부 설명 자료)
+- **해석 한계:** 덱의 행 수·파일 크기는 한 주문의 기술 통계다. 다른
+  데이터셋의 기대값이 아니다. plot 생성 시점 서술은 실행 순서에 대한
+  기술이며 플롯의 타당성 주장이 아니다. kinase 예측 향상 서술을 쓰지
+  않는다.
+- **결정성:** 측정 없음. 새 seed·solver 경로 없음. 덱은
+  `python3 docs/presentations/build_preprocessing_to_rag_deck.py` 로
+  재생성된다.
+
+### [2026-09-22] Kinase 추론 약점·필요 연구 설명 덱 추가
+
+- **분류:** 구현
+- **대상:** `docs/presentations/build_kinase_inference_gaps_deck.py`,
+  `docs/presentations/ptm_kinase_inference_gaps.pptx`,
+  `docs/presentations/check_deck_layout.py`
+- **구현 대상 설계:** 신규 — 설명 자료 전용. 측정 경로에 없다.
+  내용의 출처는 기존 문서·모듈 docstring이며 새 판정을 도입하지 않는다:
+  `docs/2026-08-13_temporal_ptm_upgrade_assessment.md`,
+  `docs/2026-08-13_cowave_multi_kinase_interpretation_audit.md`,
+  `docs/2026-08-13_tmm_temporal_precedence_vs_snapkin.md`,
+  `docs/official_temporal_terminology_contract.md`,
+  `docs/tmm_allocation_change.md`, `docs/c1_prereg_v1.md`,
+  `ptm_shared/temporal_wave_engine.py`, `ptm_shared/tmm_identifiability.py`,
+  `ptm_shared/tmm_attribution_guard.py`,
+  `ptm_shared/directed_temporal_relationship.py`,
+  `ptm_shared/time_varying_comovement.py`,
+  `ptm_shared/probabilistic_cowave.py`, `ptm_shared/c1_transmissibility.py`
+- **사전등록 상태:** 해당 없음 (측정되는 양을 계산하지 않고 판정 임계를
+  새로 도입하지 않는다).
+- **내용:** 시계열 kinase 추론에서 Pearson correlation 단일 지표에
+  의존할 때 발생하는 해석 오류 8건(W1 척도 불변 / W2 부호 처리 목적
+  충돌 / W3 zero-lag 한정 / W4 대칭성 / W5 공유 기질 이중 계상 /
+  W6 식별가능성 미검사 / W7 증거 없는 균등 분할 / W8 전역 상관의 시간
+  평균)과, 각 건에 대해 현재 코드에 있는 대응을 25장 덱으로 정리.
+  Part 2는 아직 검증되지 않은 항목 8건(R1 Wave vs Site benchmark /
+  R2 time permutation·ablation / R3 순환성 정량화 / R4 replicate 안정성 /
+  R5 식별가능 실험 설계 / R6 개입 기반 방향성 검증 / R7 τ 재계산 /
+  R8 soft prior)과 P0/P1/P2 우선순위를 기록.
+  인용 수치는 기존 기록을 옮긴 것이다 — identifiable 1.1% (공유 site
+  1,310개 감사), 균등 ratio 분기 46.3%, 영값 대입 top-1 반전 10.1%,
+  `minimum_variance` 0.30 / `minimum_amplitude` 0.80,
+  `RATIO_AMBIGUITY_WEAK` 0.15 / `RATIO_AMBIGUITY_BROKEN` 0.50,
+  `COHERENCE_SUBSTITUTABLE` 0.99.
+- **논문에서의 용도:** 사용 안 함 (내부 설명 자료). Part 2 항목은 향후
+  limitation 절의 근거가 될 수 있으나 그 승격은 별도 항목으로 기록한다.
+- **해석 한계:** 덱의 예시 궤적(W1 r=1.000, W3 zero-lag r=-0.427 vs
+  2칸 이동 r=0.75, W8 구간별 r=+1.000/-1.000, 전 구간 r=-0.327)은
+  상관계수의 성질을 보이기 위해 손으로 만든 수치이며 관측 데이터가
+  아니다. W5 막대(1.0/1.0/1.0 vs 0.65/0.25/0.10)도 예시이며 특정
+  site의 추정치가 아니다. 덱에 열거한 대응은 진단 계층 추가와 발표
+  범위 축소이며 kinase 예측 정확도 개선의 증거가 아니다 — 덱 본문
+  2장·13장·15장·25장에 그 경계를 명시했다.
+- **결정성:** 측정 없음. 새 seed·solver 경로 없음. 덱은
+  `python3 docs/presentations/build_kinase_inference_gaps_deck.py` 로
+  재생성되고, 기하 검사는
+  `python3 docs/presentations/check_deck_layout.py` 로 재현된다
+  (현재 0 issues).
+
+### [2026-09-22] Kinase 추론 약점·필요 연구 5장 축약 덱 추가
+
+- **분류:** 구현
+- **대상:** `docs/presentations/build_kinase_inference_gaps_short_deck.py`,
+  `docs/presentations/ptm_kinase_inference_gaps_5p.pptx`
+- **구현 대상 설계:** 신규 — 설명 자료 전용. 같은 날 항목
+  「Kinase 추론 약점·필요 연구 설명 덱 추가」(25장)의 축약판이며 출처가
+  동일하다. 새 문서·새 임계·새 수치를 도입하지 않는다.
+- **사전등록 상태:** 해당 없음 (측정되는 양을 계산하지 않는다).
+- **내용:** 25장 덱을 5장으로 압축. 1장 질문 불일치, 2장 상관계수 자체의
+  성질에서 오는 오류(W1 척도 불변 / W2 부호 처리 목적 충돌 /
+  W3 zero-lag 한정 / W4 대칭성), 3장 kinase 배분에 쓸 때의 오류
+  (W5 이중 계상 / W6 식별가능성 미검사 / W7 증거 없는 균등 분할 /
+  W8 전역 상관의 시간 평균), 4장 대응 8건과 각 대응의 성격,
+  5장 P0/P1/P2 우선순위와 주장 경계. 축약 과정에서 항목을 합치거나
+  뺐을 뿐이며 원본에 없는 진술을 추가하지 않았다.
+- **논문에서의 용도:** 사용 안 함 (내부 설명 자료)
+- **해석 한계:** 2장의 예시 궤적(zero-lag r=-0.427, 2칸 이동 r=0.75)과
+  3장에 인용한 구간별 r(+1.000 / -1.000, 전 구간 -0.327)은 상관계수의
+  성질을 보이기 위해 손으로 만든 수치이며 관측 데이터가 아니다.
+  identifiable 1.1%와 균등 분할 46.3%는 성과 지표가 아니라 진단을
+  붙였을 때 드러난 문제의 크기이며, 3장에 그 문장을 명시했다.
+  4장의 대응은 진단 계층 추가와 발표 범위 축소이며 kinase 예측 정확도
+  개선의 증거가 아니다 — 4장 하단과 5장 하단에 경계를 적었다.
+- **결정성:** 측정 없음. 새 seed·solver 경로 없음. 덱은
+  `python3 docs/presentations/build_kinase_inference_gaps_short_deck.py` 로
+  재생성되고, 기하 검사는
+  `python3 docs/presentations/check_deck_layout.py` 로 재현된다
+  (3개 덱 모두 0 issues).
+
+### [2026-09-22] 정정 — 설명 덱의 W/R 라벨이 저장소 workstream 번호와 충돌
+
+- **분류:** 정정
+- **대상:** `docs/presentations/build_kinase_inference_gaps_deck.py`,
+  `docs/presentations/build_kinase_inference_gaps_short_deck.py`,
+  그리고 그 산출물 `ptm_kinase_inference_gaps.pptx` (25장),
+  `ptm_kinase_inference_gaps_5p.pptx` (5장)
+- **참조:** 같은 날 항목 「Kinase 추론 약점·필요 연구 설명 덱 추가」와
+  「Kinase 추론 약점·필요 연구 5장 축약 덱 추가」를 정정한다.
+- **구현 대상 설계:** 해당 없음 (표기 정정)
+- **사전등록 상태:** 해당 없음 (측정되는 양을 바꾸지 않는다)
+- **내용:** 두 덱에서 약점을 `W1~W8`, 연구 과제를 `R1~R8`로 표기했다.
+  `W0~W8`은 `docs/implementation/ptm-report-integration-status.md`에서
+  이미 **workstream** 번호로 쓰이고 있어 뜻이 충돌한다 (예: 그 문서의 W2는
+  loss/form/charge/QC 구현 묶음이고 덱의 W2는 부호 처리 문제였다).
+  `R01~`도 같은 문서에서 requirement ID로 쓰인다. 라벨을 도입할 때 기존
+  용례를 확인하지 않은 것이 원인이다.
+  `W1~W8` → `약점 1~8`, `R1~R8` → `연구 1~8`로 바꿨다. `P0/P1/P2`는
+  `docs/collaboration/reviews/2026-09-14_insulin_report_regression_audit_ko.md`
+  의 기존 우선순위 관례와 일치하므로 유지하되, 표 셀에 `P0 / 최우선`,
+  `P1 / 다음`, `P2 / 이후` 범례를 넣고 슬라이드 kicker도
+  `연구 1 · 최우선(P0)` 형태로 풀어 적었다.
+- **논문에서의 용도:** 사용 안 함 (내부 설명 자료)
+- **해석 한계:** 표기만 바뀌었다. 약점 8건·연구 8건의 내용, 인용 수치,
+  우선순위 배정은 이전 항목과 동일하다. 이 정정으로 새로 주장되는 것은 없다.
+- **결정성:** 측정 없음. 두 덱은 각 build 스크립트로 재생성되고 기하 검사는
+  `python3 docs/presentations/check_deck_layout.py` 로 재현된다.
+

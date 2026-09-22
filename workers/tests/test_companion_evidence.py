@@ -257,6 +257,10 @@ def test_multiform_and_cluster_summaries_bind_without_pf_ids():
     assert multi
     assert "PF-" not in multi[0]["reader_summary"]
     assert "FEATURE-" not in multi[0]["reader_summary"]
+    assert "S2898" not in multi[0]["reader_summary"]
+    assert "S4707" not in multi[0]["reader_summary"]
+    assert "annotated at" not in multi[0]["reader_summary"]
+    assert multi[0]["feature_identity"]["reader_display_identity"] == "PLEC"
     packet = {"reader_cards": multi, "figure_cards": []}
     assert validate_quantitative_sentence(multi[0]["reader_summary"], packet) == []
 

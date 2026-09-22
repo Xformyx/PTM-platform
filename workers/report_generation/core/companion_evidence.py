@@ -329,26 +329,17 @@ def multiform_cards(observations: list[dict], *, maximum: int = 3) -> list[dict]
         ids = {str((_mapping(card.get("feature_identity")).get("reader_feature_id"))) for card in group}
         if len(ids) < 2:
             continue
-        left, right = group[0], group[1]
-        left_identity = _mapping(left.get("feature_identity"))
-        right_identity = _mapping(right.get("feature_identity"))
-        left_label = str(left_identity.get("reader_display_identity") or "").strip()
-        right_label = str(right_identity.get("reader_display_identity") or "").strip()
-        if not left_label:
-            left_label = canonical_feature_identity(left_identity).get("reader_display_identity") or gene
-        if not right_label:
-            right_label = canonical_feature_identity(right_identity).get("reader_display_identity") or gene
-        pair_label = f"{left_label} and {right_label}"
+        n_forms = len(ids)
         cards.append(_as_card({
             "card_id": f"multiform.{gene}.{len(cards) + 1}",
             "category": "quantitation_comparison",
             "evidence_type": "multiform_comparison",
             "feature_identity": {
                 "gene": gene,
-                "reader_display_identity": pair_label,
+                "reader_display_identity": gene,
             },
             "reader_summary": (
-                f"{gene} had at least two measured precursor forms ({pair_label}). "
+                f"{gene} had more than one measured precursor form. "
                 "The forms are compared only on jointly observed conditions and are not a whole-protein activity."
             ),
             "claim_tier": "O2",
@@ -358,7 +349,7 @@ def multiform_cards(observations: list[dict], *, maximum: int = 3) -> list[dict]
                     record_type="multiform_comparison",
                     entity_id=gene,
                     metric_id="n_compared_forms",
-                    value=len(ids),
+                    value=n_forms,
                     unit="form_count",
                     estimator="same_parent_precursor_forms.v1",
                     support_status="computed",

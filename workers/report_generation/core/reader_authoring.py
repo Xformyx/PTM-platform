@@ -273,6 +273,14 @@ def _study_context_with_override(state: Mapping[str, Any]) -> dict:
     """Merge an explicit report-level verified metadata override into context."""
     context = _as_mapping(state.get("experimental_context"))
     report_config = _as_mapping(state.get("report_config"))
+    # Order-recorded taxonomy is not inferred from a cell-model nickname.
+    if not context.get("organism") and not context.get("species"):
+        for key in ("species", "organism", "organism_code"):
+            value = state.get(key)
+            if value:
+                context.setdefault("organism", value)
+                context.setdefault("species", value)
+                break
     for key in (
         "declared_timepoints", "timepoints", "time_points", "control_design", "control",
         "control_condition", "control_time_matching", "control_time_match", "time_matched_control",

@@ -158,12 +158,78 @@ def _enriched_provenance_status(path: str | Path | None) -> dict[str, Any]:
     }
 
 
-def _temporal_provenance_status(path: str | Path | None) -> dict[str, Any]:
+def _light_vector_rows(path: str | Path | None) -> list[dict[str, Any]]:
+    """Read only the identity/value columns needed for the crosswalk audit."""
+    if not path:
+        return []
+    candidate = Path(str(path))
+    if not candidate.is_file():
+        return []
+    import csv
+    rows = []
+    with candidate.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        for raw in reader:
+            if not isinstance(raw, dict):
+                continue
+            rows.append({
+                "precursor_id": raw.get("Precursor.Id") or raw.get("precursor_id"),
+                "condition": raw.get("Condition") or raw.get("condition"),
+                "log2fc": raw.get("PTM_Relative_Log2FC") or raw.get("ptm_relative_log2fc")
+                or raw.get("PTM_ProteinAdjusted_Log2FC") or raw.get("ptm_protein_adjusted_log2fc"),
+            })
+    return rows
+
+
+def _identity_audits_from_artifacts(enriched_path: str | Path | None, vector_path: str | Path | None) -> dict[str, Any]:
+    """Rebuild sidecar identity audits from the same files TMM should have copied.
+
+    구현 대상: report_artifact_manifest temporal_input identity audits
+    사전등록: 해당 없음 (sidecar 메타 복원, 2026-09-22). TMM 점수 변경 아님.
+    해석 한계: 감사 상태만 채운다. 교차검증 통과가 귀속 정확도가 아니다.
+    주장 금지: 이 필드로 kinase 예측 개선을 주장하지 않는다.
+    """
+    from ptm_shared.site_form_provenance import (
+        audit_enriched_site_form_records,
+        audit_enriched_vector_crosswalk,
+    )
+    payload = _load_json(enriched_path)
+    if isinstance(payload, Mapping):
+        payload = next((value for value in payload.values() if isinstance(value, list)), [])
+    records = [item for item in payload or [] if isinstance(item, Mapping)] if isinstance(payload, list) else []
+    return {
+        "site_form_provenance_audit": audit_enriched_site_form_records(records),
+        "enriched_vector_crosswalk_audit": audit_enriched_vector_crosswalk(records, _light_vector_rows(vector_path)),
+    }
+
+
+def _temporal_provenance_status(
+    path: str | Path | None,
+    *,
+    enriched_path: str | Path | None = None,
+    vector_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Sidecar identity audits, or the same audits computed from the source files.
+
+    구현 대상: report_artifact_manifest temporal_input identity audits
+    사전등록: 해당 없음 (sidecar 메타 복원, 2026-09-22). TMM 점수 변경 아님.
+    해석 한계: 누락된 sidecar 필드를 채운다. 교차검증 통과가 귀속 정확도가 아니다.
+    주장 금지: 이 상태로 kinase 예측 개선을 주장하지 않는다.
+    """
     payload = _load_json(path)
     provenance = dict(payload.get("provenance") or {}) if isinstance(payload, Mapping) else {}
     temporal_input = dict(provenance.get("temporal_input") or {})
     site_audit = dict(temporal_input.get("site_form_provenance_audit") or {})
     crosswalk_audit = dict(temporal_input.get("enriched_vector_crosswalk_audit") or {})
+    derived = False
+    if site_audit.get("status") != "validated" or crosswalk_audit.get("status") != "validated":
+        computed = _identity_audits_from_artifacts(enriched_path, vector_path)
+        if site_audit.get("status") != "validated":
+            site_audit = dict(computed.get("site_form_provenance_audit") or {})
+            derived = True
+        if crosswalk_audit.get("status") != "validated":
+            crosswalk_audit = dict(computed.get("enriched_vector_crosswalk_audit") or {})
+            derived = True
     return {
         "status": (
             "validated"
@@ -173,6 +239,7 @@ def _temporal_provenance_status(path: str | Path | None) -> dict[str, Any]:
         "site_form_provenance_status": site_audit.get("status") or "missing",
         "enriched_vector_crosswalk_status": crosswalk_audit.get("status") or "missing",
         "feature_provenance_input": temporal_input.get("feature_provenance_input"),
+        "identity_audits_derived_from_artifacts": derived,
     }
 
 
@@ -219,7 +286,10 @@ def build_report_artifact_manifest(
     enriched_status = _enriched_provenance_status(enriched_path)
     if enriched_status["status"] != "validated":
         reasons.append("enriched_site_form_provenance_not_validated")
-    temporal_status = _temporal_provenance_status(temporal_sidecar_path) if temporal_required else {"status": "not_required"}
+    temporal_status = (
+        _temporal_provenance_status(temporal_sidecar_path, enriched_path=enriched_path, vector_path=vector_path)
+        if temporal_required else {"status": "not_required"}
+    )
     if temporal_required and temporal_status["status"] != "validated":
         reasons.append("temporal_site_form_and_vector_provenance_not_validated")
 

@@ -104,6 +104,10 @@ SECTION_PROMPT_BUDGET = {
     "title": 10_000,
 }
 MAX_PROMPT_CHARS = 200_000  # absolute safety cap
+# Local Gemma cannot ingest the unsplit results/discussion packets (~400k chars).
+# Operational context cap only — not a research threshold. Gemini keeps MAX_PROMPT_CHARS.
+GEMMA_PARTITION_CHARS = 80_000
+GEMMA_MAX_TOKENS = 4096
 
 
 def _build_observation_only_claim_ceiling(
@@ -965,12 +969,17 @@ def run_section_writing(state: dict) -> dict:
                 "cited external context. Do not add a technical audit, implementation status, raw feature list, "
                 "or figure not supplied by the packet. Follow the required paragraph roles and do not emit PF- or FEATURE- identifiers."
             )
+            compose_budget = (
+                GEMMA_PARTITION_CHARS
+                if "gemma" in str(getattr(llm, "model", "") or "").lower()
+                else MAX_PROMPT_CHARS
+            )
             prompt, compaction_trace = compose_compacted_narrative_prompt(
                 section_authoring_packet,
                 section_type,
                 authoring_plan,
                 extra_suffix=extra_suffix,
-                max_chars=MAX_PROMPT_CHARS,
+                max_chars=compose_budget,
             )
             section_compaction_trace = compaction_trace
         else:
@@ -1211,14 +1220,19 @@ def run_section_writing(state: dict) -> dict:
         token_budget = report_config.get('model_context_token_budget')
         count_tokens = getattr(llm, 'count_tokens', None)
         estimated_tokens = int(count_tokens(prompt)) if callable(count_tokens) else len(prompt.encode('utf-8'))
+        model_name = str(getattr(llm, "model", "") or "")
+        # Local Gemma cannot ingest the 400k-char results/discussion packets.
+        partition_chars = GEMMA_PARTITION_CHARS if "gemma" in model_name.lower() else MAX_PROMPT_CHARS
+        if "gemma" in model_name.lower():
+            max_tok = min(int(max_tok), GEMMA_MAX_TOKENS)
         needs_partition = section_authoring_packet is not None and (
-            len(prompt) > MAX_PROMPT_CHARS or token_budget is not None and estimated_tokens + max_tok > int(token_budget))
+            len(prompt) > partition_chars or token_budget is not None and estimated_tokens + max_tok > int(token_budget))
         if needs_partition:
             from report_generation.core.section_model_packet import partition_section_prompts
             from common.model_json import parse_model_json
             try:
                 batches = partition_section_prompts(section_authoring_packet, section_type, authoring_plan,
-                    extra_suffix=extra_suffix, max_chars=MAX_PROMPT_CHARS, token_counter=count_tokens,
+                    extra_suffix=extra_suffix, max_chars=partition_chars, token_counter=count_tokens,
                     input_token_budget=token_budget, output_reserve=max_tok,
                     max_parts=int(report_config.get('maximum_section_review_parts', 32)))
                 paragraphs = []

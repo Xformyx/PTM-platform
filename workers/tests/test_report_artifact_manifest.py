@@ -135,6 +135,56 @@ def test_manifest_records_audience_mode_dispatch_fields(tmp_path):
     assert manifest["report_generation_started_at"] == "2026-09-15T00:00:00+00:00"
 
 
+def _valid_identity_pair(tmp_path):
+    """Enriched + vector rows that pass live site-form and crosswalk audits."""
+    form_key = "GENE_S1|precursor=FORM2|z=2"
+    vector = _write(
+        tmp_path / "vector.tsv",
+        "Precursor.Id\tCondition\tPTM_Relative_Log2FC\nFORM2\t5min\t1.0\n",
+    )
+    enriched = _write(
+        tmp_path / "enriched.json",
+        json.dumps([{
+            "site_form_trajectories": [{
+                "site_form_key": form_key,
+                "precursor_id": "FORM2",
+                "report_eligible": True,
+            }],
+            "site_aggregation": {
+                "form_count": 1,
+                "source_form_keys": [form_key],
+                "timepoints": [],
+            },
+            "condition_data": [{
+                "precursor_id": "FORM2",
+                "condition": "5min",
+                "ptm_relative_log2fc": 1.0,
+            }],
+            "site_form_provenance_audit": {"status": "validated"},
+            "report_eligible_temporal_site_aggregation": True,
+        }]),
+    )
+    return vector, enriched
+
+
+def test_manifest_derives_missing_sidecar_identity_audits_from_artifacts(tmp_path):
+    vector, enriched = _valid_identity_pair(tmp_path)
+    temporal = _write(tmp_path / "temporal_ptm_protein_analysis_v2.json", json.dumps({"provenance": {}}))
+    evidence = _write(tmp_path / "evidence_and_reproducibility_audit.md", "# Audit\n")
+    prose = _write(tmp_path / "report_prose_trace.json", "{}")
+    correctness = _write(tmp_path / "report_output_correctness_audit.json", "{}")
+    report = _write(tmp_path / "report.md", "# Report\n")
+    manifest = build_report_artifact_manifest(
+        order_id=104, output_dir=tmp_path, report_markdown_paths=[report], vector_path=vector,
+        enriched_path=enriched, temporal_sidecar_path=temporal, evidence_audit_path=evidence,
+        prose_trace_path=prose, output_correctness_path=correctness, report_config={}, temporal_required=True,
+    )
+    assert manifest["status"] == "validated"
+    assert manifest["report_eligible"] is True
+    assert manifest["temporal_provenance"]["status"] == "validated"
+    assert manifest["temporal_provenance"]["identity_audits_derived_from_artifacts"] is True
+
+
 def test_manifest_runtime_records_declared_display_policy():
     from report_generation.core.report_artifact_manifest import report_runtime_provenance
     provenance = report_runtime_provenance()
