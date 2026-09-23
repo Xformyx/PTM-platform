@@ -3304,3 +3304,35 @@
 - **결정성:** 측정 없음. 두 덱은 각 build 스크립트로 재생성되고 기하 검사는
   `python3 docs/presentations/check_deck_layout.py` 로 재현된다.
 
+### [2026-09-22] Preprocessing→Annotation 5장 축약 덱 추가
+
+- **분류:** 구현
+- **대상:** `docs/presentations/build_preprocessing_to_annotation_short_deck.py`,
+  `docs/presentations/ptm_preprocessing_to_annotation_5p.pptx`
+- **구현 대상 설계:** 신규 — 설명 자료 전용. 같은 항목
+  「Preprocessing→RAG 파이프라인 설명 덱 추가」(26장)의 축약판이며
+  출처가 동일하다. 새 임계·새 수치를 도입하지 않는다.
+- **사전등록 상태:** 해당 없음 (측정되는 양을 계산하지 않는다).
+- **내용:** 26장 덱을 5장으로 압축했다. 1장 두 단계의 역할,
+  2장 Preprocessing 여섯 블록과 합본, 3장 Log2FC 세 축과 그림이
+  나오는 시점, 4장 선별·구조화 DB 8종·문헌 경로·LLM 해석,
+  5장 Insulin_Signaling_V3_260919_Codex 규모와 보장 범위.
+  청중용 단계 이름을 RAG Enrichment에서 Annotation으로 바꿨다.
+  구현 단계 ID `rag_enrichment`는 4장 부제에 그대로 적는다.
+  코드·파일명의 단계 ID는 바꾸지 않았다. 26장 원본 덱은 유지한다.
+  인용 수치는 26장 덱과 그 주석이 가리키는 산출물에서 옮긴 것이다 —
+  PR 177,116행, PG 9,525행, 상대정량 63,735행(3,035 form × 21샘플),
+  합본 18,210행 × 116컬럼, Step 2·3 컬럼 137 → 151, Annotation 산출
+  2,210사이트 · 104MB, Regulated 선별 q<0.05 AND |Log2FC|≥1.0
+  (0건일 때 |Log2FC|≥0.8), `Normalization_Policy = legacy_median.v1`.
+- **논문에서의 용도:** 사용 안 함 (내부 설명 자료)
+- **해석 한계:** 행 수·파일 크기는 한 주문의 기술 통계이며 다른
+  데이터셋의 기대값이 아니다. Annotation은 측정값에 근거를 붙이는
+  단계의 청중용 이름이고, 구현 ID를 개명한 것이 아니다. 덱의 대응
+  범위 서술은 kinase 예측 향상 주장이 아니다 — 5장에 그 경계를 적었다.
+- **결정성:** 측정 없음. 새 seed·solver 경로 없음. 덱은
+  `python3 docs/presentations/build_preprocessing_to_annotation_short_deck.py`
+  로 재생성되고, 기하 검사는
+  `python3 docs/presentations/check_deck_layout.py` 로 재현된다
+  (현재 0 issues).
+

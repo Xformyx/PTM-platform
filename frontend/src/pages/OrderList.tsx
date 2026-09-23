@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square, Share2, Loader2, GitCompareArrows, StretchHorizontal, UnfoldHorizontal } from "lucide-react";
+import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square, Share2, Loader2, GitCompareArrows, StretchHorizontal, UnfoldHorizontal } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,6 +22,22 @@ import {
 import { ShareOrderModal } from "@/components/ShareOrderModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+
+const ORDER_LIST_PAGE_SIZE = 20;
+const ORDER_LIST_FETCH_SIZE = 100;
+
+function orderListPageWindow(current: number, count: number): Array<number | "gap"> {
+  if (count <= 7) return Array.from({ length: count }, (_, index) => index + 1);
+  const pages = [1, count, current - 1, current, current + 1]
+    .filter((value, index, all) => value >= 1 && value <= count && all.indexOf(value) === index)
+    .sort((a, b) => a - b);
+  const window: Array<number | "gap"> = [];
+  pages.forEach((value, index) => {
+    if (index > 0 && value - pages[index - 1] > 1) window.push("gap");
+    window.push(value);
+  });
+  return window;
+}
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -169,6 +185,7 @@ export default function OrderList() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>({ field: "created_at", dir: "desc" });
@@ -292,13 +309,28 @@ export default function OrderList() {
   }, [onColResizeMove, onColResizeEnd]);
 
   const fetchOrders = () => {
-    api
-      .get<{ orders: Order[]; total: number }>("/orders")
-      .then((data) => {
-        setOrders(data.orders);
-        setTotal(data.total);
-      })
-      .finally(() => setLoading(false));
+    void (async () => {
+      try {
+        const first = await api.get<{ orders: Order[]; total: number }>(
+          `/orders?page=1&page_size=${ORDER_LIST_FETCH_SIZE}`,
+        );
+        const collected = [...(first.orders || [])];
+        const totalCount = Number(first.total) || collected.length;
+        let nextPage = 2;
+        while (collected.length < totalCount && nextPage <= 50) {
+          const more = await api.get<{ orders: Order[]; total: number }>(
+            `/orders?page=${nextPage}&page_size=${ORDER_LIST_FETCH_SIZE}`,
+          );
+          if (!more.orders?.length) break;
+          collected.push(...more.orders);
+          nextPage += 1;
+        }
+        setOrders(collected);
+        setTotal(totalCount);
+      } finally {
+        setLoading(false);
+      }
+    })();
   };
 
   useEffect(() => { fetchOrders(); }, []);
@@ -365,6 +397,7 @@ export default function OrderList() {
   }, [hasRunning]);
 
   const handleSort = (field: SortField) => {
+    setPage(1);
     setSort((prev) =>
       prev?.field === field
         ? { field, dir: prev.dir === "asc" ? "desc" : "asc" }
@@ -385,6 +418,11 @@ export default function OrderList() {
     }
     return list;
   })();
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / ORDER_LIST_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * ORDER_LIST_PAGE_SIZE;
+  const visibleOrders = filtered.slice(pageStart, pageStart + ORDER_LIST_PAGE_SIZE);
 
   const filters: StatusFilter[] = ["all", "registered", "running", "completed", "failed"];
 
@@ -438,7 +476,10 @@ export default function OrderList() {
               key={f}
               variant={filter === f ? "default" : "outline"}
               className="cursor-pointer capitalize"
-              onClick={() => setFilter(f)}
+              onClick={() => {
+                setFilter(f);
+                setPage(1);
+              }}
             >
               {f}
             </Badge>
@@ -560,7 +601,7 @@ export default function OrderList() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((order) => (
+                {visibleOrders.map((order) => (
                   <TableRow
                     key={order.id}
                     className={cn("cursor-pointer", compareSelection.includes(order.id) && "bg-primary/5")}
@@ -799,6 +840,56 @@ export default function OrderList() {
             </div>
           )}
         </CardContent>
+        {pageCount > 1 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+            <p className="text-sm text-muted-foreground">
+              {pageStart + 1}–{Math.min(pageStart + visibleOrders.length, filtered.length)} of {filtered.length}
+            </p>
+            <div className="flex items-center gap-1" role="navigation" aria-label="Order pages">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 px-2"
+                disabled={currentPage <= 1}
+                onClick={() => setPage(currentPage - 1)}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                <span className="sr-only">Previous page</span>
+              </Button>
+              {orderListPageWindow(currentPage, pageCount).map((item, index) =>
+                item === "gap" ? (
+                  <span key={`gap-${index}`} className="px-1 text-sm text-muted-foreground">
+                    …
+                  </span>
+                ) : (
+                  <Button
+                    key={item}
+                    type="button"
+                    size="sm"
+                    variant={item === currentPage ? "default" : "outline"}
+                    className="h-8 min-w-8 px-2"
+                    onClick={() => setPage(item)}
+                    aria-current={item === currentPage ? "page" : undefined}
+                  >
+                    {item}
+                  </Button>
+                ),
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 px-2"
+                disabled={currentPage >= pageCount}
+                onClick={() => setPage(currentPage + 1)}
+              >
+                <ChevronRight className="h-4 w-4" />
+                <span className="sr-only">Next page</span>
+              </Button>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Stop-in-progress overlay (Order detail과 동일 — 즉시 피드백, 중복 클릭 방지) */}
