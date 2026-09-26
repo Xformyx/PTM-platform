@@ -21,6 +21,6 @@ def merge_analysis_context(existing, patch):
     policy = result.get("normalization_policy", "legacy_median.v1")
     if policy not in {"legacy_median.v1", "already_normalized.v1"}:
         raise ValueError("Unsupported normalization_policy")
-    if result.get('quantitation_export_mode', 'legacy_only.v1') not in {'legacy_only.v1', 'legacy_plus_report_compatible.v1'}:
+    if result.get('quantitation_export_mode', 'legacy_only.v1') not in {'legacy_only.v1', 'legacy_plus_report_compatible.v1', 'enrichment_free_primary.v2'}:
         raise ValueError('Unsupported quantitation_export_mode')
     return result

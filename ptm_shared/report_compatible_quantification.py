@@ -258,10 +258,22 @@ def quantify_forms(pr, pg, fasta, samples, baseline_time=0):
             post_u = float(contrast(u[i], indices[first], treated)[0]) if first is not None and time >= first else np.nan
             post_a = float(contrast(a[i], indices[first_joint], treated)[0]) if first_joint is not None and time >= first_joint else np.nan
             detection.append({'form_id': form['form_id'], 'time_min': time,
+                'primary_mapping_eligible': form['primary_mapping_eligible'],
+                'primary_adjustment_eligible': form['primary_adjustment_eligible'],
+                'mapping_status': form['mapping_status'], 'parent_match': form['parent_match'],
+                'parent_observed_n': int(np.isfinite(p[i,treated]).sum()),
+                'joint_observed_n': int(joint[treated].sum()),
                 'baseline_n': int(np.isfinite(u[i,base]).sum()), 'detected_n': int(np.isfinite(u[i,treated]).sum()),
                 'scheduled_n': len(treated), 'first_ge2_time': first, 'first_joint_ge2_time': first_joint,
                 'baseline_status': 'undetected' if not np.isfinite(u[i,base]).any() else 'insufficient' if np.isfinite(u[i,base]).sum() < 2 else 'evaluable',
                 'post_reference_U': post_u, 'post_reference_A': post_a,
+                'raw_candidate_A': post_a,
+                'eligible_A': post_a if form['primary_adjustment_eligible'] else np.nan,
+                'inference_use_allowed': bool(form['primary_adjustment_eligible'] and np.isfinite(post_a)),
+                'use_restriction': ('mapping_or_parent_ineligible' if not form['primary_adjustment_eligible'] else
+                                    'insufficient_post_reference_joint_observations' if not np.isfinite(post_a) else
+                                    'post_reference_only_not_baseline_footprint'),
+                'localization_status': 'unknown_not_imputed',
                 'interpretation': 'post_reference_change_is_not_baseline_fold_change'})
     return {'summary': summary, 'runlevel': pd.DataFrame(runlevel), 'comparisons': pd.DataFrame(comparisons),
             'detection': pd.DataFrame(detection), 'samples': samples, 'arrays': arrays, 'fasta': fasta,

@@ -1,4 +1,5 @@
 import {SignalingEvidenceExplorer} from "../components/SignalingEvidenceExplorer";
+import PrimaryAEvidence from "../components/PrimaryAEvidence";
 import {VirtualFeatureList} from "../components/VirtualFeatureList";
 import { VectorScatterPlots } from "../components/VectorScatterPlots";
 import { finiteExtent } from "../lib/vectorView";
@@ -3514,6 +3515,8 @@ export default function OrderDetail() {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
+  const hasPrimaryAEvidence = order?.analysis_context?.quantitation_export_mode === 'enrichment_free_primary.v2' || !!order?.result_files?.enrichment_free;
+  useEffect(() => { if (hasPrimaryAEvidence) setActiveTab('primary-a'); }, [orderId,hasPrimaryAEvidence]);
   const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);
   const runHandledRef = useRef(false);
@@ -4079,6 +4082,7 @@ export default function OrderDetail() {
   const handleRunStage = (stage: string) => openRerunModal({ type: "run-stage", stage });
 
   const rerunConfirmLabel = (() => {
+    if (hasPrimaryAEvidence) return "Confirm & Re-run Primary A evidence";
     if (pendingAction?.type === "run-stage") {
       const labels: Record<string, string> = {
         preprocessing: "Confirm & Re-run Preprocessing",
@@ -4289,6 +4293,11 @@ export default function OrderDetail() {
       )}
 
       {/* Stage Stepper */}
+      {hasPrimaryAEvidence ? <Card><CardContent className="py-6 space-y-2">
+        <p className="font-medium">Primary A evidence pipeline</p>
+        <p className="text-sm text-muted-foreground">Form quantification → frozen kinase footprints → paired parent and late protein layers → evidence report and Astra bundle</p>
+        <p className="text-sm">{order.stage_detail || order.status}</p>
+      </CardContent></Card> : (
       <Card>
         <CardContent className="py-6">
           <div className="flex items-center justify-between">
@@ -4385,6 +4394,8 @@ export default function OrderDetail() {
           </div>
         </CardContent>
       </Card>
+
+      )}
 
       {/* ── RAG Enrichment Phase Status Modal ── */}
       {phaseModalOpen && (
@@ -4694,20 +4705,21 @@ export default function OrderDetail() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="flex items-center justify-between gap-2">
           <TabsList className="flex-wrap h-auto gap-1">
+            {hasPrimaryAEvidence && <TabsTrigger value="primary-a">Primary A evidence</TabsTrigger>}
             <TabsTrigger value="overview">
               <LayoutDashboard className="h-3.5 w-3.5 mr-1.5" />
               Overview
             </TabsTrigger>
-            <TabsTrigger value="analysis-statistics">
+            <TabsTrigger value="analysis-statistics" disabled={hasPrimaryAEvidence}>
               <BarChart3 className="h-3.5 w-3.5 mr-1.5" />
               Analysis Statistics
             </TabsTrigger>
-            <TabsTrigger value="vector-plot">
+            <TabsTrigger value="vector-plot" disabled={hasPrimaryAEvidence}>
               <ChartScatter className="h-3.5 w-3.5 mr-1.5" />
               Vector Plot
             </TabsTrigger>
             {resolveTemporalContract((order.report_options as { temporal_contract?: string } | undefined)?.temporal_contract) === "dynamics_v1" && (
-            <TabsTrigger value="temporal-atlas">
+            <TabsTrigger value="temporal-atlas" disabled={hasPrimaryAEvidence}>
               <TrendingUp className="h-3.5 w-3.5 mr-1.5" />
               Temporal Atlas
             </TabsTrigger>
@@ -5233,6 +5245,9 @@ export default function OrderDetail() {
           )}
         </TabsContent>
 
+        <TabsContent value="primary-a" className="mt-4">
+          <PrimaryAEvidence orderId={order.id} status={order.status} />
+        </TabsContent>
         <TabsContent value="analysis-statistics" className="mt-4">
           <AnalysisStatisticsTab orderId={order.id} />
         </TabsContent>

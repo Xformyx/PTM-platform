@@ -9,14 +9,15 @@ import pandas as pd
 from .report_compatible_quantification import tokens, assigned_positions, contrast
 
 VERSION = 'gene_balanced_frozen_substrate_footprint.v1'
+JOINT_COMPARISON_VERSION = 'gene_balanced_joint_counterfactual.v2'
 CURATED = {'PhosphoSite', 'SIGNOR', 'HPRD', 'phosphoELM'}
 NONCATALYTIC = {'Ccnb1', 'Ccne2', 'Csnk2b', 'Prkab1', 'Prkab2', 'Prkag1', 'Prkag2', 'Prkag3'}
 FAMILIES = {'AKT_family': ['Akt1', 'Akt2', 'Akt3'], 'ERK1_2_family': ['Mapk1', 'Mapk3'],
             'MEK1_2_family': ['Map2k1', 'Map2k2'], 'mTOR': ['Mtor'],
             'S6K_family': ['Rps6kb1', 'Rps6kb2'], 'RSK_family': ['Rps6ka1', 'Rps6ka2', 'Rps6ka3', 'Rps6ka6'],
             'GSK3_family': ['Gsk3a', 'Gsk3b']}
-# Frozen before discovery scoring. The internal same-experiment validation is
-# descriptive and does not constitute inhibitor or biological replication.
+# Fixed before this reanalysis's discovery scoring after review of the original
+# report; this is retrospective holdout, not prospective preregistration.
 HELD_OUT_GENES = frozenset({'FOSL1', 'FOSL2', 'JUN', 'JUNB', 'CCND1', 'IRS1'})
 
 
@@ -133,10 +134,12 @@ def score_footprints(analysis, all_edges, run_omissions=True):
     by_entity = {e: [r for r in primary if r['entity'] == e] for e in entities}
     all_by_entity = {e: [r for r in selection if r['entity'] == e] for e in entities}
     scores, sites_export, genes_export, omission_export, sensitivities, strict = [], [], [], [], [], []
-    mode_membership, gene_omissions = [], []
+    mode_membership, gene_omissions, comparison_profiles, comparison_membership = [], [], [], []
     modes = {'primary_A': 'A', 'singlecharge_A': 'A_singlecharge', 'complete3_A': 'A',
              'fixed_site_panel_A': 'A', 'unadjusted_U': 'U', 'parent_P': 'P', 'multisite_component_A': 'A'}
     values = {(axis, t): summary[f'{axis}_log2FC_{t}'].to_dict() for axis in set(modes.values()) for t in times}
+    joint_values = {(axis, t): analysis['comparisons'].loc[analysis['comparisons'].time_min.eq(t)].set_index('form_id')[axis].to_dict()
+                    for axis in ('U_joint','P_joint') for t in times}
     for entity in entities:
         rows = by_entity[entity]
         fixed = set.intersection(*[{r['site_key'] for r in rows if np.isfinite(values['A',t][r['form_id']])} for t in times])
@@ -151,6 +154,18 @@ def score_footprints(analysis, all_edges, run_omissions=True):
                 components[site] = union
         multi = [{**r, 'feature_key': min(components[r['site_key']])} for r in all_by_entity[entity]]
         for time in times:
+            matched_rows = [r for r in rows if np.isfinite(values['A',time][r['form_id']])]
+            for name, axis_values in [
+                ('unadjusted_U_all_observed', values['U',time]), ('parent_P_all_observed', values['P',time]),
+                ('unadjusted_U_joint', joint_values['U_joint',time]), ('parent_P_joint', joint_values['P_joint',time])]:
+                sites, genes, supporting = aggregate_rows(matched_rows, axis_values)
+                comparison_profiles.append({'entity':entity, 'mode':name, 'time_min':time,
+                    **footprint_statistics(sites,genes), 'estimator_version':JOINT_COMPARISON_VERSION,
+                    'aggregation_identity':'form_A_equals_U_joint_minus_P_joint_only; site_and_gene_medians_are_nonlinear'})
+                comparison_membership.extend({'entity':entity,'mode':name,'time_min':time,
+                    'substrate_gene':gene,'site_key':site,'contribution':value,
+                    'form_ids':';'.join(sorted({r['form_id'] for r in supporting[gene,site]}))}
+                    for (gene,site),value in sites.items())
             for mode, axis in modes.items():
                 selected = multi if mode == 'multisite_component_A' else rows
                 if mode == 'fixed_site_panel_A':
@@ -225,4 +240,31 @@ def score_footprints(analysis, all_edges, run_omissions=True):
             'omissions': pd.DataFrame(omission_export, columns=['entity','time_min','omit_baseline_run','omit_treatment_run'] + list(footprint_statistics({},{}))),
             'sensitivities': pd.DataFrame(sensitivities), 'strict': pd.DataFrame(strict), 'overlap': pd.DataFrame(overlap),
             'mode_membership':pd.DataFrame(mode_membership, columns=['entity','mode','time_min','substrate_gene','feature_key','contribution','form_ids']),
-            'gene_omissions':pd.DataFrame(gene_omissions, columns=['entity','time_min','omitted_gene'] + list(footprint_statistics({},{})))}
+            'gene_omissions':pd.DataFrame(gene_omissions, columns=['entity','time_min','omitted_gene'] + list(footprint_statistics({},{}))),
+            'comparison_profiles_v2':pd.DataFrame(comparison_profiles),
+            'comparison_membership_v2':pd.DataFrame(comparison_membership)}
+
+
+def emergent_kinase_evidence(analysis, edges):
+    """Join emergence to curated candidates without pooling different references."""
+    forms = analysis['summary'].set_index('form_id')
+    selected = edges.loc[edges.primary_edge_eligible.astype(bool)].copy()
+    records = []
+    for edge in selected.to_dict('records'):
+        form = forms.loc[edge['form_id']]
+        if not form.baseline_undetected_all_runs or not form.primary_adjustment_eligible:
+            continue
+        entities = [edge['kinase_gene']] + [name for name,members in FAMILIES.items() if edge['kinase_gene'] in members]
+        for detection in analysis['detection'].loc[analysis['detection'].form_id.eq(edge['form_id'])].to_dict('records'):
+            for entity in entities:
+                records.append({**detection, 'entity':entity, 'site_key':edge['site_key'],
+                    'mapped_accession':edge['mapped_accession'], 'residue_offset':edge['residue_offset'],
+                    'site_window':edge['site_window'], 'kinase_gene':edge['kinase_gene'],
+                    'curated_resources':edge['curated_resources'],'curated_references':edge['curated_references'],
+                    'source_caution':edge['source_caution'],'orthology_status':edge['orthology_status'],
+                    'n_phosphates':form.n_phosphates,
+                    'multisite_limit':'inseparable_form' if form.n_phosphates > 1 else 'assigned_site_localization_unknown',
+                    'evidence_tier':'emergent_curated_candidate', 'contributes_to_baseline_score':False,
+                    'pooling_policy':'do_not_average_forms_with_different_post_reference_times'})
+    return pd.DataFrame(records).drop_duplicates() if records else pd.DataFrame(columns=[
+        'form_id','time_min','entity','site_key','kinase_gene','eligible_A','evidence_tier','contributes_to_baseline_score'])

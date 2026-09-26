@@ -318,7 +318,70 @@ def _updated_analysis_context(order, patch, existing=None):
             samples_from_manifest(context.get('sample_manifest'), _build_condition_map(order.sample_config))
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+    from ptm_shared.enrichment_free_profile import enabled, validate_profile, annotation_snapshot
+    if enabled(context):
+        try:
+            if getattr(order, 'secondary_pr_matrix_path', None) or getattr(order, 'secondary_pg_matrix_path', None):
+                raise ValueError('The primary-A profile supports a single phosphorylation input pair')
+            species = _require_species_context(order.species)
+            validate_profile(context, _build_condition_map(order.sample_config), order.ptm_type,
+                             species.taxonomy_id, order.analysis_options)
+            annotation_snapshot(Path(get_settings().REFERENCE_DIR) / 'frozen_annotations', context.get('annotation_snapshot_sha256'))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
     return context
+
+
+def _attach_enrichment_free_profile(order, config):
+    from ptm_shared.enrichment_free_profile import enabled, annotation_snapshot
+    if enabled(order.analysis_context):
+        _updated_analysis_context(order,{})
+        config['frozen_annotation'] = annotation_snapshot(Path(get_settings().REFERENCE_DIR) / 'frozen_annotations',
+            order.analysis_context['annotation_snapshot_sha256'])
+        config['order_id'] = order.id
+        config['chain_to_next'] = False
+    return config
+
+
+@router.get("/frozen-annotations")
+async def list_frozen_annotations(user=Depends(get_current_user)):
+    from ptm_shared.enrichment_free_profile import annotation_snapshot
+    root = Path(get_settings().REFERENCE_DIR) / 'frozen_annotations'
+    snapshots = []
+    for directory in sorted(root.glob('*')):
+        try:
+            snapshot = annotation_snapshot(root,directory.name)
+            snapshots.append({key:snapshot[key] for key in ('sha256','retrieved_utc')})
+        except (ValueError, OSError):
+            continue
+    return {'snapshots':snapshots}
+
+
+@router.get("/{order_id}/enrichment-free-evidence")
+async def get_enrichment_free_evidence(order_id:int, artifact:Optional[str]=None,
+    db:AsyncSession=Depends(get_db), user=Depends(get_current_user)):
+    from ptm_shared.enrichment_free_workflow import recorded_run
+    import asyncio
+    result = await db.execute(select(Order).where(Order.id==order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404,detail='Order not found')
+    await _check_order_access_async(order,user,db)
+    root = Path(get_settings().OUTPUT_DIR)/order.order_code
+    try:
+        record = await asyncio.to_thread(recorded_run,root)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404,detail='No completed primary A evidence run')
+    except (ValueError,KeyError,OSError) as error:
+        raise HTTPException(status_code=409,detail=str(error)) from error
+    if artifact:
+        if artifact not in record['artifacts']:
+            raise HTTPException(status_code=404,detail='Unknown evidence artifact')
+        path = root/record['artifacts'][artifact]['path']
+        return FileResponse(path, filename=path.name,
+            media_type='text/html' if artifact=='report' else 'application/octet-stream')
+    # The recorded run remains authoritative even when draft order settings change.
+    return record
 
 
 def _build_condition_map(sample_cfg: dict | list | None) -> dict:
@@ -936,10 +999,10 @@ async def update_order_options(
             status_code=400,
             detail=f"Cannot update order while running (status: '{order.status}'). Stop first.",
         )
-    if body.analysis_context is not None:
-        order.analysis_context = _updated_analysis_context(order, body.analysis_context)
     if body.analysis_options is not None:
         order.analysis_options = body.analysis_options
+    if body.analysis_context is not None or body.analysis_options is not None:
+        order.analysis_context = _updated_analysis_context(order, body.analysis_context or {})
     if body.report_options is not None:
         order.report_options = _normalize_report_options(body.report_options)
     if body.rag_collections is not None:
@@ -1273,6 +1336,7 @@ async def duplicate_order(
             secondary_sample_config=source.secondary_sample_config,
         )
 
+        new_order.analysis_context = _updated_analysis_context(new_order, {})
         db.add(new_order)
         await db.commit()
         await db.refresh(new_order)
@@ -1314,6 +1378,7 @@ async def start_order(
     await db.refresh(order)
 
     validated_sample_manifest = _validated_order_sample_manifest(order)
+    _updated_analysis_context(order, {})
     prev_status = order.status
     claimed = await _claim_order_dispatch(
         db,
@@ -1335,7 +1400,8 @@ async def start_order(
     await _clear_order_locks(order_id)
 
     # For completed or cancelled orders, clear output dir so full pipeline runs from scratch
-    if prev_status in ("completed", "cancelled"):
+    from ptm_shared.enrichment_free_profile import enabled as primary_a_enabled
+    if prev_status in ("completed", "cancelled") and not primary_a_enabled(order.analysis_context):
         output_dir = os.getenv("OUTPUT_DIR", "/app/data/outputs")
         order_output = Path(output_dir) / order.order_code
         if order_output.exists():
@@ -1425,6 +1491,7 @@ async def start_order(
     celery_app.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
     celery_app.conf.result_backend = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
 
+    _attach_enrichment_free_profile(order, task_config)
     task = celery_app.send_task(
         "preprocessing.tasks.run_preprocessing",
         args=[order.id, task_config],
@@ -1609,6 +1676,11 @@ async def run_stage(
             status_code=400,
             detail=f"Can only re-run stages for completed, failed, or cancelled orders (current: '{order.status}')",
         )
+    from ptm_shared.enrichment_free_profile import enabled as primary_a_enabled
+    if primary_a_enabled(order.analysis_context):
+        # A report/kinase rerun must use the same explicit whole-run estimator path.
+        _updated_analysis_context(order, {})
+        body.stage = "preprocessing"
     if is_benchmark_child(order) and body.stage != "preprocessing":
         raise HTTPException(
             status_code=400,
@@ -1758,6 +1830,7 @@ async def run_stage(
                 bench_run.status = "preprocessing"
                 bench_run.error_message = None
                 await db.commit()
+        _attach_enrichment_free_profile(order, task_config)
         task = celery_app.send_task(
             "preprocessing.tasks.run_preprocessing",
             args=[order.id, task_config],

@@ -252,6 +252,23 @@ def run_preprocessing(self, order_id: int, config: dict):
             if not os.path.exists(path):
                 raise FileNotFoundError(f"{label} not found: {path}")
 
+        from ptm_shared.enrichment_free_profile import enabled as primary_a_enabled
+        if primary_a_enabled(config.get("experimental_context")):
+            from ptm_shared.enrichment_free_workflow import run_primary_analysis
+            evidence = run_primary_analysis(order_id, config, order_output,
+                checkpoint=lambda: abort_if_superseded(order_id),
+                progress=lambda message: publish_progress(order_id, "preprocessing", "primary_A", "running", 50, message))
+            abort_if_superseded(order_id)
+            files = {"enrichment_free": {"run_id": evidence["run_id"],
+                "provenance_id": evidence["provenance"]["provenance_id"], "artifacts": evidence["artifacts"]},
+                "all_files": [evidence["artifacts"]["astra"]["path"], "enrichment_free_current.json"]}
+            publish_progress(order_id, "preprocessing", "primary_A", "completed", 100,
+                "Primary A evidence report and Astra bundle completed")
+            update_order_status(order_id, "completed", current_stage="completed", progress_pct=100,
+                stage_detail="Primary A evidence report and Astra bundle completed", result_files=files)
+            return {"order_id": order_id, "status": "completed", "run_id": evidence["run_id"],
+                    "provenance_id": evidence["provenance"]["provenance_id"]}
+
         from preprocessing.core.quick_analysis import (
             is_quick_analysis,
             subset_diann_matrices_for_quick_analysis,

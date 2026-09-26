@@ -49,7 +49,9 @@ logger = logging.getLogger("ptm-security")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-SECURITY_LOG_PATH = Path("/app/storage/logs/security.log")
+from app.config import get_settings
+
+SECURITY_LOG_PATH = Path(get_settings().LOG_DIR) / "security.log"
 SECURITY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Rate-limit window: more than RATE_LIMIT_COUNT requests in RATE_LIMIT_WINDOW seconds

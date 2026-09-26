@@ -6,6 +6,27 @@ from pathlib import Path
 VERSION = "normalization_provenance.v1"
 
 
+def normalize_supplied_matrices(pr, pg, columns, policy):
+    """Execute an explicit policy once; record both layers for portable replay."""
+    import numpy as np
+    import pandas as pd
+    result, factors = [], []
+    for source in (pr, pg):
+        frame = source.copy()
+        values = frame[columns].apply(pd.to_numeric, errors='coerce')
+        values = values.where(np.isfinite(values) & values.gt(0))
+        layer_factors = {c:1.0 for c in columns}
+        if policy == 'legacy_median.v1':
+            medians = values.median().fillna(1.0)
+            target = float(np.median(medians))
+            layer_factors = (target / medians).to_dict()
+        elif policy != 'already_normalized.v1':
+            raise ValueError('Unsupported normalization_policy')
+        frame[columns] = values.mul(pd.Series(layer_factors))
+        result.append(frame); factors.append(layer_factors)
+    return *result, normalization_provenance(policy, *factors)
+
+
 def normalization_provenance(policy, pr_factors=None, pg_factors=None):
     if policy not in {"legacy_median.v1", "already_normalized.v1"}:
         raise ValueError("Unsupported normalization_policy")

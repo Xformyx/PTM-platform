@@ -14,6 +14,9 @@ import pandas as pd
 from .report_compatible_quantification import contrast, positive_matrix, VERSION
 from .report_compatible_kinase import HELD_OUT_GENES
 
+STRICT_PARENT_V1_VERSION = 'strict_unmodified_parent_separate_means.v1'
+EXPORT_VERSION = 'astra_evidence_bundle.v2'
+
 
 def strict_unmodified_parent(analysis):
     pr = analysis['pr']
@@ -58,7 +61,8 @@ def strict_unmodified_parent(analysis):
                 'sequences': ';'.join(sorted(r['sequence'] for r in contributions))})
     sequence_columns = ['protein_group', 'gene', 'sequence', 'precursor_id', 'time_min', 'log2_change', 'baseline_n', 'treated_n']
     protein_columns = ['protein_group', 'gene', 'time_min', 'strict_log2_change', 'peptide_n', 'positive_sequence_fraction', 'sequences']
-    # Every phosphoform uses its OWN joint run mask; do not borrow all-run parent changes.
+    # v1 reproduction: restrict to the form's PG joint range, then average each
+    # peptide's available subset. This is NOT exact per-peptide paired correction.
     selected_groups = {g: np.array(ix) for g, ix in selected.reset_index(drop=True).groupby('Protein.Group').indices.items()}
     joint_sensitivity = []
     forms = analysis['summary'].set_index('form_id')
@@ -79,10 +83,13 @@ def strict_unmodified_parent(analysis):
             'strict_parent_A': adjusted, 'PG_parent_A': row['A'],
             'sign_retained': bool(adjusted * row['A'] > 0) if np.isfinite(adjusted) else None,
             'threshold_0p5_retained': bool((abs(adjusted) >= .5) == (abs(row['A']) >= .5)) if np.isfinite(adjusted) else None})
+    from .strict_parent_paired import paired_parent_sensitivities
+    paired = paired_parent_sensitivities(analysis, selected, logs)
     return {'sequences': pd.DataFrame(sequence_records, columns=sequence_columns),
             'proteins': pd.DataFrame(protein_records, columns=protein_columns),
             'joint_sensitivity': pd.DataFrame(joint_sensitivity),
-            'selected_sequences': selected[['Protein.Group', 'Genes', 'Stripped.Sequence', 'Precursor.Id', 'Precursor.Charge'] + columns]}
+            'selected_sequences': selected[['Protein.Group', 'Genes', 'Stripped.Sequence', 'Precursor.Id', 'Precursor.Charge'] + columns],
+            **paired}
 
 
 def late_layer(analysis, strict_proteins):
@@ -134,12 +141,18 @@ def held_out_temporal_context(kinase):
     return pd.DataFrame(records)
 
 
-def extend_and_export(analysis, mappings, edges, kinase, output, inputs, reference_dir=None):
+def extend_and_export(analysis, mappings, edges, kinase, output, inputs, reference_dir=None,
+                      run_context=None, normalization=None, make_archive=True):
     """A self-contained bundle with input bytes, masks, evidence, and runnable code."""
     output = Path(output)
     if output.exists() and any(output.iterdir()):
         raise ValueError('Use a new export directory; existing evidence must not be overwritten')
     output.mkdir(parents=True, exist_ok=True)
+    inputs = {name:Path(path) for name,path in inputs.items()}
+    from .evidence_metadata import (build_provenance, software_versions, form_evidence_status,
+                                    analysis_readiness, data_dictionary)
+    from .report_compatible_kinase import emergent_kinase_evidence
+    provenance_record = build_provenance(inputs, analysis['samples'], run_context, normalization)
     strict = strict_unmodified_parent(analysis)
     tables = {name: analysis[name] for name in ['summary', 'runlevel', 'comparisons', 'detection']}
     tables.update({'site_mappings': mappings, 'all_edges': edges})
@@ -147,8 +160,14 @@ def extend_and_export(analysis, mappings, edges, kinase, output, inputs, referen
     tables.update({'strict_parent_' + k: v for k,v in strict.items()})
     tables['held_out_protein_layer'] = late_layer(analysis, strict['proteins'])
     tables['held_out_early_time_omissions'] = held_out_temporal_context(kinase)
+    tables['emergent_kinase_evidence'] = emergent_kinase_evidence(analysis, edges)
+    tables['form_evidence_status'] = form_evidence_status(analysis, edges, kinase)
     for name, frame in tables.items():
         frame.to_csv(output / (name + '.csv'), index=False)
+    for name, value in {'provenance':provenance_record, 'software_versions':software_versions(),
+                        'analysis_readiness':analysis_readiness(analysis,kinase,provenance_record),
+                        'data_dictionary':data_dictionary(tables)}.items():
+        (output / (name+'.json')).write_text(json.dumps(value,indent=2,ensure_ascii=False,allow_nan=False))
     (output / 'samples.json').write_text(json.dumps(analysis['samples'], indent=2))
     copied_inputs = {}
     (output / 'inputs').mkdir()
@@ -167,11 +186,15 @@ def extend_and_export(analysis, mappings, edges, kinase, output, inputs, referen
                 shutil.copyfile(source, provenance / name)
     (output / 'ptm_shared').mkdir()
     (output / 'ptm_shared/__init__.py').write_text('')
-    for name in ['report_compatible_quantification.py', 'report_compatible_kinase.py', 'report_compatible_extensions.py']:
+    for name in ['report_compatible_quantification.py', 'report_compatible_kinase.py', 'report_compatible_extensions.py',
+                 'strict_parent_paired.py','evidence_metadata.py','normalization_provenance.py']:
         shutil.copyfile(Path(__file__).parent / name, output / 'ptm_shared' / name)
     config = {'estimator_version': VERSION, 'baseline_time': analysis['baseline_time'], 'inputs': copied_inputs,
-              'held_out_genes_before_discovery': sorted(HELD_OUT_GENES),
-              'normalization': 'supplied_input_values_no_additional_scaling',
+              'held_out_genes_before_reanalysis_discovery': sorted(HELD_OUT_GENES),
+              'held_out_selection_timing':'retrospective_after_original_report_review_not_prospective_preregistration',
+              'normalization': provenance_record['normalization'],
+              'estimator_versions':provenance_record['estimator_versions'],
+              'run_context':dict(run_context or {}), 'provenance_id':provenance_record['provenance_id'],
               'localization_probability': 'unknown_not_imputed',
               'strict_kinase_status': 'no_call_localization_unavailable',
               'replication': 'sample_metadata_required_for_biological_inference; this layer emits no p/q',
@@ -184,6 +207,7 @@ import pandas as pd
 from ptm_shared.report_compatible_quantification import quantify_forms, read_fasta
 from ptm_shared.report_compatible_kinase import frozen_edges, score_footprints
 from ptm_shared.report_compatible_extensions import extend_and_export, file_digest
+from ptm_shared.normalization_provenance import normalize_supplied_matrices
 root = Path(__file__).resolve().parent
 for name, record in json.loads((root / "manifest.json").read_text())["files"].items():
     path = (root / name).resolve()
@@ -191,11 +215,14 @@ for name, record in json.loads((root / "manifest.json").read_text())["files"].it
         raise ValueError("Bundle integrity failure: " + name)
 cfg = json.loads((root / "config.json").read_text())
 inputs = {k: root / p for k, p in cfg["inputs"].items()}
-a = quantify_forms(pd.read_csv(inputs["PR"], sep="\\t"), pd.read_csv(inputs["PG"], sep="\\t"),
-                   read_fasta(inputs["FASTA"]), json.loads((root / "samples.json").read_text()), cfg["baseline_time"])
+samples = json.loads((root / "samples.json").read_text())
+pr, pg, normalization = normalize_supplied_matrices(pd.read_csv(inputs["PR"], sep="\\t"),
+    pd.read_csv(inputs["PG"], sep="\\t"), [s["original_column"] for s in samples], cfg["normalization"]["normalization_policy"])
+a = quantify_forms(pr, pg, read_fasta(inputs["FASTA"]), samples, cfg["baseline_time"])
 m, e = frozen_edges(a, pd.read_csv(inputs["snapshot"], sep="\\t"))
 k = score_footprints(a, e)
-extend_and_export(a, m, e, k, Path(sys.argv[1]), inputs, reference_dir=root / "frozen_source_audit")
+extend_and_export(a, m, e, k, Path(sys.argv[1]), inputs, reference_dir=root / "frozen_source_audit",
+                  run_context=cfg.get("run_context"), normalization=normalization)
 ''')
     (output / 'README.md').write_text('''# Astra evidence bundle
 
@@ -213,16 +240,22 @@ Kinase profiles are descriptive exploratory substrate footprints. Assigned sites
 have unknown localization probability, so strict attribution is no-call. Rat
 annotation is orthology translated; it is not evidence of direct rat validation.
 Source, gene and injection omission are sensitivities, not confidence intervals.
-The held-out gene list is fixed before scoring. Its late protein layer belongs
+The held-out gene list was fixed before this reanalysis's discovery scoring,
+after review of the original report. This is not prospective preregistration.
+Its late protein layer belongs
 to the same experiment and does not prove causal direction or precise lag.
 
 Original article extension files were not present in the minimal reference.
 Strict parent and held-out results here are separately versioned calculations.
 ''')
-    manifest = {str(p.relative_to(output)): {'bytes': p.stat().st_size, 'sha256': file_digest(p)}
+    manifest = {str(p.relative_to(output)): {'bytes': p.stat().st_size, 'sha256': file_digest(p),
+                'order_id':provenance_record['order_id'],'run_id':provenance_record['run_id'],
+                'provenance_id':provenance_record['provenance_id']}
                 for p in sorted(output.rglob('*')) if p.is_file() and '__pycache__' not in p.parts}
-    (output / 'manifest.json').write_text(json.dumps({'schema_version': 'astra_evidence_bundle.v1', 'files': manifest}, indent=2))
+    (output / 'manifest.json').write_text(json.dumps({'schema_version': EXPORT_VERSION, 'files': manifest}, indent=2))
     archive = output.with_suffix('.zip')
+    if not make_archive:
+        return {'directory':str(output), 'provenance':provenance_record}
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
         for path in sorted(output.rglob('*')):
             if path.is_file():

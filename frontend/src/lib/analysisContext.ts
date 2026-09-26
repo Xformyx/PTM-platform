@@ -50,13 +50,17 @@ export function designErrors(context: AnalysisContext, samples: DesignSample[], 
     }
     if (manifest.samples.some((s) => !String(s.biological_unit ?? "").trim())) errors.push(`${label} samples require a biological unit for every injection.`);
   }
-  if (context.quantitation_export_mode === 'legacy_plus_report_compatible.v1') {
+  if (['legacy_plus_report_compatible.v1','enrichment_free_primary.v2'].includes(String(context.quantitation_export_mode))) {
     const manifest = sampleManifest(context.sample_manifest);
     const conditions = [...new Set(samples.map(s => s.condition))];
     const times = new Map(manifest?.conditions?.map(c => [c.condition, c.time_minutes]) ?? []);
     if (!manifest || conditions.some(c => times.get(c) == null || !Number.isFinite(times.get(c))) || times.get('Control') !== 0 || new Set(times.values()).size !== times.size) {
       errors.push('Additional form evidence requires a complete sample design and unique condition times, with Control at 0 minutes.');
     }
+  }
+  if (context.quantitation_export_mode === 'enrichment_free_primary.v2') {
+    if (context.enrichment_status !== 'enrichment_free') errors.push('Declare enrichment-free acquisition for primary A analysis.');
+    if (!/^[a-f0-9]{64}$/.test(String(context.annotation_snapshot_sha256 ?? ''))) errors.push('Select a registered frozen annotation snapshot.');
   }
   return errors;
 }
