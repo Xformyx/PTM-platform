@@ -48,6 +48,7 @@ class PTMQuantificationAnalyzer:
         progress_callback: Optional[Callable[[float, str], None]] = None,
         sample_manifest: Optional[dict] = None,
         normalization_policy: str = "legacy_median.v1",
+        quantitation_export_mode: str = "legacy_only.v1",
     ):
         self.fasta_path = fasta_path
         self.output_dir = Path(output_dir)
@@ -72,6 +73,11 @@ class PTMQuantificationAnalyzer:
         if normalization_policy not in {"legacy_median.v1", "already_normalized.v1"}:
             raise ValueError("Unsupported normalization policy")
         self.normalization_policy = normalization_policy
+        if quantitation_export_mode not in {'legacy_only.v1', 'legacy_plus_report_compatible.v1'}:
+            raise ValueError('Unsupported quantitation_export_mode')
+        if quantitation_export_mode != 'legacy_only.v1' and ptm_mode != 'phospho':
+            raise ValueError('Report-compatible export currently supports phosphorylation')
+        self.quantitation_export_mode = quantitation_export_mode
         self.condition_map = condition_map if condition_map else {}
         self.external_condition_map = condition_map is not None
         self.available_conditions: List[str] = []
@@ -117,9 +123,15 @@ class PTMQuantificationAnalyzer:
             from ptm_shared.sample_manifest import validate_sample_manifest
             if self.sample_manifest.get("samples"):
                 self.sample_manifest = validate_sample_manifest(self.sample_manifest, self.condition_map, self.pr_matrix.columns, self.pg_matrix.columns)
-            self._progress(0.10, "Median normalization")
+            self._progress(0.10, "Applying normalization policy")
             if not self.apply_median_normalization():
                 return False
+
+            if self.quantitation_export_mode == 'legacy_plus_report_compatible.v1':
+                from ptm_shared.report_compatible_export import export_form_evidence
+                export_form_evidence(self.pr_matrix_normalized, self.pg_matrix_normalized,
+                    self.fasta_path, self.sample_manifest, self.condition_map, self.output_dir,
+                    self.file_suffix, self.normalization_policy)
 
             self._progress(0.20, "Target PTM filtering")
             ptm_precursors = self.filter_target_ptms()
@@ -494,7 +506,7 @@ class PTMQuantificationAnalyzer:
 
             self._save_normalization_factors(pr_factors, pg_factors)
             self._pg_lookup = None
-            logger.info("Median normalization complete")
+            logger.info("Normalization complete: %s", self.normalization_policy)
             return True
         except Exception as e:
             logger.error(f"Normalization failed: {e}")
@@ -522,6 +534,13 @@ class PTMQuantificationAnalyzer:
             rows.append({"Matrix_Type": "PR", "Sample": sample, "Normalization_Factor": pr_factors[sample]})
             rows.append({"Matrix_Type": "PG", "Sample": sample, "Normalization_Factor": pg_factors[sample]})
         pd.DataFrame(rows).to_csv(self.output_dir / "normalization_factors.tsv", sep="\t", index=False)
+        suffix = getattr(self, "file_suffix", "")
+        if suffix:
+            pd.DataFrame(rows).to_csv(self.output_dir / f"normalization_factors{suffix}.tsv", sep="\t", index=False)
+        from ptm_shared.normalization_provenance import normalization_provenance
+        from ptm_shared.report_revision import _atomic_json
+        _atomic_json(self.output_dir / f"normalization_provenance{suffix}.json",
+                     normalization_provenance(self.normalization_policy, pr_factors, pg_factors))
 
     # ------------------------------------------------------------------
     # PTM filtering
@@ -793,6 +812,11 @@ class PTMQuantificationAnalyzer:
                     "Occupancy_Calibration_Type": "none",
                     "Occupancy_Statistical_Unit": test["statistical_unit"],
                     "Occupancy_Test_Status": test["status"],
+                    "Occupancy_Inference_Policy": test["inference_policy_version"],
+                    "Occupancy_Control_Biological_N": test.get("control_biological_n"),
+                    "Occupancy_Treatment_Biological_N": test.get("treatment_biological_n"),
+                    "Occupancy_Control_Observation_CV": test["observation_repeatability"]["control"]["cv"],
+                    "Occupancy_Treatment_Observation_CV": test["observation_repeatability"]["treatment"]["cv"],
                     "Pair_Quality_Tier": tier,
                     "Pair_Missingness": 1.0 - completeness,
                     "Occupancy_P_Value": p_value,
@@ -970,6 +994,9 @@ class PTMQuantificationAnalyzer:
                     "PTM_Unadjusted_Method": test["method"] + "; BH across valid unadjusted feature-condition comparisons",
                     "PTM_Unadjusted_Statistical_Unit": test["statistical_unit"],
                     "PTM_Unadjusted_Test_Status": test["status"],
+                    "PTM_Unadjusted_Inference_Policy": test["inference_policy_version"],
+                    "PTM_Unadjusted_Control_Observation_CV": test["observation_repeatability"]["control"]["cv"],
+                    "PTM_Unadjusted_Treatment_Observation_CV": test["observation_repeatability"]["treatment"]["cv"],
                     "PTM_Unadjusted_Status": status,
                     "PTM_Unadjusted_Conventional_Log2FC_NA": not bool(control_values and current_values),
                     "PTM_Unadjusted_Calculation_Mode": (
@@ -1116,6 +1143,9 @@ class PTMQuantificationAnalyzer:
                     "PTM_ProteinAdjusted_Method": test["method"] + "; BH across valid adjusted feature-condition comparisons",
                     "PTM_ProteinAdjusted_Statistical_Unit": test["statistical_unit"],
                     "PTM_ProteinAdjusted_Test_Status": test["status"],
+                    "PTM_ProteinAdjusted_Inference_Policy": test["inference_policy_version"],
+                    "PTM_ProteinAdjusted_Control_Observation_CV": test["observation_repeatability"]["control"]["cv"],
+                    "PTM_ProteinAdjusted_Treatment_Observation_CV": test["observation_repeatability"]["treatment"]["cv"],
                     "PTM_ProteinAdjusted_Missing_Reason": missing_reason,
                     "PTM_ProteinAdjusted_Conventional_Log2FC_NA": bool(denominator_unavailable or used_pc),
                     "PR_Control_N": pr_lookup.get(control_key, 0),
@@ -1340,8 +1370,8 @@ class PTMQuantificationAnalyzer:
                     "Comparison": ptm_row["Comparison"],
                     "PTM_Relative_Log2FC": ptm_row["Log2FC"],
                     "PTM_ProteinAdjusted_Log2FC": ptm_row["Log2FC"],
-                    **{f"PTM_ProteinAdjusted_{suffix}": ptm_row.get(f"PTM_ProteinAdjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method", "Statistical_Unit", "Test_Status", "Control_Biological_N", "Treatment_Biological_N")},
-                    **{f"PTM_Unadjusted_{suffix}": unadjusted.get(f"PTM_Unadjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method", "Statistical_Unit", "Test_Status", "Control_Biological_N", "Treatment_Biological_N")},
+                    **{f"PTM_ProteinAdjusted_{suffix}": ptm_row.get(f"PTM_ProteinAdjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method", "Statistical_Unit", "Test_Status", "Control_Biological_N", "Treatment_Biological_N", "Inference_Policy", "Control_Observation_CV", "Treatment_Observation_CV")},
+                    **{f"PTM_Unadjusted_{suffix}": unadjusted.get(f"PTM_Unadjusted_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Method", "Statistical_Unit", "Test_Status", "Control_Biological_N", "Treatment_Biological_N", "Inference_Policy", "Control_Observation_CV", "Treatment_Observation_CV")},
                     **{f"Protein_{suffix}": pc.get(f"Protein_{suffix}") for suffix in ("Control_Sample_IDs", "Treatment_Sample_IDs", "Control_N", "Treatment_N", "Method")},
                     "PTM_ProteinAdjusted_Control_N": ptm_row.get("PTM_ProteinAdjusted_Control_N", ptm_row.get("Control_N", np.nan)),
                     "PTM_ProteinAdjusted_Treatment_N": ptm_row.get("PTM_ProteinAdjusted_Treatment_N", ptm_row.get("Treatment_N", np.nan)),

@@ -288,12 +288,22 @@ def run_preprocessing(self, order_id: int, config: dict):
 
         from common.phase_b_cache import stage_fingerprint, stage_cache_valid, record_stage_completion, preserve_stage_outputs
         code_root = Path(__file__).parent / 'core'
-        quant_policy = {"conditions": condition_map, "sample_manifest": config.get('sample_manifest'),
+        from ptm_shared.preprocessing_dependencies import quantification_dependency_digest
+        effective_sample_manifest = config.get('sample_manifest') or (config.get('experimental_context') or {}).get('sample_manifest')
+        quantitation_export_mode = (config.get('experimental_context') or {}).get('quantitation_export_mode', 'legacy_only.v1')
+        quant_policy = {"conditions": condition_map, "sample_manifest": effective_sample_manifest,
+                        "quantitation_export_mode": quantitation_export_mode,
+                        "engine_dependency_digest": quantification_dependency_digest(code_root),
                         "normalization_policy": config.get('normalization_policy', 'legacy_median.v1'),
                         "ptm_mode": ptm_mode}
+        quant_artifacts = [quant_output, all_protein_output,
+                           f'normalization_provenance{file_suffix}.json', f'normalization_factors{file_suffix}.tsv']
+        if quantitation_export_mode == 'legacy_plus_report_compatible.v1':
+            from ptm_shared.report_compatible_export import artifact_names
+            quant_artifacts.extend(artifact_names(file_suffix))
         quant_key = stage_fingerprint({'pr': pr_path, 'pg': pg_path, 'reference': fasta_path}, quant_policy,
                                      [code_root / 'ptm_quantification.py', code_root / 'enhanced_motif_analyzer_v2.py'])
-        quant_cached = stage_cache_valid(order_output, 'quantification', quant_key, [quant_output, all_protein_output])
+        quant_cached = stage_cache_valid(order_output, 'quantification', quant_key, quant_artifacts)
         if quant_cached and _has_output(order_output, quant_output, all_protein_output):
             logger.info(f"[Order {order_id}] Step 1 skipped — quantification outputs already exist")
             publish_progress(order_id, "preprocessing", "ptm_quantification", "completed", 50, "PTM quantification skipped (cached)")
@@ -312,15 +322,18 @@ def run_preprocessing(self, order_id: int, config: dict):
                 ptm_mode=ptm_mode,
                 condition_map=condition_map,
                 progress_callback=quant_cb,
-                sample_manifest=config.get("sample_manifest") or (config.get("experimental_context") or {}).get("sample_manifest"),
+                sample_manifest=effective_sample_manifest,
                 normalization_policy=config.get("normalization_policy", "legacy_median.v1"),
+                quantitation_export_mode=quantitation_export_mode,
             )
 
-            preserve_stage_outputs(order_output, [path.name for path in order_output.glob(f'*normalized{file_suffix}.tsv')])
+            preserve_stage_outputs(order_output, [path.name for path in order_output.glob(f'*normalized{file_suffix}.tsv')]
+                + [path.name for path in order_output.glob(f'report_compatible_*{file_suffix}.*')]
+                + [f'normalization_provenance{file_suffix}.json', f'normalization_factors{file_suffix}.tsv'])
             success = analyzer.run_analysis(pr_path, pg_path)
             if not success:
                 raise RuntimeError("PTM quantification failed")
-            record_stage_completion(order_output, 'quantification', quant_key, [quant_output, all_protein_output])
+            record_stage_completion(order_output, 'quantification', quant_key, quant_artifacts)
 
             publish_progress(order_id, "preprocessing", "ptm_quantification", "completed", 50, "PTM quantification complete")
             _emit_prep_phase(order_id, "ptm_quantification", "done", "PTM quantification complete", 50)
@@ -347,18 +360,18 @@ def run_preprocessing(self, order_id: int, config: dict):
                 else:
                     all_prot_df = pd.DataFrame()
 
+                from ptm_shared.normalization_provenance import recorded_normalization
                 norm_stats = {
+                    **recorded_normalization(order_output, file_suffix),
                     "pr_precursors_before": _pr_row_count,
                     "pg_proteins_before": _pg_row_count,
-                    "method": "median",
-                    "batch_variation_corrected": True,
                 }
-                norm_factors_path = order_output / "normalization_factors.tsv"
+                norm_factors_path = order_output / f"normalization_factors{file_suffix}.tsv"
                 if norm_factors_path.exists():
                     try:
                         nf_df = pd.read_csv(norm_factors_path, sep="\t")
                         if "Sample" in nf_df.columns:
-                            norm_stats["samples_corrected"] = int(nf_df["Sample"].nunique())
+                            norm_stats["samples_recorded"] = int(nf_df["Sample"].nunique())
                         if "Normalization_Factor" in nf_df.columns:
                             factors = nf_df["Normalization_Factor"].dropna()
                             if len(factors) > 0:
@@ -742,10 +755,14 @@ def run_preprocessing(self, order_id: int, config: dict):
                         if not secondary_condition_map:
                             raise ValueError('secondary_condition_design_unavailable')
 
+                secondary_manifest = config.get('secondary_sample_manifest') or (config.get('experimental_context') or {}).get('secondary_sample_manifest')
+                secondary_quant_artifacts = [secondary_quant_output, secondary_all_protein_output,
+                    f'normalization_provenance{secondary_file_suffix}.json', f'normalization_factors{secondary_file_suffix}.tsv']
                 secondary_quant_key = stage_fingerprint({'pr': secondary_pr_path, 'pg': secondary_pg_path, 'reference': fasta_path},
-                    {**quant_policy, 'conditions': secondary_condition_map, 'sample_manifest': config.get('secondary_sample_manifest'), 'ptm_mode': secondary_ptm_mode},
+                    {**quant_policy, 'conditions': secondary_condition_map, 'sample_manifest': secondary_manifest,
+                     'quantitation_export_mode': 'legacy_only.v1', 'ptm_mode': secondary_ptm_mode},
                     [code_root / 'ptm_quantification.py', code_root / 'enhanced_motif_analyzer_v2.py'])
-                if stage_cache_valid(secondary_output_dir, 'quantification', secondary_quant_key, [secondary_quant_output, secondary_all_protein_output]) and _has_output(secondary_output_dir, secondary_quant_output, secondary_all_protein_output):
+                if stage_cache_valid(secondary_output_dir, 'quantification', secondary_quant_key, secondary_quant_artifacts) and _has_output(secondary_output_dir, secondary_quant_output, secondary_all_protein_output):
                     logger.info(f"[Order {order_id}] Secondary Step 1 skipped — outputs already exist")
                 else:
                     from preprocessing.core.ptm_quantification import PTMQuantificationAnalyzer
@@ -759,7 +776,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                         ptm_mode=secondary_ptm_mode,
                         condition_map=secondary_condition_map,
                         progress_callback=secondary_quant_cb,
-                        sample_manifest=config.get("secondary_sample_manifest") or (config.get("experimental_context") or {}).get("secondary_sample_manifest"),
+                        sample_manifest=secondary_manifest,
                         normalization_policy=config.get("normalization_policy", "legacy_median.v1"),
                     )
                     if is_quick_analysis(config.get("analysis_options")):
@@ -776,13 +793,14 @@ def run_preprocessing(self, order_id: int, config: dict):
                             f"[Order {order_id}] Quick Analysis secondary PR "
                             f"{sec_quick['pr_rows_before']:,}→{sec_quick['pr_rows_after']:,}"
                         )
-                    preserve_stage_outputs(secondary_output_dir, [path.name for path in secondary_output_dir.glob(f'*normalized{secondary_file_suffix}.tsv')])
+                    preserve_stage_outputs(secondary_output_dir, [path.name for path in secondary_output_dir.glob(f'*normalized{secondary_file_suffix}.tsv')]
+                        + [f'normalization_provenance{secondary_file_suffix}.json', f'normalization_factors{secondary_file_suffix}.tsv'])
                     secondary_success = secondary_analyzer.run_analysis(secondary_pr_path, secondary_pg_path)
                     if not secondary_success:
                         logger.warning(f"[Order {order_id}] Secondary PTM quantification failed — continuing without")
                         secondary_output_dir = None
                     else:
-                        record_stage_completion(secondary_output_dir, 'quantification', secondary_quant_key, [secondary_quant_output, secondary_all_protein_output])
+                        record_stage_completion(secondary_output_dir, 'quantification', secondary_quant_key, secondary_quant_artifacts)
                         logger.info(f"[Order {order_id}] Secondary PTM quantification complete")
 
                 # Secondary Step 2: Unified Enrichment

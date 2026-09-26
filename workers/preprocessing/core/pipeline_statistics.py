@@ -518,7 +518,10 @@ class InfographicGenerator:
         right_x = 10.0
         
         # Normalization
-        ax.text(left_x, y, 'Median Normalization', fontsize=11, fontweight='bold', color=self.colors["text"])
+        norm_label = ('Additional median scaling' if norm.get('sample_scaling_status') == 'performed'
+                      else 'No additional scaling' if norm.get('sample_scaling_status') == 'not_performed'
+                      else 'Normalization not recorded')
+        ax.text(left_x, y, norm_label, fontsize=11, fontweight='bold', color=self.colors["text"])
         ax.text(left_x + 0.3, y - 0.35, f'PR: {self._format_number(norm.get("pr_precursors_before", 0))} precursors',
                 fontsize=10, color=self.colors["light_text"])
         ax.text(left_x + 0.3, y - 0.65, f'PG: {self._format_number(norm.get("pg_proteins_before", 0))} protein groups',

@@ -3,21 +3,27 @@ import math
 from collections import defaultdict
 
 SAMPLE_MANIFEST_VERSION = "sample_manifest.v1"
+INFERENCE_POLICY_VERSION = "declared_biological_units_required.v2"
 
 
 def validate_sample_manifest(manifest, condition_map=None, pr_columns=None, pg_columns=None):
+    if manifest is not None and not isinstance(manifest, dict):
+        raise ValueError("sample_manifest must be an object")
     if not manifest or (manifest.get("schema_version") == SAMPLE_MANIFEST_VERSION
                         and manifest.get("status") == "unavailable" and not manifest.get("samples")):
         return {"schema_version": SAMPLE_MANIFEST_VERSION, "status": "unavailable", "samples": [], "conditions": [],
                 "statistical_unit": "sample_observation_biological_design_unavailable"}
     result = dict(manifest)
     samples = manifest.get("samples") or []
-    if not samples:
+    if not isinstance(samples, list) or not samples:
         raise ValueError("sample_manifest.samples is required")
     seen = set()
     for sample in samples:
+        if not isinstance(sample, dict):
+            raise ValueError("Each sample must be an object")
         sid = sample.get("sample_id")
-        if not sid or sid in seen or not sample.get("condition") or not sample.get("biological_unit"):
+        if (any(not isinstance(sample.get(k), str) or not sample[k].strip()
+                for k in ("sample_id", "condition", "biological_unit")) or sid in seen):
             raise ValueError("Each sample requires a unique sample_id, condition and biological_unit")
         seen.add(sid)
         if condition_map is not None and (sid not in condition_map or sample["condition"] != condition_map[sid]):
@@ -32,7 +38,7 @@ def validate_sample_manifest(manifest, condition_map=None, pr_columns=None, pg_c
     if pairing not in {"paired", "unpaired"}:
         raise ValueError("pairing must be paired or unpaired")
     for condition in manifest.get("conditions") or []:
-        if not condition.get("condition"):
+        if not isinstance(condition, dict) or not condition.get("condition"):
             raise ValueError("Condition label is required")
         for key in ("time_minutes", "elapsed_time"):
             if condition.get(key) is not None and not math.isfinite(float(condition[key])):
@@ -47,10 +53,18 @@ def unit_test_inputs(control, treatment, manifest=None):
     """
     clean = lambda values: {k: float(v) for k, v in values.items() if v is not None and math.isfinite(float(v))}
     control, treatment = clean(control), clean(treatment)
-    base = {"control_sample_n": len(control), "treatment_sample_n": len(treatment), "aggregation_rule": "none"}
-    if not manifest or not manifest.get("samples"):
-        return {**base, "control": list(control.values()), "treatment": list(treatment.values()),
-                "statistical_unit": "sample_observation_biological_design_unavailable", "test": "welch", "status": "legacy_design_unavailable"}
+    base = {"control_sample_n": len(control), "treatment_sample_n": len(treatment), "aggregation_rule": "none",
+            "inference_policy_version": INFERENCE_POLICY_VERSION}
+    unavailable = {**base, "control": [], "treatment": [], "statistical_unit": "unavailable", "test": "unavailable"}
+    if not isinstance(manifest, dict) or not manifest.get("samples"):
+        return {**unavailable, "status": "biological_design_unavailable"}
+    rows = manifest["samples"]
+    if (not isinstance(rows, list) or any(not isinstance(s, dict)
+            or any(not isinstance(s.get(k), str) or not s[k].strip()
+                   for k in ("sample_id", "biological_unit")) for s in rows)
+            or len({s["sample_id"] for s in rows}) != len(rows)
+            or manifest.get("pairing", "unpaired") not in {"paired", "unpaired"}):
+        return {**unavailable, "status": "invalid_biological_design"}
     samples = {s["sample_id"]: s for s in manifest["samples"]}
     groups = []
     for values in (control, treatment):
@@ -79,12 +93,30 @@ def compare_sample_units(control, treatment, manifest=None):
     from scipy import stats
     inputs = unit_test_inputs(control, treatment, manifest)
     p = None
-    if min(len(inputs["control"]), len(inputs["treatment"])) >= 2 and inputs["test"] != "unavailable":
+    if inputs["status"] == "eligible" and min(len(inputs["control"]), len(inputs["treatment"])) >= 2:
         result = (stats.ttest_rel(inputs["control"], inputs["treatment"]) if inputs["test"] == "paired"
                   else stats.ttest_ind(inputs["control"], inputs["treatment"], equal_var=False))
         p = float(result.pvalue) if math.isfinite(float(result.pvalue)) else None
-    return {**inputs, "p_value": p, "method": inputs["test"] + "; " + inputs["statistical_unit"] + "; " + inputs["aggregation_rule"],
+    return {**inputs, "p_value": p,
+            "observation_repeatability": {"control": observation_repeatability(control), "treatment": observation_repeatability(treatment)},
+            "method": inputs["test"] + "; " + inputs["statistical_unit"] + "; " + inputs["aggregation_rule"],
             "status": inputs["status"] if p is not None else inputs["status"] + ":test_unavailable"}
+
+
+def observation_repeatability(observations):
+    """Descriptive dispersion of observations, never biological uncertainty.
+
+    It is technical repeatability only when the manifest declares the observations
+    to belong to the same biological unit. The calculation itself makes no design
+    assumption and never produces inferential p-values or confidence intervals.
+    """
+    from statistics import mean, stdev
+    values = [float(v) for v in observations.values() if v is not None and math.isfinite(float(v))]
+    average = mean(values) if values else None
+    sd = stdev(values) if len(values) >= 2 else None
+    return {"n": len(values), "mean": average, "sd": sd,
+            "cv": sd / abs(average) if sd is not None and average else None,
+            "interpretation": "descriptive_observation_dispersion_not_biological_inference"}
 
 
 def biological_unit_crosswalk(primary, secondary, declared_links=None):

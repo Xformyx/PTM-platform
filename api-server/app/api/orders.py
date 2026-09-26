@@ -301,6 +301,26 @@ def _validated_order_sample_manifest(order, context=None, *, secondary=False):
         raise HTTPException(status_code=422, detail="Invalid sample manifest or input columns: " + str(error)) from error
 
 
+def _updated_analysis_context(order, patch, existing=None):
+    from ptm_shared.analysis_context import merge_analysis_context
+    try:
+        context = merge_analysis_context(existing if existing is not None else order.analysis_context, patch)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    _validated_order_sample_manifest(order, context)
+    if context.get("secondary_sample_manifest") is not None:
+        _validated_order_sample_manifest(order, context, secondary=True)
+    if context.get('quantitation_export_mode') == 'legacy_plus_report_compatible.v1':
+        from ptm_shared.report_compatible_quantification import samples_from_manifest
+        try:
+            if order.ptm_type != 'phosphorylation':
+                raise ValueError('Report-compatible export currently supports primary phosphorylation orders')
+            samples_from_manifest(context.get('sample_manifest'), _build_condition_map(order.sample_config))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+    return context
+
+
 def _build_condition_map(sample_cfg: dict | list | None) -> dict:
     """Build {filename: condition_label} from sample_config.
 
@@ -903,6 +923,8 @@ async def update_order_options(
     user=Depends(get_current_user),
 ):
     """Update analysis_context, analysis_options, and/or report_options for an order.
+    Context keys are merged; explicit null removes a key. Structured values replace
+    that key atomically. Omitted keys and an empty context object preserve the design.
     Used before re-run or restart to allow re-configuration of Analysis Focus and Report Options."""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
@@ -915,8 +937,7 @@ async def update_order_options(
             detail=f"Cannot update order while running (status: '{order.status}'). Stop first.",
         )
     if body.analysis_context is not None:
-        _validated_order_sample_manifest(order, body.analysis_context)
-        order.analysis_context = body.analysis_context
+        order.analysis_context = _updated_analysis_context(order, body.analysis_context)
     if body.analysis_options is not None:
         order.analysis_options = body.analysis_options
     if body.report_options is not None:
@@ -1148,7 +1169,7 @@ async def create_order(
             secondary_sample_config=secondary_sample_config_data,
         )
 
-        _validated_order_sample_manifest(order)
+        order.analysis_context = _updated_analysis_context(order, {})
         db.add(order)
         await db.commit()
         await db.refresh(order)
@@ -1227,7 +1248,7 @@ async def duplicate_order(
 
         report_opts = body.report_options if body.report_options is not None else (source.report_options or {})
         analysis_opts = body.analysis_options if body.analysis_options is not None else source.analysis_options
-        analysis_ctx = body.analysis_context if body.analysis_context is not None else source.analysis_context
+        analysis_ctx = _updated_analysis_context(source, body.analysis_context)
         rag_cols = body.rag_collections if body.rag_collections is not None else source.rag_collections
 
         new_order = Order(
@@ -4421,31 +4442,18 @@ def _generate_statistics_from_outputs(order: Order, output_dir: Path, file_suffi
                 n_sites = int(ptm_df.groupby(["Protein.Group", "PTM_Position"]).ngroups)
             else:
                 n_sites = len(ptm_df)
+            from ptm_shared.normalization_provenance import recorded_normalization
             norm_stats = {
+                **recorded_normalization(output_dir, file_suffix),
                 "pr_precursors_before": n_pr,
                 "pg_proteins_before": n_pg,
-                # This is a sample-level scaling summary.  The preprocessing
-                # path does not fit a batch covariate, injection-order drift
-                # model, or pooled-QC correction, so those states must never
-                # be implied by the historical statistics endpoint.
-                "method": _NORMALIZATION_METHOD,
-                "normalization_method": _NORMALIZATION_METHOD,
-                "sample_scaling_status": "performed",
-                # Retained as a boolean compatibility field for existing
-                # consumers; explicit status fields carry the reader-facing
-                # provenance contract.
-                "batch_variation_corrected": False,
-                "batch_correction_status": "not_performed",
-                "injection_order_drift_correction_status": "not_performed",
-                "upstream_quantity_scale_status": "unknown_not_recorded",
-                "ratio_track_interpretation": _RATIO_TRACK_INTERPRETATION,
             }
-            norm_factors_path = output_dir / "normalization_factors.tsv"
+            norm_factors_path = output_dir / f"normalization_factors{file_suffix}.tsv"
             if norm_factors_path.exists():
                 try:
                     nf_df = pd.read_csv(norm_factors_path, sep="\t")
                     if "Sample" in nf_df.columns:
-                        norm_stats["samples_corrected"] = int(nf_df["Sample"].nunique())
+                        norm_stats["samples_recorded"] = int(nf_df["Sample"].nunique())
                     if "Normalization_Factor" in nf_df.columns:
                         factors = nf_df["Normalization_Factor"].dropna()
                         if len(factors) > 0:
@@ -4528,7 +4536,12 @@ def _with_truthful_normalization_provenance(stats: dict | None) -> dict | None:
     if normalization.get("method") == "median":
         normalization["method"] = _NORMALIZATION_METHOD
     normalization.setdefault("normalization_method", normalization.get("method", _NORMALIZATION_METHOD))
-    normalization.setdefault("sample_scaling_status", "performed")
+    # A historical label was written even for skipped normalization; it does
+    # not establish that sample scaling was performed for this result.
+    normalization.setdefault("sample_scaling_status", "unknown_not_recorded")
+    if (normalization.get('method') == _NORMALIZATION_METHOD
+            and normalization.get('schema_version') != 'normalization_provenance.v1'):
+        normalization['sample_scaling_status'] = 'unknown_not_recorded'
     normalization.setdefault("upstream_quantity_scale_status", "unknown_not_recorded")
     normalization.setdefault("ratio_track_interpretation", _RATIO_TRACK_INTERPRETATION)
 

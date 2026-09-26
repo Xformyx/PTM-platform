@@ -292,14 +292,19 @@ function QuantificationCard({ s2, ptmModeName }: { s2: Record<string, any>; ptmM
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Normalization & Batch Correction Description */}
+        {/* Provenance belongs to the completed run, not the current settings. */}
         <div className="rounded-lg border bg-muted/30 px-4 py-3 text-xs text-muted-foreground space-y-1.5">
-          <p className="font-medium text-foreground">Normalization & Batch Variation Correction</p>
+          <p className="font-medium text-foreground">Normalization</p>
           <p>
-            <strong>Median normalization</strong>: Sample-wise scaling to align intensity distributions. Each sample&apos;s median is scaled to the global median to correct for technical variation.
+            {norm.sample_scaling_status === "performed"
+              ? "PR and PG intensities were scaled separately by their sample medians."
+              : norm.sample_scaling_status === "not_performed"
+                ? "Input intensities were used without additional global scaling."
+                : "The applied sample scaling policy was not recorded for this result."}
           </p>
           <p>
-            <strong>Batch variation correction</strong>: The same median normalization step corrects for sample-to-sample (batch) variation, ensuring comparable intensity levels across conditions before PTM quantification.
+            Batch correction: {norm.batch_correction_status === "performed" ? "performed" : norm.batch_correction_status === "not_performed" ? "not performed" : "not recorded"}.
+            {" "}Input normalization history: {norm.upstream_quantity_scale_status === "unknown_not_recorded" ? "not recorded" : norm.upstream_quantity_scale_status ?? "not recorded"}.
           </p>
         </div>
 
@@ -309,8 +314,8 @@ function QuantificationCard({ s2, ptmModeName }: { s2: Record<string, any>; ptmM
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Normalization</p>
             <StatValue label="PR Precursors" value={norm.pr_precursors_before} />
             <StatValue label="PG Proteins" value={norm.pg_proteins_before} />
-            {norm.samples_corrected != null && (
-              <StatValue label="Samples Corrected" value={norm.samples_corrected} sub={norm.method === "median" ? "Median method" : undefined} />
+            {norm.samples_scaled != null && (
+              <StatValue label="Samples Scaled" value={norm.samples_scaled} />
             )}
             {Array.isArray(norm.factor_range) && norm.factor_range.length === 2 && (
               <p className="text-[10px] text-muted-foreground">

@@ -17,6 +17,8 @@ import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, clampQuickSettings
 import QuickAnalysisCustomFields from "./QuickAnalysisOptions";
 import { cn } from "@/lib/utils";
 import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
+import SampleDesignFields from "./SampleDesignFields";
+import { designErrors, designSamples, mergeAnalysisContext } from "@/lib/analysisContext";
 
 const CLOUD_PROVIDERS = ["gemini", "openai", "anthropic"] as const;
 
@@ -50,6 +52,8 @@ interface Order {
   id: number;
   order_code: string;
   analysis_context?: Record<string, unknown>;
+  sample_config?: unknown;
+  secondary_sample_config?: unknown;
   analysis_options?: Record<string, unknown>;
   report_options?: Record<string, unknown>;
   rag_collections?: number[] | null;
@@ -110,6 +114,7 @@ export default function RerunOptionsModal({
   onDuplicateNameChange,
 }: Props) {
   const [analysisContext, setAnalysisContext] = useState<Record<string, string>>(DEFAULT_CONTEXT);
+  const [structuredContext, setStructuredContext] = useState<Record<string, unknown>>({});
   const [analysisMode, setAnalysisMode] = useState<"ptm_only" | "ptm_nonptm_network">("ptm_only");
   const [temporalContract, setTemporalContract] = useState<TemporalContract>(DEFAULT_TEMPORAL_CONTRACT);
   const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>({ ...DEFAULT_ANALYSIS_OPTIONS });
@@ -197,6 +202,7 @@ export default function RerunOptionsModal({
         setSelectedCollectionIds([]);
       }
       const ctx = (order.analysis_context || {}) as Record<string, unknown>;
+      setStructuredContext(ctx);
       const str = (v: unknown) => (v != null && typeof v === "string" ? v : "");
       setAnalysisContext({
         cell_type: str(ctx.cell_type),
@@ -285,6 +291,8 @@ export default function RerunOptionsModal({
     if (!order) return;
     setSubmitting(true);
     try {
+      const errors = designErrors(structuredContext, designSamples(order.sample_config), designSamples(order.secondary_sample_config));
+      if (errors.length) throw new Error(errors.join(" "));
       const optsForApi: Record<string, unknown> = {
         mode: analysisOptions.mode,
         topN: analysisOptions.topN,
@@ -314,7 +322,7 @@ export default function RerunOptionsModal({
         ...researcherReportConfigFields(Boolean(reportConfig.reader_authoring_shadow)),
       };
       await onConfirm({
-        analysis_context: analysisContext,
+        analysis_context: mergeAnalysisContext(structuredContext, analysisContext),
         analysis_options: optsForApi,
         rag_collections: useAllCollections ? null : (selectedCollectionIds.length > 0 ? selectedCollectionIds : null),
           report_options: {
@@ -533,6 +541,8 @@ export default function RerunOptionsModal({
                   className="h-8 text-sm"
                 />
               </div>
+              <SampleDesignFields context={structuredContext} onChange={setStructuredContext}
+                samples={designSamples(order.sample_config)} secondarySamples={designSamples(order.secondary_sample_config)} />
               <div className="flex items-center gap-3">
                 <Label className="text-xs">Analysis Options (protein selection)</Label>
                 <Button

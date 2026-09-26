@@ -32,6 +32,8 @@ import { DEFAULT_ANALYSIS_OPTIONS, DEFAULT_TEMPORAL_CONTRACT, clampQuickSettings
 import AnalysisOptionsModal from "@/components/AnalysisOptionsModal";
 import QuickAnalysisCustomFields from "@/components/QuickAnalysisOptions";
 import { CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
+import SampleDesignFields from "@/components/SampleDesignFields";
+import { designErrors, designSamples, mergeAnalysisContext } from "@/lib/analysisContext";
 
 const STEPS = ["Project & Files", "Sample Config", "Analysis Focus", "Report Options"];
 
@@ -194,6 +196,7 @@ export default function OrderCreate() {
   const [direction, setDirection] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [structuredContext, setStructuredContext] = useState<Record<string, unknown>>({});
 
   // Step 0: Project & Files
   const [form, setForm] = useState({
@@ -383,8 +386,9 @@ export default function OrderCreate() {
   const handleCopyFromOrder = useCallback(async (orderId: number) => {
     setCopyFromLoading(true);
     try {
-      const order = await api.get<{ analysis_context: Record<string, string> }>(`/orders/${orderId}`);
+      const order = await api.get<{ analysis_context: Record<string, unknown> }>(`/orders/${orderId}`);
       const ctx = order.analysis_context || {};
+      setStructuredContext(ctx);
       const str = (v: unknown) => (v != null && typeof v === "string" ? v : "");
 
       setForm((f) => ({
@@ -514,6 +518,9 @@ export default function OrderCreate() {
       return;
     }
 
+    const designProblems = designErrors(structuredContext, designSamples(samples), designSamples(secondarySamples));
+    if (designProblems.length) { setError(designProblems.join(" ")); return; }
+
     setLoading(true);
     setError("");
 
@@ -534,11 +541,11 @@ export default function OrderCreate() {
     formData.append("ptm_type", form.ptm_type);
     formData.append("species", form.species);
     formData.append("sample_config", JSON.stringify(sampleConfig));
-    formData.append("analysis_context", JSON.stringify({
+    formData.append("analysis_context", JSON.stringify(mergeAnalysisContext(structuredContext, {
       cell_type: form.cell_type, treatment: form.treatment,
       time_points: form.time_points, biological_question: form.biological_question,
       special_conditions: form.special_conditions,
-    }));
+    })));
     // Build nested report_config from flat state
     const reportConfigNested = {
       md_summary_max_chars: reportConfig.md_summary_max_chars,
@@ -1276,6 +1283,8 @@ export default function OrderCreate() {
                     placeholder="e.g., 0, 5, 15, 30 min"
                   />
                 </div>
+                <SampleDesignFields context={structuredContext} onChange={setStructuredContext}
+                  samples={designSamples(samples)} secondarySamples={designSamples(secondarySamples)} />
                 <div className="space-y-2">
                   <Label>Biological Question</Label>
                   <Textarea value={form.biological_question}

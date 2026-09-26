@@ -14,6 +14,7 @@ from app.api.orders import (
     _generate_statistics_from_outputs,
     _with_truthful_normalization_provenance,
 )
+from ptm_shared.normalization_provenance import normalization_provenance
 
 
 def _write_tsv(path: Path, rows: list[dict]) -> None:
@@ -53,13 +54,16 @@ def test_generated_statistics_describe_scaling_without_false_batch_correction(tm
         }],
     )
     _write_tsv(
-        output_dir / "normalization_factors.tsv",
+        output_dir / "normalization_factors_phospho.tsv",
         [
             {"Sample": "sample_control", "Normalization_Factor": 1.0},
             {"Sample": "sample_treatment", "Normalization_Factor": 0.8},
         ],
     )
     order = SimpleNamespace(pr_matrix_path=str(pr_path), pg_matrix_path=str(pg_path))
+    (output_dir / 'normalization_provenance_phospho.json').write_text(json.dumps(
+        normalization_provenance('legacy_median.v1', {'sample_control': 1.0, 'sample_treatment': .8},
+                                 {'sample_control': 1.0, 'sample_treatment': 1.0})))
 
     stats = _generate_statistics_from_outputs(order, output_dir, "_phospho")
 
@@ -75,7 +79,8 @@ def test_generated_statistics_describe_scaling_without_false_batch_correction(tm
     assert normalization["ratio_track_interpretation"] == (
         "protein_abundance_adjusted_relative_ptm_ratio_contrast"
     )
-    assert normalization["samples_corrected"] == 2
+    assert normalization["samples_recorded"] == 2
+    assert normalization["samples_scaled"] == 2
     assert normalization["factor_range"] == [0.8, 1.0]
 
 
@@ -148,3 +153,22 @@ def test_explicit_future_batch_status_is_preserved():
     assert normalization["batch_variation_corrected"] is True
     assert normalization["batch_correction_status"] == "performed"
     assert normalization["injection_order_drift_correction_status"] == "performed"
+
+
+def test_old_outputs_do_not_inherit_edited_normalization_settings(tmp_path):
+    _write_tsv(tmp_path / 'ptm_vector_data_normalized_phospho.tsv', [{'Protein.Group':'P001', 'PTM_Position':'S10'}])
+    order = SimpleNamespace(pr_matrix_path=None, pg_matrix_path=None,
+                            analysis_context={'normalization_policy': 'legacy_median.v1'})
+    result = _generate_statistics_from_outputs(order, tmp_path, '_phospho')
+    assert result['step2_quantification']['normalization']['sample_scaling_status'] == 'unknown_not_recorded'
+
+
+def test_provided_scale_record_is_read_from_completed_run(tmp_path):
+    _write_tsv(tmp_path / 'ptm_vector_data_normalized_phospho.tsv', [{'Protein.Group':'P001', 'PTM_Position':'S10'}])
+    order = SimpleNamespace(pr_matrix_path=None, pg_matrix_path=None,
+                            analysis_context={'normalization_policy': 'legacy_median.v1'})
+    (tmp_path / 'normalization_provenance_phospho.json').write_text(json.dumps(
+        normalization_provenance('already_normalized.v1', {'s': 1.0}, {'s': 1.0})))
+    record = _generate_statistics_from_outputs(order, tmp_path, '_phospho')['step2_quantification']['normalization']
+    assert record['method'] == 'none'
+    assert record['sample_scaling_status'] == 'not_performed'

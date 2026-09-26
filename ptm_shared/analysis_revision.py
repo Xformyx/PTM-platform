@@ -39,8 +39,8 @@ def _publish_analysis_input(output_dir, *, config, parent_generation=None, befor
     """Called at preprocessing publication, not on chart or job POST requests."""
     root = Path(output_dir)
     names = sorted(p.name for p in root.iterdir() if p.is_file() and (
-        p.name.startswith(("ptm_vector_data_", "ptm_condition_comparisons_", "site_level_relative_quantification_", "all_protein_level_changes_"))
-        and p.suffix == ".tsv") or p.is_file() and p.name.startswith(("observation_inventory_", "pipeline_statistics", "import_")) and p.suffix in {".json", ".jsonl"})
+        p.name.startswith(("ptm_vector_data_", "ptm_condition_comparisons_", "ptm_unadjusted_condition_comparisons_", "site_level_relative_quantification_", "all_protein_level_changes_", "normalization_factors", "paired_peptide_occupancy_audit_", "report_compatible_"))
+        and p.suffix == ".tsv") or p.is_file() and p.name.startswith(("observation_inventory_", "pipeline_statistics", "import_", "normalization_provenance", "report_compatible_contract")) and p.suffix in {".json", ".jsonl"})
     files = [{"name": name, "sha256": file_sha256(root/name)} for name in names]
     quick_manifest = root/"quick_analysis"/"quick_analysis_manifest.json"
     source_paths = {name:root/name for name in names}
