@@ -4,9 +4,11 @@ Never run against a production service: this creates orders and uploads PR/PG.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import time
 from uuid import uuid4
+from urllib.parse import urlparse
 import httpx
 
 
@@ -15,8 +17,9 @@ def main():
     parser.add_argument('--base-url',default='http://127.0.0.1:8000/api')
     parser.add_argument('--inputs',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--reference-preset',action='store_true',help='New canonical design with explicit HIRc-B reference adapter and session-declared metadata')
     args=parser.parse_args()
-    if not args.base_url.startswith('http://127.0.0.1:'):
+    if urlparse(args.base_url).scheme!='http' or urlparse(args.base_url).hostname!='127.0.0.1':
         parser.error('This validation script requires an isolated localhost service')
     args.output.mkdir(parents=True,exist_ok=True)
     samples=json.loads((args.inputs/'validation-results/delivery/astra_handoff/samples.json').read_text())
@@ -28,11 +31,20 @@ def main():
     context={'quantitation_export_mode':'enrichment_free_primary.v2','enrichment_status':'enrichment_free',
         'normalization_policy':'already_normalized.v1','sample_manifest':manifest,
         'annotation_snapshot_sha256':'80c9ae707a853169b6890a1e393f72f9f0b57edbf94e0c1e6f61dec57594de07'}
+    if args.reference_preset:
+        context.update(quantitation_export_mode='enrichment_free_timecourse.v3',analysis_preset='hircb_insulin_reference.v1',
+            annotation_mode='required',cell_type='HIRc-B',treatment='insulin',time_points='0,1,5,15,30,60,180min',
+            biological_question=None,special_conditions='serum starvation 12 h',
+            acquisition_metadata={'insulin_concentration':'100 nM','starvation_duration':'12 h','injection_amount':'10 µL'},
+            acquisition={'injection_volume':{'value':10,'unit':'µL','status':'provided','source':'user_declaration_2026-09-26'},
+                         'injected_peptide_mass':{'value':None,'status':'unknown'}},
+            pre_treatment={'name':'serum starvation','duration':12,'unit':'h','source':'user_declaration_2026-09-26'},
+            processing={k:{'value':None,'status':'unknown'} for k in ['software_version','upstream_normalization']})
     sample_config={'samples':[{'file_name':s['original_column'],'condition':conditions[s['time_min']],
                               'group':'Control' if s['time_min']==0 else 'Treatment','replicate':s['run_suffix']} for s in samples]}
     name='HIRcB_followup_'+uuid4().hex[:8]
     client=httpx.Client(base_url=args.base_url,timeout=120)
-    login=client.post('/auth/login',json={'email':'admin@ptm.local','password':'local_validation_only'})
+    login=client.post('/auth/login',json={'email':os.environ['PTM_TEST_EMAIL'],'password':os.environ['PTM_TEST_PASSWORD']})
     login.raise_for_status()
     client.headers['Authorization']='Bearer '+login.json()['access_token']
     events=[]
@@ -63,7 +75,7 @@ def main():
             files={'pr_matrix':('report.pr_matrix.tsv',pr),'pg_matrix':('report.pg_matrix.tsv',pg)})
     order_id=order['id']
     print('created',order_id,name,flush=True)
-    (args.output/'order.json').write_text(json.dumps(order,indent=2))
+    (args.output/'order.json').write_text(json.dumps({k:order.get(k) for k in ['id','order_code','species','ptm_type','analysis_context']},indent=2,ensure_ascii=False))
     request('POST',f'/orders/{order_id}/start')
     original=wait(order_id)
     assert original['counts']['primary_comparisons']==11920
@@ -97,9 +109,10 @@ def main():
                 response.raise_for_status()
                 import hashlib
                 assert hashlib.sha256(response.content).hexdigest()==record['artifacts'][artifact]['sha256']
+                if artifact=='astra':(args.output/(label+'.zip')).write_bytes(response.content)
     result={'passed':True,'order_id':order_id,'copy_id':copy_id,'order_code':name,
         'real_services':['FastAPI','MySQL','Redis','Celery'],'run_ids':[r['run_id'] for r in [original,copy_result,rerun]],
-        'copy_settings_preserved':True,'edited_settings_do_not_relabel_prior_results':True,
+        'copy_settings_preserved':True,'edited_settings_do_not_relabel_prior_results':True,'reference_preset':args.reference_preset,
         'report_rerun_uses_primary_A_pipeline':True,'events':events}
     (args.output/'validation.json').write_text(json.dumps(result,indent=2))
     print(json.dumps({k:v for k,v in result.items() if k!='events'},indent=2))

@@ -1,5 +1,12 @@
 # Enrichment-free primary A profile v2
 
+For the generic condition/contrast profile v3, canonical design migration,
+validation results and operations, see the
+[generic study guide](../docs/collaboration/generic_study_20260928_KO.md) and
+[migration/registration guide](../docs/collaboration/generic_study_migration_operations_KO.md).
+The v2 behavior below remains available; HIRc-B reference settings are an explicit
+`hircb_insulin_reference.v1` preset in the new profile.
+
 Select **Enrichment-free time course: primary A + frozen kinase + Astra** in the
 order's sample-design settings. This is an explicit full-matrix rat/Rat_hir
 phosphorylation profile. It produces a deterministic evidence report and portable

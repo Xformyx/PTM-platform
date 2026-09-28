@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
@@ -17,8 +18,8 @@ def main():
         page=browser.new_page(viewport={'width':1440,'height':1100})
         errors=[]; page.on('pageerror',lambda error:errors.append(str(error)))
         page.goto(args.url+'/login')
-        page.get_by_placeholder('Enter your email').fill('admin@ptm.local')
-        page.get_by_placeholder('Enter your password').fill('local_validation_only')
+        page.get_by_placeholder('Enter your email').fill(os.environ['PTM_TEST_EMAIL'])
+        page.get_by_placeholder('Enter your password').fill(os.environ['PTM_TEST_PASSWORD'])
         page.locator('button[type=submit]').click()
         page.wait_for_url(args.url+'/admin',timeout=30000)
         page.goto(args.url+f'/admin/orders/{args.order_id}')

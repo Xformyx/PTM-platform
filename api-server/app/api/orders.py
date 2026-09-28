@@ -287,6 +287,8 @@ def _validate_order_code(code: str) -> None:
 def _validated_order_sample_manifest(order, context=None, *, secondary=False):
     from ptm_shared.sample_manifest import validate_sample_manifest
     context = context if context is not None else (order.analysis_context or {})
+    if context.get('quantitation_export_mode')=='enrichment_free_timecourse.v3' and not secondary:
+        return None  # v1 is an import source; canonical v3 is validated at execution.
     manifest = context.get("secondary_sample_manifest" if secondary else "sample_manifest")
     sample_config = order.secondary_sample_config if secondary else order.sample_config
     paths = (order.secondary_pr_matrix_path, order.secondary_pg_matrix_path) if secondary else (order.pr_matrix_path, order.pg_matrix_path)
@@ -301,12 +303,28 @@ def _validated_order_sample_manifest(order, context=None, *, secondary=False):
         raise HTTPException(status_code=422, detail="Invalid sample manifest or input columns: " + str(error)) from error
 
 
-def _updated_analysis_context(order, patch, existing=None):
+def _updated_analysis_context(order, patch, existing=None, *, for_execution=False):
     from ptm_shared.analysis_context import merge_analysis_context
     try:
         context = merge_analysis_context(existing if existing is not None else order.analysis_context, patch)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    if context.get('quantitation_export_mode')=='enrichment_free_timecourse.v3':
+        from ptm_shared.study_execution import resolve_context,validate_execution
+        try:
+            species=_require_species_context(order.species)
+            context=resolve_context(context,order.sample_config,taxonomy_id=species.taxonomy_id,species=order.species,ptm_type=order.ptm_type)
+            if for_execution:
+                if getattr(order,'secondary_pr_matrix_path',None) or getattr(order,'secondary_pg_matrix_path',None):
+                    raise ValueError('Generic primary A currently supports one PR/PG pair; use standard cross-talk analysis for paired PTMs')
+                columns=[]
+                for path in [order.pr_matrix_path,order.pg_matrix_path]:
+                    with open(path,encoding='utf-8-sig') as handle:columns.append(next(csv.reader(handle,delimiter='\t')))
+                validate_execution(context,order.ptm_type,species.taxonomy_id,order.analysis_options,
+                    Path(get_settings().REFERENCE_DIR)/'frozen_annotations',*columns)
+        except (ValueError,OSError,StopIteration,TypeError) as error:
+            raise HTTPException(status_code=422,detail={'code':'study_design_execution_invalid','issues':getattr(error,'issues',[]),'message':str(error)}) from error
+        return context
     _validated_order_sample_manifest(order, context)
     if context.get("secondary_sample_manifest") is not None:
         _validated_order_sample_manifest(order, context, secondary=True)
@@ -335,26 +353,43 @@ def _updated_analysis_context(order, patch, existing=None):
 def _attach_enrichment_free_profile(order, config):
     from ptm_shared.enrichment_free_profile import enabled, annotation_snapshot
     if enabled(order.analysis_context):
-        _updated_analysis_context(order,{})
-        config['frozen_annotation'] = annotation_snapshot(Path(get_settings().REFERENCE_DIR) / 'frozen_annotations',
-            order.analysis_context['annotation_snapshot_sha256'])
+        context=_updated_analysis_context(order,{},for_execution=True)
+        context['literature_context']={'selected_collection_ids':order.rag_collections,'collection_contents_included':False,
+            'interpretation_only':True,'legacy_RAG_execution':False}
+        config['experimental_context']=context
+        if context.get('quantitation_export_mode')=='enrichment_free_timecourse.v3':
+            from ptm_shared.study_execution import validate_execution
+            species=_require_species_context(order.species)
+            config['frozen_annotation']=validate_execution(context,order.ptm_type,species.taxonomy_id,order.analysis_options,
+                Path(get_settings().REFERENCE_DIR)/'frozen_annotations')
+        else:
+            config['frozen_annotation'] = annotation_snapshot(Path(get_settings().REFERENCE_DIR) / 'frozen_annotations',
+                context['annotation_snapshot_sha256'])
         config['order_id'] = order.id
         config['chain_to_next'] = False
     return config
 
 
 @router.get("/frozen-annotations")
-async def list_frozen_annotations(user=Depends(get_current_user)):
-    from ptm_shared.enrichment_free_profile import annotation_snapshot
+async def list_frozen_annotations(taxonomy_id:Optional[str]=None,ptm_type:Optional[str]=None,user=Depends(get_current_user)):
+    from ptm_shared.annotation_registry import public_registry
     root = Path(get_settings().REFERENCE_DIR) / 'frozen_annotations'
-    snapshots = []
-    for directory in sorted(root.glob('*')):
-        try:
-            snapshot = annotation_snapshot(root,directory.name)
-            snapshots.append({key:snapshot[key] for key in ('sha256','retrieved_utc')})
-        except (ValueError, OSError):
-            continue
-    return {'snapshots':snapshots}
+    try:return public_registry(root,taxonomy_id,ptm_type)
+    except OSError:
+        logger.exception('Frozen annotation registry access failed')
+        raise HTTPException(status_code=503,detail={'code':'registry_unavailable','message':'Annotation registry could not be read; retry or contact the administrator'}) from None
+
+
+@router.post('/resolve-design')
+async def resolve_order_design(body:dict=Body(...),user=Depends(get_current_user)):
+    from ptm_shared.study_execution import resolve_context
+    species=_require_species_context(body.get('species','human'))
+    try:
+        context=resolve_context(body.get('analysis_context') or {},body.get('sample_config') or [],
+            taxonomy_id=species.taxonomy_id,species=body.get('species','human'),ptm_type=body.get('ptm_type','phosphorylation'))
+        return {'study_design':context['study_design']}
+    except (ValueError,TypeError,KeyError) as error:
+        raise HTTPException(status_code=422,detail={'code':'design_input_invalid','message':str(error)}) from error
 
 
 @router.get("/{order_id}/enrichment-free-evidence")
@@ -1194,7 +1229,13 @@ async def create_order(
                 analysis_options_data["protein_list_path"] = protein_list_path
 
         report_options_data = _safe_json_loads(report_options, {})
-        if not report_options_data:
+        generic_profile=(_safe_json_loads(analysis_context) or {}).get('quantitation_export_mode')=='enrichment_free_timecourse.v3'
+        if generic_profile:
+            try:
+                report_options_data=json.loads(report_options or '{}')
+                if not isinstance(report_options_data,dict):raise ValueError()
+            except (ValueError,TypeError):raise HTTPException(status_code=400,detail='Invalid report_options JSON') from None
+        elif not report_options_data:
             raise HTTPException(status_code=400, detail="Invalid report_options JSON")
         report_options_data = _normalize_report_options(report_options_data)
 
@@ -1378,7 +1419,7 @@ async def start_order(
     await db.refresh(order)
 
     validated_sample_manifest = _validated_order_sample_manifest(order)
-    _updated_analysis_context(order, {})
+    order.analysis_context=_updated_analysis_context(order, {},for_execution=True)
     prev_status = order.status
     claimed = await _claim_order_dispatch(
         db,
@@ -1679,7 +1720,7 @@ async def run_stage(
     from ptm_shared.enrichment_free_profile import enabled as primary_a_enabled
     if primary_a_enabled(order.analysis_context):
         # A report/kinase rerun must use the same explicit whole-run estimator path.
-        _updated_analysis_context(order, {})
+        order.analysis_context=_updated_analysis_context(order, {},for_execution=True)
         body.stage = "preprocessing"
     if is_benchmark_child(order) and body.stage != "preprocessing":
         raise HTTPException(

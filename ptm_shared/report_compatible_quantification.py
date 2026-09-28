@@ -66,22 +66,22 @@ def read_fasta(path):
     return records
 
 
-def assigned_positions(sequence):
+def assigned_positions(sequence, modification_code=21):
     # Count residues after removing each annotation, preserving assigned offsets.
     position, result = 0, []
     for token in re.findall(r'\([^)]*\)|[A-Z]', sequence):
-        if token == '(UniMod:21)':
+        if token == f'(UniMod:{modification_code})':
             result.append(position)
         elif len(token) == 1:
             position += 1
     return result
 
 
-def map_form(row, fasta):
-    positions = assigned_positions(row['Modified.Sequence'])
+def map_form(row, fasta, modification_code=21):
+    positions = assigned_positions(row['Modified.Sequence'], modification_code)
     accessions = list(dict.fromkeys(tokens(row['Protein.Ids']) + tokens(row['Protein.Group'])))
     backbone = row['Stripped.Sequence']
-    if not positions or min(positions) < 1 or max(positions) > len(backbone):
+    if not positions or min(positions) < (0 if modification_code==1 else 1) or max(positions) > len(backbone):
         raise ValueError('Invalid assigned phosphoresidue offset')
     mappings = []
     for accession in accessions:
@@ -91,7 +91,7 @@ def map_form(row, fasta):
         start = entry['sequence'].find(backbone)
         while start >= 0:
             mappings.append({'accession': accession, 'gene': entry['gene'], 'start': start + 1,
-                             'sites': [f'{backbone[p-1]}{start+p}' for p in positions],
+                             'sites': [f'{backbone[p-1]}{start+p}' if p else f'Nterm{start+1}' for p in positions],
                              'reviewed': entry['reviewed']})
             start = entry['sequence'].find(backbone, start + 1)
     mapped_genes = {m['gene'].upper() for m in mappings if m['gene']}

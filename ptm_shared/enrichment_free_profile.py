@@ -11,7 +11,7 @@ EXPORT_MODE = 'enrichment_free_primary.v2'
 
 
 def enabled(context):
-    return isinstance(context, dict) and context.get('quantitation_export_mode') == EXPORT_MODE
+    return isinstance(context, dict) and context.get('quantitation_export_mode') in {EXPORT_MODE,'enrichment_free_timecourse.v3'}
 
 
 def annotation_snapshot(root, sha256):
@@ -34,6 +34,9 @@ def annotation_snapshot(root, sha256):
 def validate_profile(context, condition_map, ptm_type, species_tax_id, analysis_options=None):
     if not enabled(context):
         return None
+    if context.get('quantitation_export_mode')=='enrichment_free_timecourse.v3':
+        from .study_execution import validate_execution
+        return validate_execution(context,ptm_type,species_tax_id,analysis_options)
     if ptm_type not in {'phosphorylation','phospho'}:
         raise ValueError('The primary-A profile requires phosphorylation input')
     if str(species_tax_id) != '10116':

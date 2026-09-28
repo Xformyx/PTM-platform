@@ -16,7 +16,8 @@ test('copy and rerun text edits retain complete structured context', () => {
 test('filenames establish condition matching but never biological replication', () => {
   const samples = designSamples([{ file_name: 'rep1.mzML', group: 'Control', condition: 'con', replicate: 1 },
     { file_name: 'rep2.mzML', group: 'Treatment', condition: '5min_2', replicate: 2 }]);
-  assert.deepEqual(samples, [{ sample_id: 'rep1.mzML', condition: 'Control' }, { sample_id: 'rep2.mzML', condition: '5min' }]);
+  assert.deepEqual(samples.map(({sample_id,condition,replicate})=>({sample_id,condition,replicate})), [{ sample_id: 'rep1.mzML', condition: 'Control',replicate:1 }, { sample_id: 'rep2.mzML', condition: '5min',replicate:2 }]);
+  assert.equal(samples[1].source_condition,'5min_2');
   assert.deepEqual(designErrors({}, samples), []);
   assert.equal(designErrors({ sample_manifest: { samples: samples.map(s => ({ ...s, biological_unit: '' })) } }, samples).length, 1);
 });

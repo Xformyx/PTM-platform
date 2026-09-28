@@ -1,5 +1,5 @@
 export type AnalysisContext = Record<string, unknown>;
-export type DesignSample = { sample_id: string; condition: string };
+export type DesignSample = { sample_id: string; condition: string; group?: string; replicate?: string | number; [key:string]:unknown };
 export type ManifestSample = DesignSample & {
   biological_unit: string;
   technical_injection?: string | number;
@@ -22,14 +22,15 @@ export function designSamples(config: unknown): DesignSample[] {
   const rows = Array.isArray(config) ? config : (config as { samples?: unknown[] } | null)?.samples ?? [];
   return rows.flatMap((entry) => {
     const row = entry as Record<string, unknown>;
-    const filename = String(row.file_name ?? row.File_Name ?? row.filename ?? "");
+    const filename = String(row.sample_id ?? row.file_name ?? row.File_Name ?? row.filename ?? "");
     if (!filename) return [];
     const group = String(row.group ?? row.Group ?? "").trim();
     let condition = String(row.condition ?? row.Condition ?? "").trim();
     const replicate = row.replicate ?? row.Replicate;
-    if (group.toLowerCase() === "control") condition = "Control";
+    const sourceCondition=condition;
+    if (group.toLowerCase() === "control" && !row.condition_id) condition = "Control";
     else if (condition && replicate != null && condition.endsWith(`_${replicate}`)) condition = condition.slice(0, -String(replicate).length - 1);
-    return [{ sample_id: filename, condition: condition || group || "Unknown" }];
+    return [{ ...row, sample_id: filename, condition: condition || group || "Unknown", source_condition:sourceCondition, group, replicate:replicate as string | number | undefined }];
   });
 }
 
@@ -39,6 +40,9 @@ export function sampleManifest(value: unknown): SampleManifest | null {
 }
 
 export function designErrors(context: AnalysisContext, samples: DesignSample[], secondary: DesignSample[] = []): string[] {
+  // Generic drafts are saved through the server resolver. Execution validates
+  // its resolved design, raw column coverage, capabilities and frozen digest.
+  if (context.quantitation_export_mode === 'enrichment_free_timecourse.v3') return [];
   const errors: string[] = [];
   for (const [key, rows, label] of [["sample_manifest", samples, "Primary"], ["secondary_sample_manifest", secondary, "Secondary"]] as const) {
     if (context[key] == null) continue;

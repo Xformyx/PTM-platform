@@ -3515,7 +3515,7 @@ export default function OrderDetail() {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
-  const hasPrimaryAEvidence = order?.analysis_context?.quantitation_export_mode === 'enrichment_free_primary.v2' || !!order?.result_files?.enrichment_free;
+  const hasPrimaryAEvidence = ['enrichment_free_primary.v2','enrichment_free_timecourse.v3'].includes(String(order?.analysis_context?.quantitation_export_mode)) || !!order?.result_files?.enrichment_free;
   useEffect(() => { if (hasPrimaryAEvidence) setActiveTab('primary-a'); }, [orderId,hasPrimaryAEvidence]);
   const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);
@@ -4141,6 +4141,7 @@ export default function OrderDetail() {
         report_options: opts.report_options,
         analysis_options: opts.analysis_options,
         analysis_context: opts.analysis_context,
+        rag_collections: opts.rag_collections,
       });
       setDuplicateModalOpen(false);
       navigate(`/admin/orders/${result.id}`);
@@ -4295,7 +4296,7 @@ export default function OrderDetail() {
       {/* Stage Stepper */}
       {hasPrimaryAEvidence ? <Card><CardContent className="py-6 space-y-2">
         <p className="font-medium">Primary A evidence pipeline</p>
-        <p className="text-sm text-muted-foreground">Form quantification → frozen kinase footprints → paired parent and late protein layers → evidence report and Astra bundle</p>
+        <p className="text-sm text-muted-foreground">Condition contrasts and parent adjustment → annotation analysis when selected → full protein evidence → evidence report and Astra bundle. Read the completed run's readiness for executed capabilities.</p>
         <p className="text-sm">{order.stage_detail || order.status}</p>
       </CardContent></Card> : (
       <Card>
@@ -4776,7 +4777,7 @@ export default function OrderDetail() {
                 <OverviewField
                   label="Analysis Mode"
                   value={
-                    (order.report_options as any)?.analysis_mode === "cross_talk"
+                    hasPrimaryAEvidence ? String(order.analysis_context?.quantitation_export_mode??'Recorded primary-A run') : (order.report_options as any)?.analysis_mode === "cross_talk"
                       ? "Cross-Talk (Phos x Ub)"
                       : (order.report_options as any)?.analysis_mode === "ptm_nonptm_network"
                         ? "PTM + Network"
@@ -4786,7 +4787,7 @@ export default function OrderDetail() {
                 <OverviewField
                   label="Report Type"
                   value={
-                    (order.report_options as any)?.report_type === "extended"
+                    hasPrimaryAEvidence ? 'Primary A evidence report (deterministic)' : (order.report_options as any)?.report_type === "extended"
                       ? "Extended (+ Drug Repositioning)"
                       : (order.report_options as any)?.report_type === "co_scientist"
                         ? "Data-Grounded Analysis"
@@ -4796,7 +4797,7 @@ export default function OrderDetail() {
                 <OverviewField
                   label="연구자용 Report 작성"
                   value={
-                    isResearcherManuscriptRequest((order.report_options as any)?.report_config)
+                    hasPrimaryAEvidence ? '이 profile에서 실행하지 않음' : isResearcherManuscriptRequest((order.report_options as any)?.report_config)
                       ? "사용"
                       : "사용 안 함"
                   }
@@ -4804,7 +4805,7 @@ export default function OrderDetail() {
                 <OverviewField
                   label="RAG Literature Collections"
                   value={
-                    (() => {
+                    (hasPrimaryAEvidence ? 'Interpretation context only; contents not bundled. ' : '') + (() => {
                       const ids = order.rag_collections;
                       if (!ids || !Array.isArray(ids) || ids.length === 0) return "All active collections";
                       const toNum = (x: unknown) => (typeof x === "string" ? parseInt(x, 10) : Number(x));

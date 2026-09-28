@@ -37,6 +37,18 @@ def finalize_bundle(directory):
 
 def run_primary_analysis(order_id, config, output_dir, checkpoint=lambda:None, progress=lambda message:None):
     context = config['experimental_context']
+    if context.get('quantitation_export_mode')=='enrichment_free_timecourse.v3':
+        from .study_execution import validate_execution
+        from .study_presets import HIRCB_PRESET,legacy_manifest
+        frozen=config.get('frozen_annotation')
+        validate_execution(context,context['study_design']['study']['ptm_type'],config['species_tax_id'],config.get('analysis_options'),
+            Path(frozen['reference_dir']).parent if frozen else None)
+        if context.get('analysis_preset')!=HIRCB_PRESET:
+            from .generic_workflow import run_generic_analysis
+            return run_generic_analysis(order_id,config,output_dir,checkpoint,progress)
+        manifest=legacy_manifest(context['study_design'])
+        context={**context,'quantitation_export_mode':'enrichment_free_primary.v2','sample_manifest':manifest}
+        config={**config,'experimental_context':context,'condition_map':{s['sample_id']:s['condition'] for s in manifest['samples']}}
     samples = validate_profile(context, config['condition_map'], config['ptm_mode'],
                                config['species_tax_id'], config.get('analysis_options'))
     frozen = config['frozen_annotation']
@@ -44,6 +56,7 @@ def run_primary_analysis(order_id, config, output_dir, checkpoint=lambda:None, p
     inputs = {key:Path(config[name]) for key,name in
               [('PR','pr_matrix_path'),('PG','pg_matrix_path'),('FASTA','fasta_path')]}
     inputs['snapshot'] = Path(registered['snapshot_path'])
+    original_hashes={key:file_digest(path) for key,path in inputs.items()}
     run_id = f"g{int(config.get('run_generation') or 0)}-{uuid4().hex}"
     root = Path(output_dir)
     directory = root / 'enrichment_free_runs' / run_id
@@ -58,10 +71,16 @@ def run_primary_analysis(order_id, config, output_dir, checkpoint=lambda:None, p
     checkpoint()
     run_context = {'order_id':order_id,'order_code':config['order_code'],'run_id':run_id,
         'run_generation':config.get('run_generation'),'sample_manifest':context['sample_manifest'],
-        'analysis_profile':PROFILE,'acquisition_metadata':context.get('acquisition_metadata',{})}
+        'analysis_profile':PROFILE,'analysis_preset':context.get('analysis_preset','hircb_insulin_reference.v1'),
+        'acquisition_metadata':context.get('acquisition_metadata',{})}
+    from .study_design import clean_context
+    run_context['study_context']=clean_context(context)
+    if context.get('study_design'):run_context['study_design']=clean_context(context['study_design'])
     progress('Exporting paired parent, emergence, late protein layer and evidence report')
     exported = extend_and_export(analysis,mappings,edges,kinase,directory,inputs,
         reference_dir=registered['reference_dir'],run_context=run_context,normalization=normalization,make_archive=False)
+    if any(file_digest(path)!=original_hashes[key] or exported['provenance']['input_files'][key]['sha256']!=original_hashes[key] for key,path in inputs.items()):
+        raise ValueError('Input bytes changed during reference run; completion was not published')
     provenance = exported['provenance']
     primary = analysis['comparisons'].loc[analysis['comparisons'].included].copy()
     primary['estimator_version'] = provenance['estimator_versions']['quantification']

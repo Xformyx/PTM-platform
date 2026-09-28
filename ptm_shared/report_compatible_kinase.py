@@ -18,7 +18,8 @@ FAMILIES = {'AKT_family': ['Akt1', 'Akt2', 'Akt3'], 'ERK1_2_family': ['Mapk1', '
             'GSK3_family': ['Gsk3a', 'Gsk3b']}
 # Fixed before this reanalysis's discovery scoring after review of the original
 # report; this is retrospective holdout, not prospective preregistration.
-HELD_OUT_GENES = frozenset({'FOSL1', 'FOSL2', 'JUN', 'JUNB', 'CCND1', 'IRS1'})
+from .study_presets import HIRCB_PANEL
+HELD_OUT_GENES = HIRCB_PANEL
 
 
 def frozen_edges(analysis, snapshot):

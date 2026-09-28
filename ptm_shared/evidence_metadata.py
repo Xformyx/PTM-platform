@@ -52,6 +52,13 @@ def build_provenance(inputs, samples, run_context=None, normalization=None):
         'held_out_policy':{'genes':sorted(HELD_OUT_GENES),
             'selection_timing':'fixed_before_reanalysis_discovery_scoring_after_original_report_review',
             'prospective_preregistration':False, 'independent_biological_validation':False}}
+    if context.get('study_context') is not None:
+        from .study_design import clean_context
+        result['study_context']=clean_context(context['study_context'])
+        result['study_context_sha256']=digest_json(result['study_context'])
+        result['analysis_preset']=context.get('analysis_preset')
+    if context.get('study_design') is not None:
+        result['canonical_study_design_sha256']=digest_json(context['study_design'])
     result['provenance_id'] = digest_json(result)
     return result
 

@@ -49,6 +49,8 @@ function isRagModelTooSmall(modelName: string): boolean {
 }
 
 interface Order {
+  species?:string;
+  ptm_type?:string;
   id: number;
   order_code: string;
   analysis_context?: Record<string, unknown>;
@@ -291,7 +293,7 @@ export default function RerunOptionsModal({
     if (!order) return;
     setSubmitting(true);
     try {
-      const errors = designErrors(structuredContext, designSamples(order.sample_config), designSamples(order.secondary_sample_config));
+      const errors = designErrors(mergeAnalysisContext(structuredContext,analysisContext), designSamples(order.sample_config), designSamples(order.secondary_sample_config));
       if (errors.length) throw new Error(errors.join(" "));
       const optsForApi: Record<string, unknown> = {
         mode: analysisOptions.mode,
@@ -369,6 +371,7 @@ export default function RerunOptionsModal({
   };
 
   if (!order) return null;
+  const generic=structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3';
 
   return (
     <>
@@ -400,6 +403,8 @@ export default function RerunOptionsModal({
               <h4 className="text-sm font-semibold flex items-center gap-2">
                 <FlaskConical className="h-4 w-4" /> Analysis Focus
               </h4>
+              {generic&&<p className="text-xs">Primary A uses full PR/PG input. Legacy LLM, RAG, Network and temporal-contract controls below are inactive for this profile.</p>}
+              <fieldset disabled={generic} className={generic?'hidden':'space-y-4'}>
               <div
                 className={cn(
                   "w-full rounded-lg border text-left transition-colors",
@@ -503,6 +508,7 @@ export default function RerunOptionsModal({
                   </button>
                 </div>
               </div>
+              </fieldset>
               <div className="grid gap-2">
                 <Label className="text-xs">Cell Type</Label>
                 <Input
@@ -541,8 +547,8 @@ export default function RerunOptionsModal({
                   className="h-8 text-sm"
                 />
               </div>
-              <SampleDesignFields context={structuredContext} onChange={setStructuredContext}
-                samples={designSamples(order.sample_config)} secondarySamples={designSamples(order.secondary_sample_config)} />
+              <SampleDesignFields context={mergeAnalysisContext(structuredContext,analysisContext)} onChange={setStructuredContext}
+                samples={designSamples(order.sample_config)} secondarySamples={designSamples(order.secondary_sample_config)} species={order.species} ptmType={order.ptm_type} />
               <div className="flex items-center gap-3">
                 <Label className="text-xs">Analysis Options (protein selection)</Label>
                 <Button
@@ -559,7 +565,8 @@ export default function RerunOptionsModal({
             </div>
 
             {/* Report Options */}
-            <div className="space-y-4">
+            {generic&&<p className="text-sm">This run generates the evidence report and Astra bundle. Saved literature collection selections are retained as interpretation context; their contents are not bundled.</p>}
+            <fieldset disabled={generic} className={generic?'hidden':'space-y-4'}>
               <h4 className="text-sm font-semibold flex items-center gap-2">
                 <Brain className="h-4 w-4" /> Report Options
               </h4>
@@ -961,10 +968,10 @@ export default function RerunOptionsModal({
                 </div>
               </div>
               )}
-            </div>
+            </fieldset>
 
             {/* Advanced Report Settings */}
-            <div className="rounded-lg border">
+            <fieldset disabled={generic} className={generic?'hidden':'rounded-lg border'}>
               <button
                 type="button"
                 className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors"
@@ -1066,7 +1073,7 @@ export default function RerunOptionsModal({
                   </div>
                 </div>
               )}
-            </div>
+            </fieldset>
           </div>
 
           <DialogFooter>
@@ -1079,7 +1086,7 @@ export default function RerunOptionsModal({
                   Kinase analysis included ({(order.kinase_analysis_data as any).kinase_modules.length} modules)
                 </div>
               )}
-              {order?.temporal_evidence_readiness?.status === "ready" ? (
+              {!generic && (order?.temporal_evidence_readiness?.status === "ready" ? (
                 <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-700 dark:text-sky-300 text-xs">
                   <CheckSquare className="h-3 w-3" />
                   Temporal evidence ready
@@ -1089,7 +1096,7 @@ export default function RerunOptionsModal({
                   <Zap className="h-3 w-3 shrink-0" />
                   Temporal evidence will be prepared before Report generation
                 </div>
-              ) : null}
+              ) : null)}
             </div>
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
               Cancel

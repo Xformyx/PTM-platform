@@ -13,6 +13,7 @@ import pandas as pd
 
 from .report_compatible_quantification import contrast, positive_matrix, VERSION
 from .report_compatible_kinase import HELD_OUT_GENES
+from .study_presets import HIRCB_WINDOWS
 
 STRICT_PARENT_V1_VERSION = 'strict_unmodified_parent_separate_means.v1'
 EXPORT_VERSION = 'astra_evidence_bundle.v2'
@@ -110,7 +111,7 @@ def late_layer(analysis, strict_proteins):
             records.append({'gene': gene, 'protein_group': row['Protein.Group'], 'time_min': time,
                 'PG_log2_change': delta[i], 'strict_log2_change': strict, 'PG_baseline_n': int(bn[i]), 'PG_treated_n': int(tn[i]),
                 'estimators_direction_agree': bool(delta[i] * strict > 0) if np.isfinite(delta[i]) and np.isfinite(strict) else None,
-                'layer': 'late_validation' if time >= 60 else 'earlier_protein_context',
+                'layer': 'late_validation' if time >= HIRCB_WINDOWS['late']['minimum_minutes'] else 'earlier_protein_context',
                 'held_out_from_discovery': True, 'inference': 'same_experiment_descriptive_consistency_not_causality'})
     return pd.DataFrame(records)
 
@@ -125,7 +126,7 @@ def file_digest(path):
 
 def held_out_temporal_context(kinase):
     frame = kinase['sensitivities']
-    early = frame[frame['mode'].eq('held_out_discovery_A') & frame.time_min.le(30) & frame.coverage_adequate]
+    early = frame[frame['mode'].eq('held_out_discovery_A') & frame.time_min.le(HIRCB_WINDOWS['early']['maximum_minutes']) & frame.coverage_adequate]
     records = []
     for entity, rows in early.groupby('entity'):
         for omitted in [None] + rows.time_min.tolist():
@@ -153,6 +154,9 @@ def extend_and_export(analysis, mappings, edges, kinase, output, inputs, referen
                                     analysis_readiness, data_dictionary)
     from .report_compatible_kinase import emergent_kinase_evidence
     provenance_record = build_provenance(inputs, analysis['samples'], run_context, normalization)
+    for name in ['study_context','study_design']:
+        if (run_context or {}).get(name) is not None:
+            (output/(name+'.json')).write_text(json.dumps(run_context[name],indent=2,ensure_ascii=False,allow_nan=False))
     strict = strict_unmodified_parent(analysis)
     tables = {name: analysis[name] for name in ['summary', 'runlevel', 'comparisons', 'detection']}
     tables.update({'site_mappings': mappings, 'all_edges': edges})
@@ -164,6 +168,9 @@ def extend_and_export(analysis, mappings, edges, kinase, output, inputs, referen
     tables['form_evidence_status'] = form_evidence_status(analysis, edges, kinase)
     for name, frame in tables.items():
         frame.to_csv(output / (name + '.csv'), index=False)
+        checked=pd.read_csv(output/(name+'.csv'))
+        if list(checked.columns)!=list(frame.columns) or len(checked)!=len(frame):
+            raise ValueError('CSV write verification failed: '+name)
     for name, value in {'provenance':provenance_record, 'software_versions':software_versions(),
                         'analysis_readiness':analysis_readiness(analysis,kinase,provenance_record),
                         'data_dictionary':data_dictionary(tables)}.items():
@@ -187,7 +194,7 @@ def extend_and_export(analysis, mappings, edges, kinase, output, inputs, referen
     (output / 'ptm_shared').mkdir()
     (output / 'ptm_shared/__init__.py').write_text('')
     for name in ['report_compatible_quantification.py', 'report_compatible_kinase.py', 'report_compatible_extensions.py',
-                 'strict_parent_paired.py','evidence_metadata.py','normalization_provenance.py']:
+                 'strict_parent_paired.py','evidence_metadata.py','normalization_provenance.py','study_design.py','study_presets.py']:
         shutil.copyfile(Path(__file__).parent / name, output / 'ptm_shared' / name)
     config = {'estimator_version': VERSION, 'baseline_time': analysis['baseline_time'], 'inputs': copied_inputs,
               'held_out_genes_before_reanalysis_discovery': sorted(HELD_OUT_GENES),
@@ -223,6 +230,21 @@ m, e = frozen_edges(a, pd.read_csv(inputs["snapshot"], sep="\\t"))
 k = score_footprints(a, e)
 extend_and_export(a, m, e, k, Path(sys.argv[1]), inputs, reference_dir=root / "frozen_source_audit",
                   run_context=cfg.get("run_context"), normalization=normalization)
+if (root / "primary_A_input.csv").exists():
+    target = Path(sys.argv[1])
+    primary = a["comparisons"].loc[a["comparisons"].included].copy()
+    primary["estimator_version"] = cfg["estimator_versions"]["quantification"]
+    primary["provenance_id"] = cfg["provenance_id"]
+    primary.to_csv(target / "primary_A_input.csv", index=False)
+    manifest_path = target / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    primary_path = target / "primary_A_input.csv"
+    manifest["files"][primary_path.name] = {"bytes": primary_path.stat().st_size, "sha256": file_digest(primary_path)}
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    import zipfile
+    with zipfile.ZipFile(target.with_suffix(".zip"), "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in [*manifest["files"], "manifest.json"]:
+            archive.write(target / name, name)
 ''')
     (output / 'README.md').write_text('''# Astra evidence bundle
 

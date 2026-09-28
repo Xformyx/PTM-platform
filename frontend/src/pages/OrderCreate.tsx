@@ -518,7 +518,7 @@ export default function OrderCreate() {
       return;
     }
 
-    const designProblems = designErrors(structuredContext, designSamples(samples), designSamples(secondarySamples));
+    const designProblems = designErrors(mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions}), designSamples(samples), designSamples(secondarySamples));
     if (designProblems.length) { setError(designProblems.join(" ")); return; }
 
     setLoading(true);
@@ -959,6 +959,8 @@ export default function OrderCreate() {
                   </Button>
                 </div>
                 {/* Analysis Mode Selection */}
+                {structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'&&<p className="text-sm">Primary A uses canonical contrasts and the deterministic evidence report. Legacy network and temporal-contract selections are inactive.</p>}
+                <fieldset disabled={structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'} className={structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'?'hidden':'space-y-4'}>
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Analysis Mode</Label>
                   <div className="grid grid-cols-3 gap-3">
@@ -1075,6 +1077,7 @@ export default function OrderCreate() {
                 </div>
 
                 {/* Cross-Talk: Secondary PTM Type & Files */}
+                </fieldset>
                 {form.analysis_mode === "cross_talk" && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50/30 p-4 space-y-4">
                     <div className="flex items-center gap-2">
@@ -1283,8 +1286,8 @@ export default function OrderCreate() {
                     placeholder="e.g., 0, 5, 15, 30 min"
                   />
                 </div>
-                <SampleDesignFields context={structuredContext} onChange={setStructuredContext}
-                  samples={designSamples(samples)} secondarySamples={designSamples(secondarySamples)} />
+                <SampleDesignFields context={mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions})} onChange={setStructuredContext}
+                  samples={designSamples(samples)} secondarySamples={designSamples(secondarySamples)} species={form.species} ptmType={form.ptm_type} />
                 <div className="space-y-2">
                   <Label>Biological Question</Label>
                   <Textarea value={form.biological_question}
@@ -1318,6 +1321,8 @@ export default function OrderCreate() {
                 initial="enter" animate="center" exit="exit"
                 transition={{ duration: 0.25, ease: "easeInOut" }} className="space-y-5"
               >
+                {structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'&&<div className="rounded border p-4 space-y-2"><p className="font-medium">Primary A evidence report and Astra export</p><p className="text-sm">The selected canonical design, normalization, preset and annotation determine this run. Legacy LLM/RAG/network and manuscript options are inactive. Saved literature selections are interpretation context only.</p></div>}
+                <fieldset disabled={structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'} className={structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'?'hidden':'space-y-5'}>
                 <div
                   className={cn(
                     "w-full rounded-lg border text-left transition-colors",
@@ -1942,6 +1947,7 @@ export default function OrderCreate() {
                   </div>
                 </div>
 
+                </fieldset>
                 <div className="flex justify-between">
                   <Button variant="outline" onClick={() => goTo(2)}>
                     <ArrowLeft className="mr-2 h-4 w-4" /> Back
@@ -1975,7 +1981,7 @@ export default function OrderCreate() {
               <Copy className="h-5 w-5" /> Copy from Order
             </DialogTitle>
             <DialogDescription>
-              Cell Type, Treatment, Time Points, Biological Question, Special Conditions만 가져옵니다. Order name 등 다른 정보는 새로 입력하세요.
+              저장된 실험 context와 설계를 가져옵니다. 현재 파일·조건과의 일치 여부는 같은 resolver로 다시 확인하며, Order name은 새로 입력합니다.
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[320px] overflow-y-auto space-y-1 py-2">
