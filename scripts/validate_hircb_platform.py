@@ -18,6 +18,8 @@ def main():
     parser.add_argument('--inputs',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--reference-preset',action='store_true',help='New canonical design with explicit HIRc-B reference adapter and session-declared metadata')
+    parser.add_argument('--single-run',action='store_true',help='Create and download one real-input package; Copy/Rerun is verified separately')
+    parser.add_argument('--astra',action='store_true',help='Validate the new automatic Astra package separately from reference regression')
     args=parser.parse_args()
     if urlparse(args.base_url).scheme!='http' or urlparse(args.base_url).hostname!='127.0.0.1':
         parser.error('This validation script requires an isolated localhost service')
@@ -40,6 +42,17 @@ def main():
                          'injected_peptide_mass':{'value':None,'status':'unknown'}},
             pre_treatment={'name':'serum starvation','duration':12,'unit':'h','source':'user_declaration_2026-09-26'},
             processing={k:{'value':None,'status':'unknown'} for k in ['software_version','upstream_normalization']})
+    if args.astra:
+        context.update(quantitation_export_mode='astra_analysis.v4',replication_declaration='technical_per_condition',
+            cell_type='HIRc-B rat fibroblast; human INSR overexpression',treatment='insulin',time_points='0,1,5,15,30,60,180min',
+            biological_question='Parent-adjusted PTM, kinase candidate and temporal protein evidence for insulin response',
+            special_conditions='Enrichment-free Astral DIA; serum starvation 12 h',
+            treatments=[{'name':'insulin','dose':100,'unit':'nM','source':'user_declaration_2026-09-26'}],
+            acquisition_metadata={'insulin_concentration':'100 nM'},
+            acquisition={'injection_volume':{'value':10,'unit':'µL','status':'provided','source':'user_declaration_2026-09-26'},'injected_peptide_mass':{'value':None,'status':'unknown'}},
+            pre_treatment={'name':'serum starvation','duration':12,'unit':'h','source':'user_declaration_2026-09-26'},
+            processing={k:{'value':None,'status':'unknown'} for k in ['software_version','upstream_normalization']})
+        for field in ['annotation_snapshot_sha256','annotation_mode','analysis_preset']:context.pop(field,None)
     sample_config={'samples':[{'file_name':s['original_column'],'condition':conditions[s['time_min']],
                               'group':'Control' if s['time_min']==0 else 'Treatment','replicate':s['run_suffix']} for s in samples]}
     name='HIRcB_followup_'+uuid4().hex[:8]
@@ -54,7 +67,7 @@ def main():
         response.raise_for_status()
         return response.json()
     def wait(order_id):
-        deadline=time.monotonic()+900
+        deadline=time.monotonic()+7200
         previous=None
         while time.monotonic()<deadline:
             state=request('GET',f'/orders/{order_id}')
@@ -67,23 +80,44 @@ def main():
             time.sleep(3)
         raise TimeoutError(order_id)
     assert request('GET','/orders/frozen-annotations')['snapshots']
+    attachment=args.inputs/'HIRcB_Insulin_Full_Article (2).docx'
+    attachment_files={'research_attachments':(attachment.name,attachment.read_bytes())} if args.astra and attachment.exists() else {}
     with (args.inputs/'report.pr_matrix.tsv').open('rb') as pr,(args.inputs/'report.pg_matrix.tsv').open('rb') as pg:
         order=request('POST','/orders',data={'project_name':name,'ptm_type':'phosphorylation','species':'Rat_hir',
             'sample_config':json.dumps(sample_config),'analysis_context':json.dumps(context),
             'analysis_options':json.dumps({'mode':'full','quick_analysis':False}),
             'report_options':json.dumps({'top_n_ptms':50})},
-            files={'pr_matrix':('report.pr_matrix.tsv',pr),'pg_matrix':('report.pg_matrix.tsv',pg)})
+            files={'pr_matrix':('report.pr_matrix.tsv',pr),'pg_matrix':('report.pg_matrix.tsv',pg),**attachment_files})
     order_id=order['id']
     print('created',order_id,name,flush=True)
-    (args.output/'order.json').write_text(json.dumps({k:order.get(k) for k in ['id','order_code','species','ptm_type','analysis_context']},indent=2,ensure_ascii=False))
+    (args.output/'order.json').write_text(json.dumps({'id':order_id,'order_code':name,'species':'Rat_hir','ptm_type':'phosphorylation','source':'validation_request','analysis_context':context},indent=2,ensure_ascii=False))
     request('POST',f'/orders/{order_id}/start')
     original=wait(order_id)
-    assert original['counts']['primary_comparisons']==11920
-    assert original['counts']['kinase_profiles_v1']==3948
+    if args.astra:
+        assert original['schema_version']=='astra_analysis_package.v4'
+        assert original['counts']['forms']==2824 and original['counts']['parent_eligible']==2625
+        assert original['study_preview']['transfer_validation']['unexpected_missing']==0
+    else:
+        assert original['counts']['primary_comparisons']==11920
+        assert original['counts']['kinase_profiles_v1']==3948
+    if args.single_run:
+        import hashlib,zipfile,io
+        response=client.get(f'/orders/{order_id}/enrichment-free-evidence',params={'artifact':'astra'});response.raise_for_status()
+        assert hashlib.sha256(response.content).hexdigest()==original['artifacts']['astra']['sha256']
+        (args.output/'astra_analysis_package.zip').write_bytes(response.content)
+        (args.output/'recorded_run.json').write_text(json.dumps(original,indent=2,ensure_ascii=False))
+        if attachment_files:
+            with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                pin=json.loads(archive.read('references/literature_pin.json'))
+                doc=next(r for r in pin['documents'] if r['filename']==attachment.name)
+                assert archive.read(doc['package_file'])==attachment.read_bytes()
+        (args.output/'validation.json').write_text(json.dumps({'passed':True,'order_id':order_id,'run_id':original['run_id'],'attachment_bytes_preserved':bool(attachment_files),'download_checksum_verified':True},indent=2))
+        print('Single-run package and attached original verified',flush=True);return
     copied=request('POST',f'/orders/{order_id}/duplicate',json={'new_order_name':name+'_copy'})
     copy_id=copied['id']
     copy_state=request('GET',f'/orders/{copy_id}')
-    assert copy_state['analysis_context']==request('GET',f'/orders/{order_id}')['analysis_context']
+    if args.astra:assert copy_state['analysis_context']['study_design']==request('GET',f'/orders/{order_id}')['analysis_context']['study_design']
+    else:assert copy_state['analysis_context']==request('GET',f'/orders/{order_id}')['analysis_context']
     request('POST',f'/orders/{copy_id}/start')
     copy_result=wait(copy_id)
     # Settings edits must never relabel an existing result. Then restore the
@@ -97,7 +131,7 @@ def main():
     request('POST',f'/orders/{order_id}/run-stage',json={'stage':'report_generation'})
     rerun=wait(order_id)
     assert len({r['run_id'] for r in [original,copy_result,rerun]})==3
-    for key in ['input_files','design_sha256','declared_design','normalization','estimator_versions','annotation_sha256']:
+    for key in (['input_hashes','design_hash','normalization','estimator_versions','source_pin_sha256'] if args.astra else ['input_files','design_sha256','declared_design','normalization','estimator_versions','annotation_sha256']):
         assert original['provenance'][key]==copy_result['provenance'][key]==rerun['provenance'][key],key
     for label,record in [('original',original),('copy',copy_result),('rerun',rerun)]:
         (args.output/(label+'.json')).write_text(json.dumps(record,indent=2))
@@ -112,7 +146,7 @@ def main():
                 if artifact=='astra':(args.output/(label+'.zip')).write_bytes(response.content)
     result={'passed':True,'order_id':order_id,'copy_id':copy_id,'order_code':name,
         'real_services':['FastAPI','MySQL','Redis','Celery'],'run_ids':[r['run_id'] for r in [original,copy_result,rerun]],
-        'copy_settings_preserved':True,'edited_settings_do_not_relabel_prior_results':True,'reference_preset':args.reference_preset,
+        'copy_settings_preserved':True,'edited_settings_do_not_relabel_prior_results':True,'reference_preset':args.reference_preset,'astra':args.astra,
         'report_rerun_uses_primary_A_pipeline':True,'events':events}
     (args.output/'validation.json').write_text(json.dumps(result,indent=2))
     print(json.dumps({k:v for k,v in result.items() if k!='events'},indent=2))

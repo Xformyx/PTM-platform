@@ -37,6 +37,9 @@ def finalize_bundle(directory):
 
 def run_primary_analysis(order_id, config, output_dir, checkpoint=lambda:None, progress=lambda message:None):
     context = config['experimental_context']
+    if context.get('quantitation_export_mode') == 'astra_analysis.v4':
+        from .astra_package import run_astra_analysis
+        return run_astra_analysis(order_id, config, output_dir, checkpoint, progress)
     if context.get('quantitation_export_mode')=='enrichment_free_timecourse.v3':
         from .study_execution import validate_execution
         from .study_presets import HIRCB_PRESET,legacy_manifest

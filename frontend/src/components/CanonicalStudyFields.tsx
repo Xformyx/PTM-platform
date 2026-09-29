@@ -3,7 +3,6 @@ import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { AnalysisContext, DesignSample } from '@/lib/analysisContext';
-import FrozenAnnotationFields from './FrozenAnnotationFields';
 
 type Condition={condition_id:string;arm_id:string;label:string;role:string;time:{value:number;unit:string;minutes:number;original:string}|null;reference_condition_id?:string;time_conflict_resolution?:string};
 type Material={material_id:string;biological_unit_id:string|null;pair_id:string|null;source?:string};
@@ -14,13 +13,15 @@ type Contrast={contrast_id:string;target_condition_id:string;reference_condition
 type Design={schema_version:string;status:string;replication_declaration:string;conditions:Condition[];arms:Arm[];materials:Material[];injections:Injection[];contrasts:Contrast[];issues:Array<{code:string;path:string;message:string;severity:string}>;[key:string]:unknown};
 
 export default function CanonicalStudyFields({context,onChange,samples,species,ptmType}:{context:AnalysisContext;onChange:(v:AnalysisContext)=>void;samples:DesignSample[];species:string;ptmType:string}) {
+  const astra=context.quantitation_export_mode==='astra_analysis.v4';
+  const [plan,setPlan]=useState<Record<string,unknown>|null>(null);
   const [error,setError]=useState('');const [pending,setPending]=useState(false);const [revision,setRevision]=useState(0);
   const current=useRef({context,onChange});current.current={context,onChange};
   const input=JSON.stringify({analysis_context:context,sample_config:samples,species,ptm_type:ptmType});
   useEffect(()=>{
     let active=true;
-    const timer=setTimeout(()=>{setPending(true);api.post<{study_design:Design}>('/orders/resolve-design',JSON.parse(input))
-      .then(response=>{if(!active)return;setError('');const state=current.current;
+    const timer=setTimeout(()=>{setPending(true);api.post<{study_design:Design;analysis_plan?:Record<string,unknown>}>('/orders/resolve-design',JSON.parse(input))
+      .then(response=>{if(!active)return;setError('');setPlan(response.analysis_plan??null);const state=current.current;
         if(JSON.stringify(state.context.study_design)!==JSON.stringify(response.study_design))state.onChange({...state.context,study_design:response.study_design});})
       .catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setPending(false);});},350);
     return()=>{active=false;clearTimeout(timer);};
@@ -36,15 +37,15 @@ export default function CanonicalStudyFields({context,onChange,samples,species,p
   return <div className="space-y-4">
     <p className="text-sm font-medium">Review imported study design</p>
     <p className="text-xs text-muted-foreground">Files and conditions come from the configured samples. Rep numbers alone do not establish biological or technical replication. Drafts can be saved; only unresolved execution requirements block Start.</p>
-    <label className="block text-sm">Profile preset<select aria-label="Study preset" className={selectClass} value={String(context.analysis_preset??'')} onChange={e=>put('analysis_preset',e.target.value||null)}>
-      <option value="">Generic study — no fixed panel or early/late window</option><option value="hircb_insulin_reference.v1">HIRc-B insulin reference v1 — original rat estimator and frozen annotation</option>
-    </select></label>
     <label className="flex gap-2 text-sm"><input type="checkbox" checked={context.enrichment_status==='enrichment_free'} onChange={e=>put('enrichment_status',e.target.checked?'enrichment_free':'unknown')}/>These PR/PG inputs were acquired without PTM enrichment</label>
-    <label className="block text-sm">Annotation analysis<select aria-label="Annotation analysis" className={selectClass} value={String(context.annotation_mode??'')} onChange={e=>put('annotation_mode',e.target.value)}>
-      <option value="">Confirm annotation requirement</option><option value="required">Phosphorylation kinase footprint required</option><option value="quantification_only">Quantification, parent, emergence and protein export only</option>
-    </select></label>
-    {context.annotation_mode==='required'&&<FrozenAnnotationFields {...{context,onChange,species,ptmType}}/>}
-    <p className="text-xs">Generic quantification supports phosphorylation, ubiquitylation and acetylation. Kinase footprint supports phosphorylation with compatible annotation. This profile produces a deterministic evidence report and Astra bundle; legacy LLM/RAG/network execution and manuscript report options are not run. Literature selections are context only.</p>
+    {astra?<div className="rounded border bg-muted/30 p-3 text-sm" aria-label="Automatic analysis plan">
+      <p>정량: 공급 intensity · 동일 주입 parent 보정 · 대체 parent/정규화 민감도</p>
+      <p>탐색: {ptmType==='phosphorylation'?'kinase DB + 관측 잔기 중심 motif + 기질 footprint':'지원 PTM 정량·등장·단백질 통합; kinase 해당 없음'}</p>
+      <p>통합: PTM/kinase 시간 패턴 + 전체 단백질 변화 + 등장 PTM</p>
+      <p>참조 자료는 자동 준비 후 이번 실행에 고정됩니다. 일부 DB 실패는 제한 사항과 함께 전달됩니다.</p>
+      <details><summary>참조 자료 갱신</summary><label className="flex gap-2"><input type="checkbox" checked={context.refresh_references===true} onChange={e=>put('refresh_references',e.target.checked)}/>다음 새 실행에서 참조 자료 갱신 요청 (완료된 패키지는 보존)</label></details>
+      {plan&&<details><summary>Recorded plan details</summary><pre className="whitespace-pre-wrap text-xs">{JSON.stringify(plan,null,2)}</pre></details>}
+    </div>:<p className="text-xs">Recorded legacy estimator and annotation settings are preserved. Use a new Astra package run to adopt the automatic plan.</p>}
     {!context.sample_manifest&&(!design?.materials.length||design.replication_declaration==='unknown')&&<label className="block text-sm">Confirm replication once<select aria-label="Replication declaration" className={selectClass} value={String(context.replication_declaration??design?.replication_declaration??'unknown')}
       onChange={e=>put('replication_declaration',e.target.value)}>
       <option value="unknown">Unconfirmed — descriptive observations; no biological inference</option><option value="technical_per_condition">One material per condition, with repeated technical injections</option>

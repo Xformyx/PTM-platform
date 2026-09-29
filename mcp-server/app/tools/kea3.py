@@ -45,16 +45,16 @@ async def query_kea3(
     gene_list: List[str],
     top_n: int = 10,
     redis=None,
+    taxonomy_id: Optional[str] = None,
+    orthology_mapping=None,
 ) -> dict:
     """
     Submit a gene list to KEA3 for kinase enrichment analysis.
 
     Parameters:
         gene_list: List of substrate gene symbols (e.g., ["ACC1", "AMPK", "mTOR"])
-                   Gene symbols are automatically uppercased before submission because
-                   KEA3 uses human orthologue symbols (ALL CAPS) internally.
-                   This ensures rat (Egfr → EGFR) and mouse (Mapk1 → MAPK1) genes
-                   are correctly matched against KEA3's PhosphoSitePlus-based database.
+                   Human symbols retain their identity. Nonhuman genes require explicit
+                   verified human orthology mapping; uppercase is not mapping.
         top_n: Number of top kinases to return
         redis: Optional Redis client for caching
 
@@ -68,17 +68,18 @@ async def query_kea3(
             "error": "At least 2 genes required for KEA3 analysis",
         }
 
-    # Normalize to uppercase — KEA3 uses human orthologue gene symbols (ALL CAPS).
-    # Rat genes arrive as "Egfr", "Mapk1"; mouse as "Egfr", "Mapk1"; human as "EGFR".
-    # Uppercasing all gene symbols maximizes hit rate across species.
-    normalized_genes = list(dict.fromkeys(g.upper() for g in gene_list if g))
+    from ptm_shared.kea3_evidence import mapped_human_genes, parse_kea3
+    try:
+        normalized_genes = mapped_human_genes(gene_list, taxonomy_id, orthology_mapping)
+    except ValueError as error:
+        return {"gene_count": len(gene_list), "top_kinases": [], "query_status": "not_supported", "error": str(error)}
 
     # Cache key
     sorted_genes = sorted(normalized_genes)
     from ptm_shared.evidence_contracts import source_cache_key
     top_n = max(0, int(top_n))
     cache_key = source_cache_key("kea3", genes=sorted_genes, top_n=top_n,
-                                 parser="kea3_response.v2", endpoint=KEA3_API_URL)
+                                 parser="kea3_typed_response.v3", taxon=taxonomy_id, mapping=orthology_mapping, endpoint=KEA3_API_URL)
     if redis:
         try:
             import json
@@ -117,42 +118,13 @@ async def query_kea3(
                 data = await resp.json(content_type=None)
                 result['full_source_response'] = data
                 result['available_libraries'] = sorted(data) if isinstance(data, dict) else []
-                result['species_scope'] = 'library_gene_symbols_orthology_not_verified'
-
-                # Parse integrated ranking (MeanRank)
-                integrated = data.get("Integrated--meanRank", [])
-                if isinstance(integrated, list):
-                    for i, entry in enumerate(integrated[:top_n]):
-                        if isinstance(entry, dict):
-                            overlapping = entry.get("Overlapping_Genes", "")
-                            if isinstance(overlapping, str):
-                                overlapping = [g.strip() for g in overlapping.split(",") if g.strip()]
-
-                            result["integrated_ranking"].append({
-                                "kinase": entry.get("TF", entry.get("Kinase", "")),
-                                "rank": i + 1,
-                                "score": float(entry.get("Score", 0)),
-                                "p_value": float(entry.get("FDR", entry.get("P-value", 1.0))),
-                                "overlapping_genes": overlapping,
-                                "library": "Integrated",
-                            })
-
-                result["top_kinases"] = result["integrated_ranking"][:top_n]
-
-                # Parse individual library rankings
-                for lib_key, lib_data in data.items():
-                    if lib_key.startswith("Integrated"):
-                        continue
-                    if isinstance(lib_data, list) and len(lib_data) > 0:
-                        lib_results = []
-                        for i, entry in enumerate(lib_data[:5]):
-                            if isinstance(entry, dict):
-                                lib_results.append({
-                                    "kinase": entry.get("TF", entry.get("Kinase", "")),
-                                    "rank": i + 1,
-                                    "score": float(entry.get("Score", 0)),
-                                })
-                        result["library_rankings"][lib_key] = lib_results
+                result['species_scope'] = 'human_native_or_explicit_verified_mapping'
+                rows = parse_kea3(data)
+                result['all_source_rows'] = rows
+                result['integrated_ranking'] = [r for r in rows if r['library'] == 'Integrated--meanRank']
+                result['top_kinases'] = result['integrated_ranking'][:top_n]
+                result['library_rankings'] = {lib: [r for r in rows if r['library'] == lib]
+                    for lib in sorted(data) if not lib.startswith('Integrated')}
 
     except Exception as e:
         logger.warning(f"KEA3 query failed: {e}")

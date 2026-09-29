@@ -1,3 +1,4 @@
+import AstraWritingIntent from '@/components/AstraWritingIntent';
 import { useState, useEffect } from "react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -326,7 +327,7 @@ export default function RerunOptionsModal({
       await onConfirm({
         analysis_context: mergeAnalysisContext(structuredContext, analysisContext),
         analysis_options: optsForApi,
-        rag_collections: useAllCollections ? null : (selectedCollectionIds.length > 0 ? selectedCollectionIds : null),
+        rag_collections: useAllCollections ? null : selectedCollectionIds,
           report_options: {
           ...baseReportOpts,
           report_type: reportType,
@@ -335,7 +336,7 @@ export default function RerunOptionsModal({
           output_format: baseReportOpts.output_format ?? "md",
           analysis_mode: analysisMode,
           temporal_contract: temporalContract,
-          research_questions: reportType === "co_scientist" ? [] : researchQuestions,
+          research_questions: researchQuestions,
           co_scientist_integration: coScientistIntegrationMode !== "disabled" && coScientistSessionId
             ? { enabled: true, mode: coScientistIntegrationMode, session_id: coScientistSessionId, max_hypotheses: 2 }
             : { enabled: false },
@@ -371,7 +372,7 @@ export default function RerunOptionsModal({
   };
 
   if (!order) return null;
-  const generic=structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3';
+  const generic=['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode));
 
   return (
     <>
@@ -971,7 +972,8 @@ export default function RerunOptionsModal({
             </fieldset>
 
             {/* Advanced Report Settings */}
-            <fieldset disabled={generic} className={generic?'hidden':'rounded-lg border'}>
+            {structuredContext.quantitation_export_mode==='astra_analysis.v4'&&<AstraWritingIntent questions={researchQuestions} setQuestions={setResearchQuestions} collections={ragCollections} selected={selectedCollectionIds} setSelected={setSelectedCollectionIds} all={useAllCollections} setAll={setUseAllCollections}/>}
+                <fieldset disabled={generic} className={generic?'hidden':'rounded-lg border'}>
               <button
                 type="button"
                 className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors"

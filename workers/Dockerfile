@@ -49,6 +49,8 @@ subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--no-cache-dir']
 # ── Layer: Source code ───────────────────────────────────────────────────────
 # Changes here do NOT invalidate the pip layer above.
 COPY workers .
+# Astra reuses the checked iPTMnet parser without invoking legacy RAG tasks.
+COPY mcp-server/app/tools/iptmnet.py /opt/mcp-server/app/tools/iptmnet.py
 RUN pip install --no-cache-dir --no-deps .
 
 CMD ["celery", "-A", "celery_app", "worker", "-l", "info"]

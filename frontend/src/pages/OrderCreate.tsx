@@ -1,3 +1,4 @@
+import AstraWritingIntent from '@/components/AstraWritingIntent';
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -196,7 +197,7 @@ export default function OrderCreate() {
   const [direction, setDirection] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [structuredContext, setStructuredContext] = useState<Record<string, unknown>>({});
+  const [structuredContext, setStructuredContext] = useState<Record<string, unknown>>({quantitation_export_mode:"astra_analysis.v4",normalization_policy:"already_normalized.v1"});
 
   // Step 0: Project & Files
   const [form, setForm] = useState({
@@ -251,6 +252,7 @@ export default function OrderCreate() {
   const [files, setFiles] = useState<{
     pr_matrix: File | null; pg_matrix: File | null; config_file: File | null;
   }>({ pr_matrix: null, pg_matrix: null, config_file: null });
+  const [researchAttachments, setResearchAttachments] = useState<File[]>([]);
   const [referenceStatus, setReferenceStatus] = useState<{
     ready: boolean;
     custom_reference: boolean;
@@ -567,7 +569,7 @@ export default function OrderCreate() {
       report_type: form.report_type, ptm_selection_mode: form.ptm_selection_mode, top_n_ptms: form.top_n_ptms, output_format: "md",
       analysis_mode: form.analysis_mode,
       temporal_contract: form.temporal_contract,
-      research_questions: form.report_type === "co_scientist" ? [] : (researchQuestions.length > 0 ? researchQuestions : []),
+      research_questions: researchQuestions,
       ...(form.llm_model ? (() => {
         const colonIdx = form.llm_model.indexOf(":");
         const [p, m] = colonIdx >= 0 ? [form.llm_model.slice(0, colonIdx), form.llm_model.slice(colonIdx + 1)] : ["ollama", form.llm_model];
@@ -595,12 +597,13 @@ export default function OrderCreate() {
       ...clampQuickSettings(pickQuickSettings(analysisOptions)),
     }));
     // RAG collection selection (null = all active)
-    if (!useAllCollections && selectedCollectionIds.length > 0) {
+    if (!useAllCollections) {
       formData.append("rag_collections", JSON.stringify(selectedCollectionIds));
     }
     formData.append("pr_matrix", files.pr_matrix);
     formData.append("pg_matrix", files.pg_matrix);
     if (files.config_file) formData.append("config_file", files.config_file);
+    for (const file of researchAttachments) formData.append("research_attachments", file);
     if (analysisOptions.mode === "protein_list" && proteinListFile) {
       formData.append("protein_list", proteinListFile);
     }
@@ -731,6 +734,14 @@ export default function OrderCreate() {
                   file={files.pg_matrix}
                   onChange={(f) => setFiles({ ...files, pg_matrix: f })}
                 />
+
+                <div className="space-y-2">
+                  <Label htmlFor="research-attachments">참고 논문·연구 자료 (선택)</Label>
+                  <Input id="research-attachments" type="file" multiple
+                    onChange={(e) => setResearchAttachments(Array.from(e.target.files ?? []))} />
+                  <p className="text-xs text-muted-foreground">제공한 원문을 Astra 패키지에 함께 넣습니다. 플랫폼의 문헌 비교 완료를 의미하지 않습니다.</p>
+                  {researchAttachments.length > 0 && <p className="text-xs">{researchAttachments.map(f => f.name).join(', ')}</p>}
+                </div>
 
                 <div className="rounded-lg border border-dashed border-muted-foreground/25 bg-muted/30 p-4">
                   <p className="text-sm font-medium">Reference FASTA</p>
@@ -959,8 +970,8 @@ export default function OrderCreate() {
                   </Button>
                 </div>
                 {/* Analysis Mode Selection */}
-                {structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'&&<p className="text-sm">Primary A uses canonical contrasts and the deterministic evidence report. Legacy network and temporal-contract selections are inactive.</p>}
-                <fieldset disabled={structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'} className={structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'?'hidden':'space-y-4'}>
+                {['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))&&<p className="text-sm">Primary A uses canonical contrasts and the deterministic evidence report. Legacy network and temporal-contract selections are inactive.</p>}
+                <fieldset disabled={['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))} className={['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))?'hidden':'space-y-4'}>
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Analysis Mode</Label>
                   <div className="grid grid-cols-3 gap-3">
@@ -1321,8 +1332,9 @@ export default function OrderCreate() {
                 initial="enter" animate="center" exit="exit"
                 transition={{ duration: 0.25, ease: "easeInOut" }} className="space-y-5"
               >
-                {structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'&&<div className="rounded border p-4 space-y-2"><p className="font-medium">Primary A evidence report and Astra export</p><p className="text-sm">The selected canonical design, normalization, preset and annotation determine this run. Legacy LLM/RAG/network and manuscript options are inactive. Saved literature selections are interpretation context only.</p></div>}
-                <fieldset disabled={structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'} className={structuredContext.quantitation_export_mode==='enrichment_free_timecourse.v3'?'hidden':'space-y-5'}>
+                {['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))&&<div className="rounded border p-4 space-y-2"><p className="font-medium">Primary A evidence report and Astra export</p><p className="text-sm">The automatic plan uses your existing design, prepares reference evidence and exports questions, literature inclusion status and all calculated evidence for Astra. Legacy manuscript generation is not required.</p></div>}
+                {structuredContext.quantitation_export_mode==='astra_analysis.v4'&&<AstraWritingIntent questions={researchQuestions} setQuestions={setResearchQuestions} collections={ragCollections} selected={selectedCollectionIds} setSelected={setSelectedCollectionIds} all={useAllCollections} setAll={setUseAllCollections}/>}
+                <fieldset disabled={['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))} className={['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))?'hidden':'space-y-5'}>
                 <div
                   className={cn(
                     "w-full rounded-lg border text-left transition-colors",

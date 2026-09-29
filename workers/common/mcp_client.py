@@ -375,12 +375,12 @@ class MCPClient:
     # KEA3 — Kinase Enrichment Analysis
     # ------------------------------------------------------------------
 
-    def query_kea3(self, gene_list: List[str], top_n: int = 10) -> dict:
+    def query_kea3(self, gene_list: List[str], top_n: int = 10, taxonomy_id=None, orthology_mapping=None) -> dict:
         """Query KEA3 for kinase enrichment analysis."""
         try:
             r = self.session.post(
                 f"{self.base_url}/tools/kea3/enrich",
-                json={"gene_list": gene_list, "top_n": top_n},
+                json={"gene_list": gene_list, "top_n": top_n, "taxonomy_id": taxonomy_id, "orthology_mapping": orthology_mapping},
                 timeout=self.timeout * 2,
             )
             r.raise_for_status()

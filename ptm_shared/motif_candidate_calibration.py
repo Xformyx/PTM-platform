@@ -16,6 +16,40 @@ from typing import Any, Callable, Mapping, Sequence
 
 CALIBRATION_CONTRACT = "motif_candidate_likelihood.v1"
 
+
+def load_motif_library():
+    import json
+    from pathlib import Path
+    return json.loads(Path(__file__).with_name('motif_library.json').read_text())
+
+
+def anchored_match(pattern, sequence, center):
+    """Named modified residue must be exactly the observed center, including padding."""
+    compiled = re.compile(pattern, re.IGNORECASE)
+    if 'ptm' not in compiled.groupindex:
+        return False
+    return any(match.start('ptm') == center and match.end('ptm') == center + 1
+               for offset in range(len(sequence)) if (match := compiled.match(sequence, offset)))
+
+
+def anchored_background(sites, library):
+    """Deduplicate sequence/site; give each substrate gene equal background weight."""
+    unique = {(s['gene'], s['sequence_window'], s['modified_center']): s for s in sites}
+    counts = defaultdict(int)
+    for gene, _, _ in unique:
+        counts[gene] += 1
+    result = {}
+    for name, item in library['patterns'].items():
+        if item['ptm_type'] != 'Phosphorylation' or item.get('evidence_role') != 'site_motif':
+            continue
+        matched = sum(1 / counts[g] for g, seq, center in unique if anchored_match(item['pattern'], seq, center))
+        total = len(counts)
+        rate = (matched + 1) / (total + 2) if total else 1
+        result[name] = {'weighted_match_count': matched, 'background_gene_count': total,
+                        'deduplicated_sequence_count': len(unique), 'smoothed_rate': rate,
+                        'information_bits': max(0., -math.log2(rate))}
+    return result
+
 _SOURCE_RELIABILITY = {
     "motif_analysis": 1.0,
     "inline_motif_match": 0.9,

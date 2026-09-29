@@ -3515,7 +3515,7 @@ export default function OrderDetail() {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
-  const hasPrimaryAEvidence = ['enrichment_free_primary.v2','enrichment_free_timecourse.v3'].includes(String(order?.analysis_context?.quantitation_export_mode)) || !!order?.result_files?.enrichment_free;
+  const hasPrimaryAEvidence = ['enrichment_free_primary.v2','enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(order?.analysis_context?.quantitation_export_mode)) || !!order?.result_files?.enrichment_free;
   useEffect(() => { if (hasPrimaryAEvidence) setActiveTab('primary-a'); }, [orderId,hasPrimaryAEvidence]);
   const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<{ type: "start" } | { type: "run-stage"; stage: string } | null>(null);

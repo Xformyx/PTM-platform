@@ -16,27 +16,25 @@ export default function SampleDesignFields({ context, onChange, samples, seconda
 }) {
   const put = (key: string, value: unknown) => onChange({ ...context, [key]: value });
   const errors = designErrors(context, samples, secondarySamples);
-  const generic=context.quantitation_export_mode==='enrichment_free_timecourse.v3';
+  const astra=context.quantitation_export_mode==='astra_analysis.v4';
+  const generic=astra||context.quantitation_export_mode==='enrichment_free_timecourse.v3';
   return <div className="space-y-4 rounded-lg border p-4">
     <div className="space-y-2">
-      <Label>Additional global normalization</Label>
-      <select className="block w-full rounded border bg-background p-2 text-sm"
-        aria-label="Additional global normalization"
-        value={String(context.normalization_policy ?? "legacy_median.v1")}
-        onChange={(e) => put("normalization_policy", e.target.value)}>
-        <option value="legacy_median.v1">Scale PR and PG separately by sample median</option>
-        <option value="already_normalized.v1">Use supplied intensities without additional scaling</option>
+      <Label>Analysis purpose</Label>
+      <select aria-label="Analysis purpose" className="block w-full rounded border bg-background p-2 text-sm"
+        value={String(context.quantitation_export_mode ?? "astra_analysis.v4")}
+        onChange={e=>onChange({...context,quantitation_export_mode:e.target.value,normalization_policy:context.normalization_policy??'already_normalized.v1'})}>
+        <option value="astra_analysis.v4">Astra 분석 패키지 생성</option>
+        <option value="legacy_only.v1">Legacy platform reports</option>
+        {!['astra_analysis.v4','legacy_only.v1'].includes(String(context.quantitation_export_mode))&&<option value={String(context.quantitation_export_mode)}>Recorded legacy analysis — preserved</option>}
       </select>
-      <p className="text-xs text-muted-foreground">This choice does not establish how DIA-NN normalized the input.</p>
-      <Label>Analysis profile</Label>
-      <select aria-label="Additional form evidence export" className="block w-full rounded border bg-background p-2 text-sm"
-        value={String(context.quantitation_export_mode ?? "legacy_only.v1")}
-        onChange={(e) => onChange({...context,quantitation_export_mode:e.target.value,normalization_policy:context.normalization_policy??'legacy_median.v1'})}>
-        <option value="legacy_only.v1">Standard analysis outputs</option>
-        <option value="legacy_plus_report_compatible.v1">Also export charge-collapsed mean-log form evidence</option>
-        <option value="enrichment_free_primary.v2">Enrichment-free time course: primary A + frozen kinase + Astra</option>
-        <option value="enrichment_free_timecourse.v3">Generic enrichment-free study: condition contrasts + Astra</option>
-      </select>
+      <details><summary className="cursor-pointer text-sm">Advanced normalization override</summary>
+        <p className="text-xs">New Astra studies preserve supplied intensities. This does not establish upstream DIA-NN normalization. The alternative scaling track is calculated automatically.</p>
+        <select aria-label="Additional global normalization" className="block w-full rounded border bg-background p-2 text-sm"
+          value={String(context.normalization_policy??'already_normalized.v1')} onChange={e=>put('normalization_policy',e.target.value)}>
+          <option value="already_normalized.v1">Use supplied intensities</option><option value="legacy_median.v1">Explicit override: separate PR/PG median scaling</option>
+        </select>
+      </details>
       {context.quantitation_export_mode === 'enrichment_free_primary.v2' && <div className="space-y-3">
         <p className="text-sm">Rat/Rat_hir full-matrix analysis. Parent-adjusted A is the primary input; U/P explain correction. Produces an evidence report and Astra bundle with frozen kinase, paired parent and late protein layers.</p>
         <label className="flex gap-2 text-sm"><input type="checkbox" checked={context.enrichment_status === 'enrichment_free'}

@@ -512,7 +512,7 @@ def _legacy_auto_run_global_analysis(order_id: int, enriched_data: list, config:
                         continue
 
                     try:
-                        kea3_result = mcp.query_kea3(gene_list, top_n=20)
+                        kea3_result = mcp.query_kea3(gene_list, top_n=20, taxonomy_id=config.get("species_tax_id"))
                         kinases = kea3_result.get("kinases", [])
                         rank_map = {}
                         for rank_idx, k_entry in enumerate(kinases):

@@ -378,12 +378,14 @@ async def tool_biogrid(
 class KEA3Request(BaseModel):
     gene_list: list[str]
     top_n: int = 10
+    taxonomy_id: str | None = None
+    orthology_mapping: dict | None = None
 
 
 @app.post("/tools/kea3/enrich")
 async def tool_kea3_enrich(req: KEA3Request):
     return await query_kea3(
-        gene_list=req.gene_list, top_n=req.top_n,
+        gene_list=req.gene_list, top_n=req.top_n, taxonomy_id=req.taxonomy_id, orthology_mapping=req.orthology_mapping,
         redis=app.state.redis,
     )
 
