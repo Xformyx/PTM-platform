@@ -21,6 +21,11 @@ from typing import Optional, Dict, Any, List
 
 # [OPT-A3] Top-level imports for frequently used modules.
 # Avoids repeated importlib overhead on every task invocation.
+# Do not `import pandas as pd` again inside run_preprocessing. A nested
+# import makes pd local to the whole function. When that branch is skipped
+# (condition_map already set, or secondary bio enrichment not reached),
+# the next pd.read_csv raises UnboundLocalError:
+# cannot access local variable 'pd' where it is not associated with a value.
 import pandas as pd
 import numpy as np
 from preprocessing.core.pipeline_statistics import PipelineStatistics
@@ -237,7 +242,6 @@ def run_preprocessing(self, order_id: int, config: dict):
         if not condition_map:
             config_xlsx = config.get("config_xlsx_path")
             if config_xlsx and os.path.exists(config_xlsx):
-                import pandas as pd
                 logger.info(f"[Order {order_id}] Loading condition_map from config.xlsx: {config_xlsx}")
                 df = pd.read_excel(config_xlsx)
                 if "File_Name" in df.columns and "Group" in df.columns:
@@ -858,7 +862,6 @@ def run_preprocessing(self, order_id: int, config: dict):
                     else:
                         secondary_enriched_file = secondary_output_dir / secondary_enriched_output
                         if secondary_enriched_file.exists():
-                            import pandas as pd
                             from preprocessing.core.biological_enricher import BiologicalEnricher
                             if "mcp" not in dir():
                                 mcp = MCPClient()

@@ -3336,3 +3336,26 @@
   `python3 docs/presentations/check_deck_layout.py` 로 재현된다
   (현재 0 issues).
 
+### [2026-09-30] Preprocessing — 함수 안 pandas 재import가 pd를 지역 변수로 묶음
+
+- **분류:** 정정
+- **대상:** `workers/preprocessing/tasks.py` `run_preprocessing`,
+  `workers/tests/test_preprocessing_pandas_scope.py`
+- **구현 대상 설계:** 해당 없음. 정량식·선별 임계·정규화 정책을 바꾸지 않는다.
+- **사전등록 상태:** 해당 없음 (측정되는 양을 바꾸지 않는다)
+- **내용:** `run_preprocessing` 안에 `import pandas as pd`가 두 곳 있었다.
+  config.xlsx로 condition_map을 읽을 때, 그리고 secondary biological
+  enrichment에서. Python은 그 이름을 함수 전체의 지역 변수로 취급한다.
+  condition_map이 이미 있으면 첫 import는 실행되지 않고, 이후
+  `pd.read_csv`가 `UnboundLocalError: cannot access local variable 'pd'`
+  로 죽는다. `Insulin_Signaling_V3_260929_Codex_Astra_bundle_1` 전처리
+  실패 메시지가 이 문장이다. 모듈 상단 import만 남기고 함수 안 재import
+  두 줄을 제거했다.
+- **논문에서의 용도:** 사용 안 함 (실행 경로 수정)
+- **해석 한계:** 바인딩만 고쳤다. Log2FC, 정규화, 사이트 매핑, Annotation
+  선별은 이전과 같다. 이 수정으로 kinase 귀속 정확도가 바뀌었다고
+  서술하지 않는다. 워커 프로세스가 이 파일을 다시 읽기 전에는 같은
+  실패가 반복된다. 주문은 재실행하지 않았다.
+- **결정성:** 측정 없음. 새 seed·solver 경로 없음. 회귀 검사는
+  `python3 -m pytest workers/tests/test_preprocessing_pandas_scope.py`.
+
