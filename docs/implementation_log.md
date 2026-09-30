@@ -3359,3 +3359,26 @@
 - **결정성:** 측정 없음. 새 seed·solver 경로 없음. 회귀 검사는
   `python3 -m pytest workers/tests/test_preprocessing_pandas_scope.py`.
 
+### [2026-09-30] TMM sidecar — next(sorted(...))가 리스트에 next를 호출
+
+- **분류:** 정정
+- **대상:** `api-server/app/services/production_temporal_analysis.py`
+  `_sidecar_identity_audits`,
+  `api-server/tests/test_sidecar_identity_audits.py`
+- **구현 대상 설계:** report_artifact_manifest temporal_input identity audits.
+  감사 메타만 읽는다. TMM 점수·τ·선별 임계를 바꾸지 않는다.
+- **사전등록 상태:** 해당 없음 (측정되는 양을 바꾸지 않는다)
+- **내용:** enriched JSON 경로를 `next(sorted(glob))`로 골랐다.
+  `sorted`는 list를 반환하고 `next`는 iterator만 받는다. Order 83 RAG가
+  enrichment 2,210건을 저장한 뒤 global analysis의 TMM sidecar에서
+  `TypeError: 'list' object is not an iterator`로 실패했다
+  (`production_temporal_analysis.py` line 37, production-tmm-worker).
+  정렬된 목록의 첫 경로를 인덱스로 고르게 바꿨다. 파일이 없으면 None.
+- **논문에서의 용도:** 사용 안 함 (실행 경로 수정)
+- **해석 한계:** 고르는 파일은 이전과 같이 이름순 첫 경로다. kinase 점수와
+  감사 판정 규칙은 그대로다. 이 수정으로 kinase 귀속 정확도가 바뀌었다고
+  서술하지 않는다. 워커가 파일을 다시 읽기 전에는 같은 실패가 반복된다.
+  주문은 재실행하지 않았다.
+- **결정성:** 측정 없음. 새 seed·solver 경로 없음. 회귀 검사는
+  `PYTHONPATH=.:api-server python3 -m pytest api-server/tests/test_sidecar_identity_audits.py`.
+

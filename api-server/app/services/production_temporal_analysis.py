@@ -34,7 +34,10 @@ def _sidecar_identity_audits(source_dir, vector_rows):
         audit_enriched_vector_crosswalk,
     )
     order_root = Path(source_dir).resolve().parent.parent
-    enriched_path = next(sorted(order_root.glob("enriched_ptm_data_*.json")), None)
+    # sorted() is a list. next() only accepts an iterator, so next(sorted(...))
+    # raises TypeError: 'list' object is not an iterator.
+    enriched_matches = sorted(order_root.glob("enriched_ptm_data_*.json"))
+    enriched_path = enriched_matches[0] if enriched_matches else None
     enriched_rows = []
     if enriched_path and enriched_path.is_file():
         payload = json.loads(enriched_path.read_text(encoding="utf-8"))
