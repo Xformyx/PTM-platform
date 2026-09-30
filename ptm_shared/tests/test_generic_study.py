@@ -106,6 +106,13 @@ def test_context_unicode_and_legacy_insulin_not_reassigned():
     assert all(t.get('dose') is None for a in d['arms'] for t in a.get('treatments',[]))
 
 
+def test_llm_token_settings_remain_in_the_serialized_research_record():
+    from ptm_shared.generic_workflow import json_bytes
+    saved = json.loads(json_bytes({'report_options': {'report_config': {'llm_tokens': {'abstract': 1024}}}, 'private_token': 'DO_NOT_EXPORT'}))
+    assert saved['report_options']['report_config']['llm_tokens']['abstract'] == 1024
+    assert 'private_token' not in saved
+
+
 def write_inputs(tmp_path,pr,pg,fasta):
     root=tmp_path/'raw';root.mkdir()
     pr.to_csv(root/'PR.tsv',sep='\t',index=False);pg.to_csv(root/'PG.tsv',sep='\t',index=False)

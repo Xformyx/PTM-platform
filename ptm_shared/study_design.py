@@ -23,7 +23,7 @@ UNITS = {'s':Decimal(1)/60, 'sec':Decimal(1)/60, 'second':Decimal(1)/60, 'second
          'd':Decimal(1440),'day':Decimal(1440),'days':Decimal(1440)}
 TIME_RE = re.compile(r'(?<![\w.])(-?\d+(?:\.\d+)?)\s*(minutes?|min|m|hours?|hr|h|days?|d|seconds?|sec|s)(?![a-z])', re.I)
 CONTEXT_FIELDS = ('cell_type','tissue','treatment','biological_question','special_conditions','time_points')
-SECRET_KEYS = re.compile(r'(password|secret|token|api.?key|authorization|credential|server_path|internal_path)',re.I)
+SECRET_KEYS = re.compile(r'(?:^|_)(?:password|passwd|secret|token|api.?key|authorization|credential|server_path|internal_path)(?:_|$)',re.I)
 
 
 def stable_id(prefix, value):

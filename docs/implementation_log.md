@@ -3412,5 +3412,88 @@
   않았다. 그 주문의 출력은 Astra 패키지가 아니다.
 - **결정성:** 측정 없음. 새 seed·solver 경로 없음. 회귀 검사는
   `node --experimental-strip-types --test frontend/tests/analysisContext.test.ts`
-  와 `docker compose exec -T api-server python -m pytest tests/test_export_mode_declaration.py tests/test_analysis_context_preservation.py`.
+  와   `docker compose exec -T api-server python -m pytest tests/test_export_mode_declaration.py tests/test_analysis_context_preservation.py`.
+
+### [2026-09-30] Astra 공급원 조회 — Not found·404·긴 STRING GET·이름순 소모
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_sources.py`,
+  `ptm_shared/tests/test_astra_source_queries.py`,
+  `docs/collaboration/astra_package_operations_KO.md` «Provider 조회 예산»
+- **구현 대상 설계:** 같은 운영 문서의 provider budget. 전체 45초/24 요청,
+  Reactome 3 accession, PubMed 200 PMID는 유지한다. 2026-09-30에
+  조회 순서와 STRING 전송, 없는 항목의 상태 이름만 바꿨다.
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 금지).
+  run `g4-06669a45084949bca50a20ebe097190c`의 ledger를 본 뒤의 수정이다.
+- **내용:** iPTMnet `Not found.` 페이지는 종 불일치가 아니라 `no_hit`이다.
+  Reactome HTTP 404는 `identifier_absent_HTTP_404` / `no_hit`이다.
+  HTTP 520 등 그 외 오류는 `access_unavailable`이고 음성 cache에 넣지 않는다.
+  호출 순서는 사람 taxon 9606, 이번 OmniPath substrate, `A0A`가 아닌
+  accession, 나머지다. STRING network는 identifier 100개 단위의 POST다.
+  Reactome·PubMed에 요청 4개를 남긴다. KEA3는 검증된 human orthology 없이
+  비사람 기호를 대문자로 바꾸지 않으며, native human 유전자가 2개 미만이면
+  호출하지 않는다. STRING·Reactome·KEA 결과는 site-resolved curated
+  kinase edge로 올리지 않는다.
+- **논문에서의 용도:** 사용 안 함 (methods에 쓸 공급원 조회 절차의 탐색적 수정)
+- **해석 한계:** 예산 안의 앞선 accession만 추가로 조회된다. 나머지
+  관측 accession은 ledger에 미실행으로 남는다. 이 수정으로 kinase 귀속
+  정확도가 올랐다고 서술하지 않는다. 완료된 pin
+  `7b48be3cf4df82ef791db65761531a41923cfeb69f558d58406a4a48931ce9e0`은
+  바꾸지 않았다. 주문은 재실행하지 않았다.
+- **결정성:** 같은 단계 안에서는 accession 문자열 오름차순. 새 seed·solver
+  없음. STRING batch 100, Reactome 3, context reserve 4는 위 문서에 선언했다.
+  회귀 검사는 `python -m pytest ptm_shared/tests/test_astra_source_queries.py ptm_shared/tests/test_astra_package.py`.
+
+### [2026-09-30] Astra 공급원 예산 — 공급원별 시계와 이전 성공 보존
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_sources.py` `astra_sources.v1.3`, `ptm_shared/study_design.py` `clean_context`, `docs/collaboration/astra_package_operations_KO.md` Provider 조회 예산
+- **구현 대상 설계:** 같은 운영 문서. OmniPath 60초/4, iPTMnet 90초/20, STRING 240초/60, Reactome 45초/3, PubMed 45초/1, KEA3 30초/1. 직전 300초/90요청 공유 시계는 실행 전에 이 구조로 대체했다.
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). run g7이 g4의 human STRING 46건과 PubMed 200건을 빼낸 뒤 선언했다.
+- **내용:** 공유 시계를 늘리는 대신 공급원 시계를 분리했다. 참조 갱신은 새 pin을 만들되 7일 안 hit/no_hit cache를 다시 받지 않고, 이 주문의 이전 pin에서 이번 실행이 대체하지 못한 성공만 남긴다. STRING 배치에는 `within_posted_identifiers_only`와 `cross_batch_edges=not_requested`를 적는다. Reactome HTTP 404는 `payload=[]`인 `no_hit`으로 두고 이후 목록 검사가 `parse_failure`로 덮지 않는다. `llm_tokens`는 credential이 아니므로 직렬화에서 빼지 않는다. 완료된 pin은 바꾸지 않았다.
+- **논문에서의 용도:** 사용 안 함 (methods에 쓸 공급원 조회 절차의 탐색적 수정)
+- **해석 한계:** 배치 성공은 그 identifier 집합 안의 연결이다. STRING·Reactome·KEA를 site-resolved curated kinase edge로 올리지 않는다. iPTMnet 나머지 페이지는 이 예산 밖이다. 동일 시료 반복과 enrichment-free는 저장된 condition이 `1min_1`처럼 주입마다 나뉘어 있어 이 수정에서 설계를 다시 묶지 않았다. 참고논문 7편은 redistribution 허가가 없어 metadata-only로 남는다. 주문은 재실행하지 않았다.
+- **결정성:** 새 seed·solver 없음. 공급원별 초/요청 수는 위 문서에 선언했다.   회귀 검사는 `python -m pytest ptm_shared/tests/test_astra_source_queries.py ptm_shared/tests/test_astra_package.py ptm_shared/tests/test_generic_study.py`.
+
+### [2026-09-30] Astra discover — 빈 유전자의 NaN이 stable_id JSON을 깨뜨림
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_discovery.py` `_blank`, `discover`
+- **구현 대상 설계:** substrate gene이 없으면 unresolved로 두는 기존 discover 규칙.
+  새 임계는 없다.
+- **사전등록 상태:** 해당 없음 (측정되는 양을 새로 정하지 않는다)
+- **내용:** FASTA gene이 빈 문자열이고 representative_gene이 비어 있으면
+  pandas가 `NaN`을 넣는다. `NaN`은 truthy라서 “유전자 없음” 분기를 지나
+  `stable_id`의 `json.dumps(..., allow_nan=False)`에서
+  `Out of range float values are not JSON compliant`로 Order 83 전처리가
+  멈췄다. 해당 필드는 빈 문자열로 두고 `substrate_gene_unresolved`로
+  남긴다. 유전자가 없는 site는 같은 서열창끼리 ambiguity group으로
+  합치지 않고 site id만으로 구분한다.
+- **논문에서의 용도:** 사용 안 함 (결측 처리)
+- **해석 한계:** 유전자명이 없다는 뜻이다. 이 수정으로 kinase 귀속
+  정확도가 바뀌었다고 서술하지 않는다. 주문은 재실행하지 않았다.
+- **결정성:** 측정 없음. 새 seed·solver 없음. 회귀 검사는
+  `python -m pytest ptm_shared/tests/test_astra_source_queries.py ptm_shared/tests/test_astra_package.py`.
+
+### [2026-09-30] Astra 공급원 예산 — STRING·Reactome·PubMed가 45초에 밀림
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_sources.py` `astra_sources.v1.2`, `docs/collaboration/astra_package_operations_KO.md` Provider 조회 예산
+- **구현 대상 설계:** 같은 운영 문서. 전체 300초/90요청. STRING 배치는 배치당 4초, Reactome 3건과 PubMed 1건은 요청 4개와 40초.
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). run g7-04b77ecdc8884d4089298bc1a30e0847의 45초 시계를 본 뒤 선언했다.
+- **내용:** g7은 iPTMnet 8페이지와 STRING 800개로 45초를 쓰고 Reactome과 PubMed를 호출하지 못했다. iPTMnet은 taxon별 STRING 배치 전체와 그 tail을 남긴 시각·요청 수에 닿으면 멈춘다. STRING은 tail 40초 전에 멈춘다. 완료된 pin `1f1fe2af236c5c18ca151b2ac57df3145a2cca2003cffda0af845b19fed1278a`와 `7b48be3c…`는 바꾸지 않았다.
+- **논문에서의 용도:** 사용 안 함 (methods에 쓸 공급원 조회 절차의 탐색적 수정)
+- **해석 한계:** 예약은 호출 자리다. STRING·Reactome·KEA 결과를 site-resolved curated kinase edge로 올리지 않는다. 4,749개를 넘는 집합의 전체 조회를 보장하지 않는다. iPTMnet 나머지 페이지의 장시간 수집은 이 예산 밖이다. 주문은 재실행하지 않았다.
+- **결정성:** 새 seed·solver 없음. 300초, 90요청, 배치 4초, tail 40초는 위 문서에 선언했다. 회귀 검사는 `python -m pytest ptm_shared/tests/test_astra_source_queries.py ptm_shared/tests/test_astra_package.py`.
+
+### [2026-09-30] Astra STRING — timeout 한 배치가 같은 taxon의 뒤를 멈추지 않음
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_sources.py` `string_batch_failure_continues`, `astra_sources.v1.4`
+- **구현 대상 설계:** `docs/collaboration/astra_package_operations_KO.md` «Provider 조회 예산»
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). run g8-71a26a7a0ac34f3e97350dc72d4d5bf4에서 rat 배치 하나의 TimeoutError 뒤 accession 3548개가 미실행으로 남은 것을 본 뒤.
+- **내용:** STRING 예산이 남아 있으면 timeout·접근 실패·parse 실패는 그 배치 기록으로 두고 다음 배치를 호출한다. `not_run_budget`만 그 taxon의 나머지를 멈춘다. 실패한 배치를 빈 network로 저장하지 않는다. 완료된 pin `b8b53f7b…`는 바꾸지 않았다.
+- **논문에서의 용도:** 사용 안 함 (공급원 조회 절차의 탐색적 수정)
+- **해석 한계:** 이후 배치가 호출돼도 배치 사이 연결은 요청하지 않는다. STRING 결과를 site-resolved curated kinase edge로 올리지 않는다. 주문은 재실행하지 않았다.
+- **결정성:** 새 seed·solver 없음. 새 임계 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_astra_source_queries.py ptm_shared/tests/test_astra_package.py`.
 

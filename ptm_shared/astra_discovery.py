@@ -37,6 +37,25 @@ def mapped_sites(tables, design, fasta_path, context, snapshots):
     return mapping, pd.concat(joined, ignore_index=True) if joined else pd.DataFrame(), analysis['fasta']
 
 
+def _blank(value):
+    """Missing FASTA text is an empty string, not NaN.
+
+    구현 대상: discover()의 substrate gene 해석. 유전자가 없으면 unresolved.
+    사전등록: 해당 없음. 2026-09-30 Order 83이 representative_gene NaN에서
+    stable_id JSON 직렬화에 실패했다. NaN은 비어 있음을 뜻한다.
+    해석 한계: 유전자명이 없다는 기록이다. 같은 서열창을 같은 유전자로 묶지 않는다.
+    주장 금지: 이 처리로 kinase 귀속 정확도를 주장하지 않는다.
+    """
+    if isinstance(value, (list, tuple, dict)):
+        return value
+    try:
+        if value is None or pd.isna(value):
+            return ''
+    except (TypeError, ValueError):
+        return ''
+    return str(value)
+
+
 def discover(tables, design, fasta_path, context, sources):
     mapped, curated, fasta = mapped_sites(tables, design, fasta_path, context, sources['snapshots'])
     forms = tables['summary'].set_index('form_id'); library = load_motif_library(); sites = []
@@ -46,8 +65,9 @@ def discover(tables, design, fasta_path, context, sources):
         # Constant center, explicit terminal padding; do not strip padding before anchoring.
         window = ''.join(sequence[i] if 0 <= i < len(sequence) else '_' for i in range(center-7,center+8))
         form=forms.loc[r['form_id']]
-        resolved_gene=r['fasta_gene'] or (form.representative_gene if form.primary_mapping_eligible else '')
-        sites.append({**r, 'gene':resolved_gene,'sequence_window':window,'modified_center':7})
+        fasta_gene=_blank(r['fasta_gene'])
+        resolved_gene=fasta_gene or (_blank(form.representative_gene) if form.primary_mapping_eligible else '')
+        sites.append({**r, 'fasta_gene':fasta_gene, 'fasta_taxonomy_id':_blank(r['fasta_taxonomy_id']), 'gene':resolved_gene,'sequence_window':window,'modified_center':7})
     background = anchored_background(sites, library)
     base_by_site = {}; records = []
     localized={(str(r['protein_group']),str(r['modified_sequence']),str(r['accession']),str(r['residue_type']),str(r['residue_offset'])):r for r in context.get('localization_evidence',[])}
@@ -67,7 +87,7 @@ def discover(tables, design, fasta_path, context, sources):
             'substrate_taxon':s['fasta_taxonomy_id'],'sequence_window':s['sequence_window'],'modified_center':7,
             'site_mapping_status':f.mapping_status,'localization_probability':None,'localization_source':None,
             'localization_status':'unknown','primary_quant_eligibility':bool(f.primary_adjustment_eligible),
-            'ambiguity_group':stable_id('shared_site',[s['gene'],s['sequence_window']]),
+            'ambiguity_group':stable_id('shared_site',[s['gene'],s['sequence_window']] if s['gene'] else ['unresolved',site_id]),
             'restriction_reasons':restrictions,'footprint_eligible':bool(f.primary_adjustment_eligible and f.n_modifications==1 and s['gene'])}
         supplied=localized.get((str(f['Protein.Group']),str(f['Modified.Sequence']),str(s['mapped_accession']),str(s['residue_type']),str(s['residue_offset'])))
         if supplied:base.update(localization_probability=float(supplied['probability']),localization_source=supplied['source'],localization_status='provided')

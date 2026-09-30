@@ -231,8 +231,12 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
     with stage('resolve_annotation',metrics,checkpoint,progress):
         mapped,_,fasta=mapped_sites(quant[0],design,inputs['FASTA'],context,[])
         fixtures=json.loads(Path(config['source_fixtures_path']).read_text()) if config.get('source_fixtures_path') else config.get('source_fixtures')
+        prior_pins=[]
+        if context.get('refresh_references'):
+            for path in sorted((root/'enrichment_free_runs').glob('*/references/source_pin.json')):
+                prior_pins.append(json.loads(path.read_text()))
         sources=resolve_sources(config['reference_root'],mapped.to_dict('records'),fasta,design['study']['ptm_type'],
-            pin_sha=config.get('source_pin_sha256'),refresh=context.get('refresh_references',False),fixtures=fixtures,checkpoint=checkpoint)
+            pin_sha=config.get('source_pin_sha256'),refresh=context.get('refresh_references',False),fixtures=fixtures,checkpoint=checkpoint,prior_pins=prior_pins)
         plan=resolve_plan(context,hashes,sources['pin_sha256'],fasta_taxonomy(inputs['FASTA']).values())
     def execute(name,fn):
         with stage(name,metrics,checkpoint,progress):return fn()

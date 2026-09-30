@@ -169,11 +169,12 @@ def test_lod_requires_documented_external_model_and_never_imputes_point_fc(confi
     pd.testing.assert_frame_equal(before,tables['comparisons'])
 
 
-def test_refresh_bypasses_valid_cache(tmp_path):
+def test_refresh_reuses_a_valid_success(tmp_path):
     client=SourceClient(tmp_path,{'P':{'payload':[]}})
     client.accept(client.query('P',{},'https://fixture.invalid'),[])
     refresh=SourceClient(tmp_path,{'P':{'payload':[{'new':True}]}},refresh=True)
-    assert refresh.query('P',{},'https://fixture.invalid')['payload']==[{'new':True}]
+    reused=refresh.query('P',{},'https://fixture.invalid')
+    assert reused['cache_hit'] is True and reused['payload']==[]
 
 
 def test_missing_table_and_foreign_keys_fail_even_with_rebuilt_hash(configuration,tmp_path):
