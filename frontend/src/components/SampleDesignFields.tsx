@@ -16,17 +16,19 @@ export default function SampleDesignFields({ context, onChange, samples, seconda
 }) {
   const put = (key: string, value: unknown) => onChange({ ...context, [key]: value });
   const errors = designErrors(context, samples, secondarySamples);
-  const astra=context.quantitation_export_mode==='astra_analysis.v4';
-  const generic=astra||context.quantitation_export_mode==='enrichment_free_timecourse.v3';
+  const mode = typeof context.quantitation_export_mode === "string" ? context.quantitation_export_mode : "";
+  const astra=mode==='astra_analysis.v4';
+  const generic=astra||mode==='enrichment_free_timecourse.v3';
   return <div className="space-y-4 rounded-lg border p-4">
     <div className="space-y-2">
       <Label>Analysis purpose</Label>
       <select aria-label="Analysis purpose" className="block w-full rounded border bg-background p-2 text-sm"
-        value={String(context.quantitation_export_mode ?? "astra_analysis.v4")}
+        value={mode}
         onChange={e=>onChange({...context,quantitation_export_mode:e.target.value,normalization_policy:context.normalization_policy??'already_normalized.v1'})}>
+        {mode === "" && <option value="">분석 목적을 선택하세요</option>}
         <option value="astra_analysis.v4">Astra 분석 패키지 생성</option>
         <option value="legacy_only.v1">Legacy platform reports</option>
-        {!['astra_analysis.v4','legacy_only.v1'].includes(String(context.quantitation_export_mode))&&<option value={String(context.quantitation_export_mode)}>Recorded legacy analysis — preserved</option>}
+        {mode !== "" && !['astra_analysis.v4','legacy_only.v1'].includes(mode)&&<option value={mode}>Recorded legacy analysis — preserved</option>}
       </select>
       <details><summary className="cursor-pointer text-sm">Advanced normalization override</summary>
         <p className="text-xs">New Astra studies preserve supplied intensities. This does not establish upstream DIA-NN normalization. The alternative scaling track is calculated automatically.</p>
@@ -47,7 +49,7 @@ export default function SampleDesignFields({ context, onChange, samples, seconda
             onChange={e => put('acquisition_metadata',{...metadata,[key]:e.target.value})} /></label>;
         })}</div>
       </div>}
-      {!generic&&<p className="text-xs text-muted-foreground">The legacy additional export requires a complete sample design and unique condition times, with Control at 0 minutes. It includes joint observation masks and parent sensitivity. Existing precursor vectors keep their estimator.</p>}
+      {!generic && mode !== "" && <p className="text-xs text-muted-foreground">The legacy additional export requires a complete sample design and unique condition times, with Control at 0 minutes. It includes joint observation masks and parent sensitivity. Existing precursor vectors keep their estimator.</p>}
     </div>
     {generic&&<CanonicalStudyFields {...{context,onChange,samples,species,ptmType}}/>}
     {!generic&&[["sample_manifest", samples, "Primary"], ["secondary_sample_manifest", secondarySamples, "Secondary"]].map(([keyValue, rowValues, label]) => {

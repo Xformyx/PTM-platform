@@ -34,7 +34,7 @@ import AnalysisOptionsModal from "@/components/AnalysisOptionsModal";
 import QuickAnalysisCustomFields from "@/components/QuickAnalysisOptions";
 import { CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 import SampleDesignFields from "@/components/SampleDesignFields";
-import { designErrors, designSamples, mergeAnalysisContext } from "@/lib/analysisContext";
+import { designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode } from "@/lib/analysisContext";
 
 const STEPS = ["Project & Files", "Sample Config", "Analysis Focus", "Report Options"];
 
@@ -520,7 +520,8 @@ export default function OrderCreate() {
       return;
     }
 
-    const designProblems = designErrors(mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions}), designSamples(samples), designSamples(secondarySamples));
+    const submittedContext = withPersistedExportMode(mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions}));
+    const designProblems = designErrors(submittedContext, designSamples(samples), designSamples(secondarySamples));
     if (designProblems.length) { setError(designProblems.join(" ")); return; }
 
     setLoading(true);
@@ -543,11 +544,7 @@ export default function OrderCreate() {
     formData.append("ptm_type", form.ptm_type);
     formData.append("species", form.species);
     formData.append("sample_config", JSON.stringify(sampleConfig));
-    formData.append("analysis_context", JSON.stringify(mergeAnalysisContext(structuredContext, {
-      cell_type: form.cell_type, treatment: form.treatment,
-      time_points: form.time_points, biological_question: form.biological_question,
-      special_conditions: form.special_conditions,
-    })));
+    formData.append("analysis_context", JSON.stringify(submittedContext));
     // Build nested report_config from flat state
     const reportConfigNested = {
       md_summary_max_chars: reportConfig.md_summary_max_chars,

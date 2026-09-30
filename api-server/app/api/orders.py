@@ -303,6 +303,37 @@ def _validated_order_sample_manifest(order, context=None, *, secondary=False):
         raise HTTPException(status_code=422, detail="Invalid sample manifest or input columns: " + str(error)) from error
 
 
+def _has_export_mode(context) -> bool:
+    if not isinstance(context, dict):
+        return False
+    mode = context.get("quantitation_export_mode")
+    return isinstance(mode, str) and bool(mode.strip())
+
+
+def _reject_undeclared_export_mode(existing, submitted) -> None:
+    """A client save must name the analysis purpose.
+
+    Omitted quantitation_export_mode is not stored as legacy_only.v1.
+    An order that already has a mode keeps it when a patch omits the key.
+    A save that would leave the mode unset is rejected.
+    """
+    if _has_export_mode(existing) or _has_export_mode(submitted):
+        return
+    raise HTTPException(
+        status_code=422,
+        detail="Analysis purpose is not saved. Select Astra 분석 패키지 생성 or Legacy platform reports.",
+    )
+
+
+def _reject_astra_downstream_stage(order, stage: str) -> None:
+    mode = (order.analysis_context or {}).get("quantitation_export_mode") if isinstance(getattr(order, "analysis_context", None), dict) else None
+    if mode == "astra_analysis.v4" and stage in {"rag_enrichment", "report_generation"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Astra analysis package orders stop after preprocessing. Re-run preprocessing to regenerate the downloadable package. RAG enrichment and report generation are not part of this purpose.",
+        )
+
+
 def _updated_analysis_context(order, patch, existing=None, *, for_execution=False):
     from ptm_shared.analysis_context import merge_analysis_context
     try:
@@ -1053,8 +1084,11 @@ async def update_order_options(
         )
     if body.analysis_options is not None:
         order.analysis_options = body.analysis_options
-    if body.analysis_context is not None or body.analysis_options is not None:
-        order.analysis_context = _updated_analysis_context(order, body.analysis_context or {})
+    if body.analysis_context is not None:
+        _reject_undeclared_export_mode(order.analysis_context, body.analysis_context)
+        order.analysis_context = _updated_analysis_context(order, body.analysis_context)
+    elif body.analysis_options is not None:
+        order.analysis_context = _updated_analysis_context(order, {})
     if body.report_options is not None:
         order.report_options = _normalize_report_options(body.report_options)
     if "rag_collections" in body.model_fields_set:
@@ -1184,6 +1218,8 @@ async def create_order(
                 status_code=422,
                 detail=_missing_reference_detail(settings.REFERENCE_DIR, species_context),
             )
+        posted_context = _safe_json_loads(analysis_context)
+        _reject_undeclared_export_mode(None, posted_context if isinstance(posted_context, dict) else None)
 
         order_dir = input_dir
         order_dir.mkdir(parents=True, exist_ok=True)
@@ -1382,6 +1418,8 @@ async def duplicate_order(
 
         report_opts = body.report_options if body.report_options is not None else (source.report_options or {})
         analysis_opts = body.analysis_options if body.analysis_options is not None else source.analysis_options
+        if body.analysis_context is not None:
+            _reject_undeclared_export_mode(source.analysis_context, body.analysis_context)
         analysis_ctx = _updated_analysis_context(source, body.analysis_context)
         rag_cols = body.rag_collections if "rag_collections" in body.model_fields_set else source.rag_collections
 
@@ -1754,6 +1792,7 @@ async def run_stage(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     await _require_write_access(order, user, db)
+    _reject_astra_downstream_stage(order, body.stage)
 
     if order.status not in _RUN_STAGE_ALLOWED:
         raise HTTPException(

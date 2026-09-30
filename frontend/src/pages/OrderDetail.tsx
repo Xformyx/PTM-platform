@@ -4037,8 +4037,10 @@ export default function OrderDetail() {
           await new Promise((r) => setTimeout(r, 300));
         }
       }
+      const astraPackage = opts.analysis_context.quantitation_export_mode === "astra_analysis.v4";
       if (pendingAction.type === "run-stage") {
-        await api.post(`/orders/${orderId}/run-stage`, { stage: pendingAction.stage });
+        const stage = astraPackage ? "preprocessing" : pendingAction.stage;
+        await api.post(`/orders/${orderId}/run-stage`, { stage });
       } else {
         await api.post(`/orders/${orderId}/start`);
       }
@@ -5206,7 +5208,7 @@ export default function OrderDetail() {
                       {pptxGenerating ? "Generating PPTX…" : "Generate PPTX"}
                     </Button>
                   </div>
-                  {!isBenchmarkChild && (
+                  {!isBenchmarkChild && order.analysis_context?.quantitation_export_mode !== "astra_analysis.v4" && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -5230,7 +5232,7 @@ export default function OrderDetail() {
                     ? "Report files available for download"
                     : "Results will appear here after analysis completes"}
                 </p>
-                {!isRunning && order.status !== "registered" && !isReadOnlyShared && !isBenchmarkChild && (
+                {!isRunning && order.status !== "registered" && !isReadOnlyShared && !isBenchmarkChild && order.analysis_context?.quantitation_export_mode !== "astra_analysis.v4" && (
                   <Button
                     variant="outline"
                     size="sm"

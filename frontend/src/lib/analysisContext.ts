@@ -17,6 +17,18 @@ export function mergeAnalysisContext(existing: AnalysisContext | null | undefine
   return { ...(existing ?? {}), ...fields };
 }
 
+/** Persist the purpose the dropdown shows. A missing mode is not legacy. */
+export function withPersistedExportMode(context: AnalysisContext | null | undefined): AnalysisContext {
+  const next: AnalysisContext = { ...(context ?? {}) };
+  const mode = next.quantitation_export_mode;
+  if (typeof mode === "string" && mode.trim() !== "") return next;
+  next.quantitation_export_mode = "astra_analysis.v4";
+  if (next.normalization_policy == null || next.normalization_policy === "") {
+    next.normalization_policy = "already_normalized.v1";
+  }
+  return next;
+}
+
 /** Match the API's condition grouping; replicate suffixes never assign study units. */
 export function designSamples(config: unknown): DesignSample[] {
   const rows = Array.isArray(config) ? config : (config as { samples?: unknown[] } | null)?.samples ?? [];

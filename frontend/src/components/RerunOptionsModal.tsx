@@ -1,5 +1,5 @@
 import AstraWritingIntent from '@/components/AstraWritingIntent';
-import { useState, useEffect } from "react";
+import { useState, useEffect, useLayoutEffect } from "react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
@@ -19,7 +19,7 @@ import QuickAnalysisCustomFields from "./QuickAnalysisOptions";
 import { cn } from "@/lib/utils";
 import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 import SampleDesignFields from "./SampleDesignFields";
-import { designErrors, designSamples, mergeAnalysisContext } from "@/lib/analysisContext";
+import { designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode } from "@/lib/analysisContext";
 
 const CLOUD_PROVIDERS = ["gemini", "openai", "anthropic"] as const;
 
@@ -192,6 +192,11 @@ export default function RerunOptionsModal({
       .finally(() => setCoScientistSessionsLoading(false));
   }, [open, order?.id]);
 
+  useLayoutEffect(() => {
+    if (!open || !order) return;
+    setStructuredContext(withPersistedExportMode((order.analysis_context || {}) as Record<string, unknown>));
+  }, [open, order]);
+
   // Load existing order values whenever modal opens — preserve user's previous settings
   useEffect(() => {
     if (open && order) {
@@ -204,7 +209,7 @@ export default function RerunOptionsModal({
         setUseAllCollections(true);
         setSelectedCollectionIds([]);
       }
-      const ctx = (order.analysis_context || {}) as Record<string, unknown>;
+      const ctx = withPersistedExportMode((order.analysis_context || {}) as Record<string, unknown>);
       setStructuredContext(ctx);
       const str = (v: unknown) => (v != null && typeof v === "string" ? v : "");
       setAnalysisContext({
@@ -294,7 +299,8 @@ export default function RerunOptionsModal({
     if (!order) return;
     setSubmitting(true);
     try {
-      const errors = designErrors(mergeAnalysisContext(structuredContext,analysisContext), designSamples(order.sample_config), designSamples(order.secondary_sample_config));
+      const savedContext = withPersistedExportMode(mergeAnalysisContext(structuredContext, analysisContext));
+      const errors = designErrors(savedContext, designSamples(order.sample_config), designSamples(order.secondary_sample_config));
       if (errors.length) throw new Error(errors.join(" "));
       const optsForApi: Record<string, unknown> = {
         mode: analysisOptions.mode,
@@ -325,7 +331,7 @@ export default function RerunOptionsModal({
         ...researcherReportConfigFields(Boolean(reportConfig.reader_authoring_shadow)),
       };
       await onConfirm({
-        analysis_context: mergeAnalysisContext(structuredContext, analysisContext),
+        analysis_context: savedContext,
         analysis_options: optsForApi,
         rag_collections: useAllCollections ? null : selectedCollectionIds,
           report_options: {
@@ -1104,7 +1110,7 @@ export default function RerunOptionsModal({
               Cancel
             </Button>
             <Button onClick={handleConfirm} disabled={submitting}>
-              {submitting ? "Saving..." : confirmLabel}
+              {submitting ? "Saving..." : (structuredContext.quantitation_export_mode === "astra_analysis.v4" && confirmLabel !== "Create Duplicate" ? "Confirm & create Astra package" : confirmLabel)}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -3382,3 +3382,35 @@
 - **결정성:** 측정 없음. 새 seed·solver 경로 없음. 회귀 검사는
   `PYTHONPATH=.:api-server python3 -m pytest api-server/tests/test_sidecar_identity_audits.py`.
 
+### [2026-09-30] Astra 목적 표시와 저장이 어긋나 일반 Report까지 실행됨
+
+- **분류:** 정정
+- **대상:** `frontend/src/components/SampleDesignFields.tsx`,
+  `frontend/src/components/RerunOptionsModal.tsx`,
+  `frontend/src/lib/analysisContext.ts`,
+  `frontend/src/pages/OrderCreate.tsx`,
+  `frontend/src/pages/OrderDetail.tsx`,
+  `api-server/app/api/orders.py`
+- **구현 대상 설계:** `docs/collaboration/astra_package_integration_20260929_KO.md`.
+  Astra 분석 패키지는 전처리에서 패키지를 만들고 Legacy LLM/RAG/report를
+  호출하지 않는다. 새 임계·정량식은 없다.
+- **사전등록 상태:** 해당 없음 (측정되는 양을 바꾸지 않는다)
+- **내용:** Analysis purpose가 비어 있어도 화면만 `astra_analysis.v4`로
+  보였다. 확인은 그 키를 저장하지 않았고, 실행은 모드가 없는 주문을
+  일반 파이프라인으로 보냈다. Order 83
+  `Insulin_Signaling_V3_260929_Codex_Astra_bundle_1`이 Report의
+  `missing_report_audience_contract`까지 간 경로다. 이제 생성·복사·재실행
+  확인은 비어 있는 목적을 `astra_analysis.v4`로 저장한다. 이미 저장된
+  목적(legacy, v2, v3 포함)은 유지한다. 목적 키가 없는 저장 요청은 422이고,
+  모드가 이미 있는 주문의 부분 수정은 그 모드를 남긴다. 저장된 목적이
+  Astra인 주문의 RAG·Report 단계 실행은 409이다. 화면에서 Astra로 확인하면
+  전처리(패키지 생성)만 보낸다.
+- **논문에서의 용도:** 사용 안 함 (실행 경로 수정)
+- **해석 한계:** 정량·정규화·Annotation 선별은 바뀌지 않았다. 이 수정으로
+  kinase 귀속 정확도가 바뀌었다고 서술하지 않는다. 목적 없이 이미 저장된
+  주문은 다시 저장하기 전까지 저장값이 그대로다. Order 83은 재실행하지
+  않았다. 그 주문의 출력은 Astra 패키지가 아니다.
+- **결정성:** 측정 없음. 새 seed·solver 경로 없음. 회귀 검사는
+  `node --experimental-strip-types --test frontend/tests/analysisContext.test.ts`
+  와 `docker compose exec -T api-server python -m pytest tests/test_export_mode_declaration.py tests/test_analysis_context_preservation.py`.
+
