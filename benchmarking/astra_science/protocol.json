@@ -1,0 +1,14 @@
+{
+  "schema_version": "astra_science_benchmark.v1",
+  "baseline_commit": "6386c553e26530d887649e8a008f19c0938b8bb7",
+  "frozen_before_algorithm_development": "2026-10-01",
+  "splits": ["development", "calibration", "locked_test"],
+  "group_fields": ["study_id", "cohort_id", "ancestry_id", "leakage_group"],
+  "strata": ["taxon", "enrichment", "center_residue_class", "design_axis", "resolution"],
+  "unknown_truth_is_negative": false,
+  "interval_unit": "original_study",
+  "comparators": ["astra_v4", "measurement_qc_only", "astra_v5", "official_KSEA", "official_PTM_SEA", "official_PhosX", "official_KSTAR"],
+  "ablations": ["parent", "localization_mapping", "evidence_source", "temporal", "fixed_shared", "omission", "family", "abstention"],
+  "release_thresholds": null,
+  "status": "protocol_only_no_independent_data"
+}
