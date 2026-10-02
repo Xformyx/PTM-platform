@@ -78,6 +78,10 @@ async def _seed_system_settings(conn) -> None:
 
 async def _run_migrations(conn) -> None:
     """Apply incremental schema changes that create_all won't handle."""
+    for field in ("diann_report_path","diann_site_report_path","run_crosswalk_path","search_fasta_path","transgene_manifest_path","taxonomy_mapping_path","specificity_manifest_path","perturbation_manifest_path"):
+        await _add_column_if_missing(conn,"orders",field,field+" VARCHAR(500) NULL")
+    await conn.execute(text("ALTER TABLE orders MODIFY COLUMN pr_matrix_path VARCHAR(500) NULL"))
+    await conn.execute(text("ALTER TABLE orders MODIFY COLUMN ptm_type ENUM('phosphorylation','ubiquitylation','ubiquitination','acetylation','proteomics') NOT NULL"))
     await _seed_system_settings(conn)
     await _add_column_if_missing(conn, "analysis_jobs", "heartbeat_at", "heartbeat_at DATETIME NULL")
     await _add_column_if_missing(conn, "analysis_jobs", "recovery_count", "recovery_count INT NOT NULL DEFAULT 0")

@@ -69,7 +69,7 @@ async def prepare_astra_inputs(order, db, reference_root):
     for record in context.get('research_attachment_records',[]):
         # Order inputs are the only permitted upload scope; raw paths are absent from export.
         path=Path(record.get('stored_path','')).resolve()
-        scope=Path(order.pr_matrix_path).resolve().parent/'research_attachments'
+        scope=Path(order.pr_matrix_path or order.pg_matrix_path).resolve().parent/'research_attachments'
         if not path.is_relative_to(scope) or not path.is_file():raise ValueError('Research attachment is outside this order upload scope or missing')
         sha=hashlib.sha256(path.read_bytes()).hexdigest()
         if sha!=record.get('sha256'):raise ValueError('Uploaded research attachment checksum mismatch')

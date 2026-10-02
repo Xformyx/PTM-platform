@@ -85,21 +85,29 @@ def stage(name,metrics,checkpoint,progress):
     checkpoint()
 
 
-def compute_science(inputs,design,context,sources,*,quant=None,alternative=None,checkpoint=lambda:None,execute=lambda name,fn:fn()):
+def compute_science(inputs,design,context,sources,*,quant=None,alternative=None,checkpoint=lambda:None,execute=lambda name,fn:fn(),engine=None):
     context=effective_context(context)
-    if quant is None:quant=calculate(inputs,design,{**context,'annotation_mode':'quantification_only'},None)
+    calculate_stage=engine.calculate if engine else calculate
+    discover_stage=engine.discover if engine else discover
+    temporal_stage=engine.integrate_temporal if engine else integrate_temporal
+    science_inputs=inputs
+    if engine:
+        fasta,reference=engine.normalized_reference(inputs,context)
+        science_inputs={**inputs,'FASTA':fasta}
+        context={**context,'_runtime_reference':reference,'_runtime_inputs':inputs}
+    if quant is None:quant=calculate_stage(inputs,design,{**context,'annotation_mode':'quantification_only'},None)
     tables,norm,readiness=quant
     if alternative is None:
         other='legacy_median.v1' if context['normalization_policy']=='already_normalized.v1' else 'already_normalized.v1'
-        alternative=calculate(inputs,design,{**context,'normalization_policy':other,'annotation_mode':'quantification_only'},None)
+        alternative=calculate_stage(inputs,design,{**context,'normalization_policy':other,'annotation_mode':'quantification_only'},None)
     alt_tables,alt_norm,_=alternative;checkpoint()
-    mapped,edges,motif=execute('discover_regulators',lambda:discover(tables,design,inputs['FASTA'],context,sources))
+    mapped,edges,motif=execute('discover_regulators',lambda:discover_stage(tables,design,science_inputs['FASTA'],context,sources))
     tables['site_mapping']=mapped
-    discovery=execute('score_regulator_footprints',lambda:score_candidates(tables,edges,design));checkpoint()
+    discovery=execute('score_regulator_footprints',lambda:score_candidates(tables,edges,design,science=bool(engine)));checkpoint()
     evidence=quantitative_evidence(tables,alt_tables,design,norm,alt_norm,{**discovery,'source_queries':sources['queries']})
-    temporal=execute('integrate_temporal_layers',lambda:integrate_temporal(tables,discovery,design,context,sources.get('context'),evidence['parent_adjustment_impact']));checkpoint()
+    temporal=execute('integrate_temporal_layers',lambda:temporal_stage(tables,discovery,design,context,sources.get('context'),evidence['parent_adjustment_impact']));checkpoint()
     evidence['censoring_bounds']=censoring_bounds(tables,design,context.get('detection_limit_model'))
-    discovery.update(candidate_context_and_omissions(tables,discovery,evidence['technical_injection_omissions']))
+    discovery.update(candidate_context_and_omissions(tables,discovery,evidence['technical_injection_omissions'],context.get('_runtime_reference')))
     scientific={**{'quant/'+k:v for k,v in tables.items()},**{'kinase/'+k:v for k,v in discovery.items()},
                 **{'temporal/'+k:v for k,v in temporal.items()},**{'evidence/'+k:v for k,v in evidence.items()}}
     queries=[]
@@ -138,6 +146,7 @@ def compute_science(inputs,design,context,sources,*,quant=None,alternative=None,
         provider_limitations=failed,normalization_sensitivity={'status':'computed','primary':context['normalization_policy'],'alternative':alt_norm['normalization_policy']},
         LOD_bounds={'status':'conditional_supplied_model' if evidence['censoring_bounds'].status.eq('conditional_lower_bound').any() else 'unavailable','reason':'supplied_limits_only; no_limit_inferred_from_data'},
         needed_for_stronger_attribution=['identity_matched_localization','more_independent_substrate_genes','independent_biological_design_or_validation'])
+    if engine:scientific=engine.augment(scientific,inputs,design,context,readiness)
     return scientific,norm,alt_norm,readiness,motif,counts
 
 
@@ -152,15 +161,25 @@ def validate_science(tables,design):
     checks=[]
     for name,df in tables.items():
         short=name.split('/')[-1];keys=TABLE_KEYS.get(short) if name.startswith('quant/') else EXTRA_KEYS.get(short)
+        if name.startswith('science/'):
+            from .astra_science import KEYS
+            keys=KEYS.get(short)
         if keys and (any(k not in df for k in keys) or df.duplicated(keys).any()):raise ValueError('Duplicate/missing row key: '+name)
         if not len(df.columns):raise ValueError('Missing header: '+name)
         for column,universe in [('form_id',forms),('contrast_id',contrasts),('candidate_id',candidates),('condition_id',conditions),('reference_condition_id',conditions),('series_id',series),('source_evidence_id',feature_ids),('target_evidence_id',feature_ids)]:
-            if column in df and not set(df[column].dropna())<=universe:raise ValueError('Foreign key mismatch: '+name+'/'+column)
+            if not name.startswith('science/') and column in df and not set(df[column].dropna())<=universe:raise ValueError('Foreign key mismatch: '+name+'/'+column)
         for column,universe in [('form_ids',forms),('edge_ids',edges),('candidate_edge_ids',edges),('candidate_ids',candidates)]:
             if column in df:
                 values=set(';'.join(df[column].dropna().astype(str)).split(';'))-{''}
                 if not values<=universe:raise ValueError('Foreign key mismatch: '+name+'/'+column)
         checks.append({'check_id':name,'schema_keys_FK':'passed','rows':len(df),'unique_key':keys})
+    if design.get('schema_version')=='study_design.v4':
+        from .astra_science import KEYS
+        missing_science={'science/'+key for key in KEYS}-set(tables)
+        if missing_science:raise ValueError('Required science table missing: '+','.join(sorted(missing_science)))
+    if any(name.startswith('science/') for name in tables):
+        from .astra_science import validate_tables
+        validate_tables(tables,design)
     comparison=tables['quant/comparisons'];finite_rows=comparison.loc[comparison.included]
     if len(finite_rows) and not np.allclose(finite_rows.A.to_numpy(float),(finite_rows.U_joint-finite_rows.P_joint).to_numpy(float),atol=1e-10,rtol=1e-10):raise ValueError('Same-mask form identity failed')
     offset=tables['evidence/normalization_offsets'].dropna(subset=['expected_A_offset','observed_A_offset'])
@@ -176,6 +195,9 @@ def write_tables(tables,directory):
         read=pd.read_csv(path,low_memory=False)
         if list(read)!=list(frame) or len(read)!=len(frame):raise ValueError('CSV write truncated: '+name)
         short=name.split('/')[-1];keys=TABLE_KEYS.get(short) if name.startswith('quant/') else EXTRA_KEYS.get(short)
+        if name.startswith('science/'):
+            from .astra_science import KEYS
+            keys=KEYS.get(short)
         dictionary[name+'.csv']={'rows':len(frame),'columns':list(frame),'unique_key':keys,
             'dtypes':{k:str(v) for k,v in frame.dtypes.items()},'nullable':True,
             'missing':'unobserved/unavailable; never zero; status/reasons accompany quantities',
@@ -207,51 +229,93 @@ def start_here(snapshot,counts,readiness):
         'Offline: install reproducibility/requirements.txt in an isolated environment, then python replay.py --output <new-directory>. All raw inputs and permitted pinned source records are included; no network calls occur.'])+'\n'
 
 
-def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progress=lambda message:None):
+def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progress=lambda message:None,*,engine=None):
+    package_version=engine.VERSION if engine else VERSION
+    profile=engine.PROFILE if engine else PROFILE
+    code_files=sorted(set(CODE_FILES+(engine.CODE_FILES if engine else [])))
+    code_capture={name:digest(Path(__file__).parent/name) for name in code_files}
+    plan_resolver=engine.resolve_plan if engine else resolve_plan
     context=sanitize_research(effective_context(config['experimental_context']));design=context['study_design']
-    validate_execution(context,design['study']['ptm_type'],config['species_tax_id'])
+    (engine.validate_execution if engine else validate_execution)(context,design['study']['ptm_type'],config['species_tax_id'])
     root=Path(output_dir);run_id=f"g{int(config.get('run_generation') or 0)}-{uuid4().hex}"
     directory=root/'enrichment_free_runs'/run_id;directory.mkdir(parents=True,exist_ok=False)
     for folder in ['study','inputs','references','methods','evidence','reproducibility']: (directory/folder).mkdir()
     metrics=[];inputs={};hashes={}
     with stage('resolve_inputs_and_plan',metrics,checkpoint,progress):
         for key,field,name in [('PR','pr_matrix_path','PR.tsv'),('PG','pg_matrix_path','PG.tsv'),('FASTA','fasta_path','reference.fasta')]:
+            if engine and not config.get(field):continue
             original=Path(config[field]);sha=digest(original);target=directory/'inputs'/name;shutil.copyfile(original,target)
             if digest(target)!=sha or digest(original)!=sha:raise ValueError('Input changed during immutable capture')
             inputs[key]=target;hashes[key]=sha
+        if engine:
+            for key,field in engine.INPUT_FIELDS.items():
+                if not config.get(field):continue
+                original=Path(config[field]);target=directory/'inputs'/(key+original.suffix)
+                if key=='SPECIFICITY':
+                    target=directory/'inputs/specificity'/(key+original.suffix)
+                    target.parent.mkdir(parents=True,exist_ok=True)
+                sha=digest(original);shutil.copyfile(original,target)
+                if digest(target)!=sha or digest(original)!=sha:raise ValueError('Scientific input changed during capture')
+                inputs[key]=target;hashes[key]=sha
+                if key=='SPECIFICITY':
+                    resource=json.loads(target.read_text())
+                    if resource.get('redistribution_status')!='permitted':
+                        # Preserve the resource request/hash, but neither export nor
+                        # execute a resource whose package permission is unresolved.
+                        # Quantification and all other supported stages continue.
+                        inputs['SPECIFICITY_RESTRICTED']=inputs.pop('SPECIFICITY')
+                        hashes['SPECIFICITY_RESTRICTED']=hashes.pop('SPECIFICITY')
+                        continue
+                    for part in ('matrix','background'):
+                        relative=Path(resource[part+'_file'])
+                        if relative.is_absolute() or '..' in relative.parts:raise ValueError('Unsafe specificity resource path')
+                        dest=target.parent/relative;dest.parent.mkdir(parents=True,exist_ok=True)
+                        if dest.resolve()==target.resolve():raise ValueError('Specificity resource would overwrite its manifest')
+                        shutil.copyfile(original.parent/relative,dest)
+                        if digest(dest)!=resource[part+'_sha256']:raise ValueError('Specificity input checksum mismatch')
+            engine.normalized_reference(inputs,context)
         snapshot=config.get('user_input_snapshot') or capture_order({'id':order_id,'order_code':config['order_code'],'analysis_context':context})
         snapshot=sanitize_research(snapshot);literature=config.get('literature_pin') or {'collections':[],'documents':[],'status':'not_persisted_in_source_order'}
-        plan=resolve_plan(context,hashes,taxa=fasta_taxonomy(inputs['FASTA']).values())
+        plan=plan_resolver(context,hashes,taxa=fasta_taxonomy(inputs['FASTA']).values())
     with stage('quantify_evidence',metrics,checkpoint,progress):
-        quant,quant_reuse=quant_cached(inputs,design,context,root,plan['fingerprints']['quant'])
+        quant,quant_reuse=(engine.calculate(inputs,design,context),{'status':'computed','fingerprint':plan['fingerprints']['quant']}) if engine else quant_cached(inputs,design,context,root,plan['fingerprints']['quant'])
         other='legacy_median.v1' if context['normalization_policy']=='already_normalized.v1' else 'already_normalized.v1'
         alt_context={**context,'normalization_policy':other}
-        alt_plan=resolve_plan(alt_context,hashes)
-        alternative,alt_reuse=quant_cached(inputs,design,alt_context,root,alt_plan['fingerprints']['quant'])
+        alt_plan=plan_resolver(alt_context,hashes)
+        alternative,alt_reuse=(engine.calculate(inputs,design,alt_context),{'status':'computed','fingerprint':alt_plan['fingerprints']['quant']}) if engine else quant_cached(inputs,design,alt_context,root,alt_plan['fingerprints']['quant'])
     with stage('resolve_annotation',metrics,checkpoint,progress):
-        mapped,_,fasta=mapped_sites(quant[0],design,inputs['FASTA'],context,[])
+        mapped,_,fasta=mapped_sites(quant[0],design,engine.normalized_reference(inputs,context)[0] if engine else inputs['FASTA'],context,[])
         fixtures=json.loads(Path(config['source_fixtures_path']).read_text()) if config.get('source_fixtures_path') else config.get('source_fixtures')
         prior_pins=[]
         if context.get('refresh_references'):
             for path in sorted((root/'enrichment_free_runs').glob('*/references/source_pin.json')):
                 prior_pins.append(json.loads(path.read_text()))
         sources=resolve_sources(config['reference_root'],mapped.to_dict('records'),fasta,design['study']['ptm_type'],
-            pin_sha=config.get('source_pin_sha256'),refresh=context.get('refresh_references',False),fixtures=fixtures,checkpoint=checkpoint,prior_pins=prior_pins)
-        plan=resolve_plan(context,hashes,sources['pin_sha256'],fasta_taxonomy(inputs['FASTA']).values())
+            pin_sha=config.get('source_pin_sha256'),refresh=context.get('refresh_references',False),fixtures=fixtures,checkpoint=checkpoint,prior_pins=prior_pins,
+            **({'query_policy':'taxon_round_robin.v1'} if engine else {}))
+        plan=plan_resolver(context,hashes,sources['pin_sha256'],fasta_taxonomy(inputs['FASTA']).values())
     def execute(name,fn):
         with stage(name,metrics,checkpoint,progress):return fn()
-    scientific,norm,altnorm,readiness,motif,counts=compute_science(inputs,design,context,sources,quant=quant,alternative=alternative,checkpoint=checkpoint,execute=execute)
+    scientific,norm,altnorm,readiness,motif,counts=compute_science(inputs,design,context,sources,quant=quant,alternative=alternative,checkpoint=checkpoint,execute=execute,engine=engine)
     with stage('assemble_evidence_package',metrics,checkpoint,progress):
+        if engine and code_capture!={name:digest(Path(__file__).parent/name) for name in code_files}:
+            raise ValueError('Scientific source changed during execution; retry on a frozen release')
         fields,transfer,brief=transfer_contract(snapshot,design,context,literature)
         scientific['study/input_field_manifest']=pd.DataFrame(fields)
         validation=validate_science(scientific,design);dictionary=write_tables(scientific,directory)
-        provenance={'schema_version':VERSION,'order_id':order_id,'order_code':config['order_code'],'run_id':run_id,'analysis_profile':PROFILE,
+        provenance={'schema_version':package_version,'order_id':order_id,'order_code':config['order_code'],'run_id':run_id,'analysis_profile':profile,
             'input_hashes':hashes,'design_hash':object_hash(design),'input_context_hash':object_hash(snapshot),'literature_pin_hash':object_hash(literature),
             'source_pin_sha256':sources['pin_sha256'],'stage_fingerprints':plan['fingerprints'],'normalization':norm,
             'stage_reuse':{'quant':quant_reuse,'normalization_sensitivity':alt_reuse},'context_revision_id':object_hash(snapshot),
-            'estimator_versions':{'quantification':plan['estimator'],'kinase':KINASE_VERSION,'temporal':'observed_grid_temporal.v1','strict_parent_default':'unit_balanced_same_injection_peptide_ratios.v3','export':VERSION},
-            'code_sha256':{name:digest(Path(__file__).parent/name) for name in CODE_FILES}}
+            'estimator_versions':{'quantification':plan['estimator'],'kinase':KINASE_VERSION,'temporal':'observed_grid_temporal.v1','strict_parent_default':'unit_balanced_same_injection_peptide_ratios.v3','export':package_version},
+            'code_sha256':{name:digest(Path(__file__).parent/name) for name in code_files}}
         provenance['provenance_id']=object_hash(provenance)
+        if engine:
+            provenance['estimator_versions'].update(kinase='gene_balanced_exact_site.v5.experimental',
+                measurement='diann_observations.v1',reference='reference_inventory.v1',
+                selective_call='selective_evidence.v1.experimental',specificity='experimental_specificity_adapter.v1',
+                observation_policy=context.get('science',{}).get('observation_policy',{'mode':'audit_only'}))
+            provenance['provenance_id']=object_hash({k:v for k,v in provenance.items() if k!='provenance_id'})
         json_write(directory/'provenance.json',provenance)
         for name,value in [('study/user_input_snapshot',snapshot),('study/study_context',context),('study/study_design',design),
             ('study/analysis_plan',plan),('study/input_transfer_validation',transfer),('references/literature_pin',literature),
@@ -269,7 +333,9 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                 original=Path(config['reference_root'])/'literature_objects'/doc['sha256'];target=directory/relative
                 if digest(original)!=doc['sha256']:raise ValueError('Pinned literature content missing or changed')
                 target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(original,target)
-        report=start_here(snapshot,counts,readiness);(directory/'START_HERE_ASTRA.md').write_text(report,encoding='utf-8')
+        report=start_here(snapshot,counts,readiness);
+        if engine:report+='\n## Experimental scientific evidence\nRead science/measurement_observations.csv and site_identity_audit.csv for exact observation and sequence provenance. Read science/kinase_calls.csv for each uncalibrated abstention; proposals are not validated calls. Specificity parity and independent benchmark improvement are not established. See evidence/readiness.json for resource/assay status. The taxon is inherited from the recorded Order, never inferred from a pathway.\n'
+        (directory/'START_HERE_ASTRA.md').write_text(report,encoding='utf-8')
         (directory/'evidence_report.html').write_text('<!doctype html><meta charset="utf-8"><title>Astra evidence</title><pre style="white-space:pre-wrap">'+html.escape(report+'\n'+brief)+'</pre>',encoding='utf-8')
         stats=[{'input_ids':'see row-grained tables and data_dictionary','n':{'injections':len(design['injections']),'materials':len(design['materials']),'biological_unit_ids':sorted({m.get('biological_unit_id') for m in design['materials'] if m.get('biological_unit_id')})},'statistic_id':name,'method_version':version,'unit':unit,'status':status,'null_or_universe':universe,'multiple_testing_family':None} for name,version,unit,status,universe in [
             ('biological_pq','not_implemented','independent_biological_unit','unavailable','not_defined'),
@@ -277,29 +343,42 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
             ('motif_weight',motif['library_version'],'candidate_per_observed_sequence','relative_support_not_probability','observed_deduplicated_gene_balanced_sequences'),
             ('gene_set_enrichment','kea3_typed_response.v3','gene_set','provider_nullable_statistics','external_library_background_uncontrolled'),
             ('temporal_LOTO','observed_grid_temporal.v1','observed_timepoint','descriptive_sensitivity','not_biological_replicates')]]
+        if engine:
+            for name,table,unit in [('biological_interval','replicate_uncertainty','declared_biological_unit_or_pair'),('perturbation_interaction','perturbation_validation','declared_validation_unit_or_pair'),('experimental_specificity','specificity_scores','site_sequence_per_assay_matrix'),('selective_call','kinase_calls','candidate_contrast')]:
+                frame=scientific['science/'+table]
+                stats.append({'statistic_id':name,'input_ids':'science/'+table+'.csv','method_version':package_version,
+                    'unit':unit,'n':len(frame),'status':'see_row_status_and_readiness','null_or_universe':'not_a_biological_p_value',
+                    'multiple_testing_family':None,'calibration':'unvalidated_experimental','missing_value':'unavailable_never_zero_or_one'})
+            if design['study'].get('design_axis')=='cross_sectional':
+                next(s for s in stats if s['statistic_id']=='temporal_LOTO')['status']='not_applicable_cross_sectional'
         json_write(directory/'methods/statistics_inventory.json',stats)
         (directory/'methods/METHODS.md').write_text('Material → biological-unit equal-weight mean-log contrasts. A=U_joint−P_joint at form level. Generic requires ≥1 joint observation per side; strict alternative parent requires ≥2 joint injections and ≥2 sequences. Repeated subset is separate. No biological p/q. Gene-balanced medians require ≥5 sites/3 genes only for operational coverage; all lower-support candidates remain. Motif patterns are repository heuristics, exactly center-anchored, with relative gene-balanced background support, not posterior probabilities. Adjacent trapezoids never bridge an NA interval and do assume a straight segment between observed endpoints. Onset/recovery are brackets, peaks are sampled maxima. Full proteins and same-experiment links are descriptive, not causal or independent validation. Additional scaling occurs once over the whole recorded study; separate PR/PG factors and A offsets are exported. LOD bounds are unavailable without a validated model.\n',encoding='utf-8')
+        if engine:
+            with (directory/'methods/METHODS.md').open('a',encoding='utf-8') as method:
+                method.write('\nExperimental v5: exact run/precursor observation audit; minimum occupied-site confidence is not an individual site posterior. Optional validated-observation filtering requires explicitly recorded thresholds and renormalization scope. Site keys use accession, taxon, sequence hash and residue/position. Enzyme and substrate taxa are separate; unknown enzyme taxonomy restricts protein/context joins. Specificity uses only the declared local matrix semantics and permitted pinned resources; official atlas parity is not established. Confirmed calls remain no_call (uncalibrated_policy). Optional biological percentile intervals require at least 3 declared independent units/pairs and resample joint PTM/parent ratios together; technical-only data have no biological interval. Perturbation records are cohort-scoped. These methods are not MSstatsPTM, PhosX, KSTAR or independent validation. Cross-sectional inputs have no temporal event/AUC analysis. Protein-only inputs have no PTM adjustment or kinase call.\n')
         claims=[]
         for r in scientific['evidence/parent_adjustment_impact'].to_dict('records'):
             claims.append({'claim_id':stable_id('claim',[r['form_id'],r['contrast_id']]),'claim_type':'observed_parent_adjustment_effect',
                 'supporting_rows':[r['impact_id']],'opposing_or_sensitivity_rows':[r['impact_id']],
                 'table':'evidence/parent_adjustment_impact.csv','statement':r['classification'],'limits':['relative_ratio_not_occupancy','technical_not_biological_replication','not_kinase_causality']})
         (directory/'evidence/evidence_claims.jsonl').write_bytes(b'\n'.join(json_bytes(c).replace(b'\n',b' ') for c in claims)+b'\n')
-        figure_packet(scientific,directory)
+        figure_packet(scientific,directory) if design['study'].get('design_axis')!='cross_sectional' else None
         code=directory/'reproducibility/code/ptm_shared';code.mkdir(parents=True)
-        for name in CODE_FILES:shutil.copyfile(Path(__file__).parent/name,code/name)
+        for name in code_files:shutil.copyfile(Path(__file__).parent/name,code/name)
         (code/'__init__.py').write_text('')
         versions={'python':platform.python_version(),**{p:importlib.metadata.version(p) for p in ['numpy','pandas','matplotlib']}}
+        if engine:
+            versions['pyarrow']=importlib.metadata.version('pyarrow')
         json_write(directory/'methods/software_versions.json',versions)
-        (directory/'reproducibility/requirements.txt').write_text('\n'.join(p+'=='+versions[p] for p in ['numpy','pandas','matplotlib'])+'\n')
-        json_write(directory/'reproducibility/replay_config.json',{'context':context,'design':design,'inputs':{k:str(p.relative_to(directory)) for k,p in inputs.items()},'snapshot':snapshot,'literature':literature})
+        (directory/'reproducibility/requirements.txt').write_text('\n'.join(p+'=='+versions[p] for p in (['numpy','pandas','matplotlib','pyarrow'] if engine else ['numpy','pandas','matplotlib']))+'\n')
+        json_write(directory/'reproducibility/replay_config.json',{'engine_profile':profile,'context':context,'design':design,'inputs':{k:str(p.relative_to(directory)) for k,p in inputs.items()},'snapshot':snapshot,'literature':literature})
         (directory/'replay.py').write_text("from pathlib import Path\nimport sys,argparse\nROOT=Path(__file__).resolve().parent\nsys.path.insert(0,str(ROOT/'reproducibility/code'))\nfrom ptm_shared.astra_package import replay_package,validate_package\np=argparse.ArgumentParser()\np.add_argument('--output',type=Path)\np.add_argument('--validate-only',action='store_true')\na=p.parse_args()\nvalidate_package(ROOT) if a.validate_only else replay_package(ROOT,a.output)\n")
         json_write(directory/'reproducibility/v3_migration.json',{'legacy_v3_tables':{name+'.csv':'quant/'+name+'.csv' for name in TABLE_KEYS},'v3_tables_preserve_meanings':True,'new_typed_kinase_tables_are_additional_not_curated_replacements':True})
     with stage('validate_and_publish',metrics,checkpoint,progress):
         publication_started=time.monotonic()
         json_write(directory/'reproducibility/stage_metrics.json',metrics+[{'stage':'validate_and_publish','status':'archive_publication_metrics_recorded_in_platform_run','note':'Archive duration/size cannot be hashed inside that same archive without changing them'}])
         files={str(p.relative_to(directory)):{'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(directory.rglob('*')) if p.is_file()}
-        json_write(directory/'manifest.json',{'schema_version':VERSION,'run_id':run_id,'files':files})
+        json_write(directory/'manifest.json',{'schema_version':package_version,'run_id':run_id,'files':files})
         validate_package(directory)
         archive=root/(f'astra_analysis_package_{run_id}.zip');pending=archive.with_name('.'+archive.name)
         with zipfile.ZipFile(pending,'w',zipfile.ZIP_DEFLATED) as z:
@@ -313,12 +392,15 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
             'astra':archive,'report':directory/'evidence_report.html','report_markdown':directory/'START_HERE_ASTRA.md',
             'start_here':directory/'START_HERE_ASTRA.md','study_brief':directory/'study/STUDY_BRIEF.md',
             'primary_input':directory/'quant/primary_A_input.csv','provenance':directory/'provenance.json'}.items()}
-        preview=scientific['kinase/kinase_temporal_profiles'].loc[lambda f:f.track.isin(['curated_A','motif_A'])].copy()
+        if engine:
+            for key,relative in [('kinase_calls','science/kinase_calls.csv'),('measurement_audit','science/measurement_observations.csv'),('protein_input','quant/protein_contrasts.csv')]:
+                artifacts[key]={'path':str((directory/relative).relative_to(root)),'sha256':digest(directory/relative)}
+        preview=scientific['kinase/kinase_temporal_profiles'].loc[lambda f:f.track.isin(['curated_A','motif_A','specificity_A'] if engine else ['curated_A','motif_A'])].copy()
         conditions={c['condition_id']:c for c in design['conditions']}
         preview['target_label']=preview.condition_id.map(lambda cid:conditions[cid]['label'])
         preview['reference_label']=preview.reference_condition_id.map(lambda cid:conditions[cid]['label'])
         preview=preview.rename(columns={'candidate_gene':'entity','activity_magnitude':'gene_balanced_mean','n_sites':'n_sites_or_units','n_genes':'n_substrate_genes','activity_status':'descriptive_pattern'})
-        result={'schema_version':VERSION,'run_id':run_id,'provenance':provenance,'artifacts':artifacts,'counts':counts,'analysis_readiness':readiness,
+        result={'schema_version':package_version,'run_id':run_id,'provenance':provenance,'artifacts':artifacts,'counts':counts,'analysis_readiness':readiness,
             'primary_profiles':json.loads(preview.to_json(orient='records')),'source_pin_sha256':sources['pin_sha256'],'literature_pin':literature,
             'publication_metrics':{'elapsed_seconds':time.monotonic()-publication_started,'archive_bytes':archive.stat().st_size,'manifest_files':len(files),'source_requests':len(sources['queries']),'cache_hits':sum(bool(q.get('cache_hit')) for q in sources['queries'])},
             'study_preview':{'snapshot':snapshot,'brief':brief,'transfer_validation':transfer},'analysis_plan':plan}
@@ -350,7 +432,10 @@ def replay_package(directory,output):
     if output==directory or directory in output.parents:raise ValueError('Replay cannot overwrite the source package')
     validate_package(directory);config=json.loads((directory/'reproducibility/replay_config.json').read_text())
     inputs={k:directory/v for k,v in config['inputs'].items()};sources=json.loads((directory/'references/source_pin.json').read_text())
-    tables,*_=compute_science(inputs,config['design'],config['context'],sources)
+    engine=None
+    if config.get('engine_profile')=='astra_analysis.v5':
+        from . import astra_science as engine
+    tables,*_=compute_science(inputs,config['design'],config['context'],sources,engine=engine)
     fields,_,_=transfer_contract(config['snapshot'],config['design'],config['context'],config['literature'])
     tables['study/input_field_manifest']=pd.DataFrame(fields)
     validate_science(tables,config['design']);output.mkdir(parents=True,exist_ok=False);write_tables(tables,output)

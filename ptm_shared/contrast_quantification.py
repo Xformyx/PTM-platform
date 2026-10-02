@@ -15,7 +15,7 @@ from .report_compatible_quantification import map_form, tokens, positive_matrix,
 
 VERSION='material_then_unit_balanced_mean_log.v3'
 STRICT_VERSION='unit_balanced_same_injection_peptide_ratios.v3'
-PTM_CODES={'phosphorylation':21,'phospho':21,'ubiquitylation':121,'ubiquitination':121,'ubi':121,'acetylation':1}
+PTM_CODES={'phosphorylation':21,'phospho':21,'ubiquitylation':121,'ubiquitination':121,'ubi':121,'acetylation':1,'proteomics':-1}
 IDENTITY_COLUMNS=['form_id','Protein.Group','Protein.Ids','Genes','Stripped.Sequence','Modified.Sequence',
     'n_modifications','mapping_status','mapping_json','mapped_genes','annotation_gene_discordant',
     'representative_accession','representative_gene','representative_sites','sites_all','primary_mapping_eligible',
@@ -58,7 +58,7 @@ class ContrastEstimator:
         target=self.conditions[contrast['target_condition_id']];reference=self.conditions[contrast['reference_condition_id']]
         return {'contrast_id':contrast['contrast_id'],'arm_id':target['arm_id'],'condition_id':target['condition_id'],
             'target_condition_id':target['condition_id'],'reference_condition_id':reference['condition_id'],
-            'time_min':target['time']['minutes'],'reference_time_min':reference['time']['minutes'],
+            'time_min':(target.get('time') or {}).get('minutes'),'reference_time_min':(reference.get('time') or {}).get('minutes'),
             'target_label':target['label'],'reference_label':reference['label'],'pairing':contrast['pairing'],
             'comparison_interpretation':'target_vs_declared_reference_condition_not_necessarily_time_zero'}
 
@@ -154,7 +154,7 @@ def prepare_forms(pr,pg,fasta,estimator,ptm_type):
         for j,sample in enumerate(estimator.samples):
             condition=estimator.conditions[sample['condition_id']];material=estimator.materials.get(sample.get('material_id'),{})
             runlevel.append({'form_id':form['form_id'],**{k:sample.get(k) for k in ['injection_id','input_column','condition_id','material_id']},
-                'arm_id':condition['arm_id'],'time_min':condition['time']['minutes'],'biological_unit_id':material.get('biological_unit_id'),
+                'arm_id':condition['arm_id'],'time_min':(condition.get('time') or {}).get('minutes'),'biological_unit_id':material.get('biological_unit_id'),
                 'pair_id':material.get('pair_id'),'ptm_intensity':intensity[fi,j],'parent_intensity':parent[fi,j],
                 'ptm_log2':u[fi,j],'parent_log2':p[fi,j],'adjusted_log2_ratio':u[fi,j]-p[fi,j],
                 'U_observed':bool(np.isfinite(u[fi,j])),'P_observed':bool(np.isfinite(p[fi,j])),
@@ -198,6 +198,8 @@ def quantify_contrasts(pr,pg,fasta,design,ptm_type='phosphorylation'):
 
 
 def detection_by_arm(analysis,design):
+    if design.get('study',{}).get('design_axis')=='cross_sectional':
+        return pd.DataFrame(columns=DETECTION_COLUMNS)
     est=analysis['estimator'];u=analysis['arrays']['U'];p=analysis['arrays']['P'];a=analysis['arrays']['A'];records=[]
     for c in design['contrasts']:
         meta=est.metadata(c);arm=meta['arm_id'];ref=c['reference_condition_id'];target=c['target_condition_id']

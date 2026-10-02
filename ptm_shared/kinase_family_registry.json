@@ -1,0 +1,104 @@
+{
+  "schema_version": "kinase_family_registry.v1",
+  "source": "existing repository species_kinase_groups.v1; operational paralog groups, not independently curated taxonomy validation",
+  "definition_timing": "fixed_before_v5_calibration",
+  "family_type": "paralog_group",
+  "taxa": {
+    "9606": {
+      "AKT_family": [
+        "AKT1",
+        "AKT2",
+        "AKT3"
+      ],
+      "ERK1_2_family": [
+        "MAPK1",
+        "MAPK3"
+      ],
+      "MEK1_2_family": [
+        "MAP2K1",
+        "MAP2K2"
+      ],
+      "mTOR": [
+        "MTOR"
+      ],
+      "S6K_family": [
+        "RPS6KB1",
+        "RPS6KB2"
+      ],
+      "RSK_family": [
+        "RPS6KA1",
+        "RPS6KA2",
+        "RPS6KA3",
+        "RPS6KA6"
+      ],
+      "GSK3_family": [
+        "GSK3A",
+        "GSK3B"
+      ]
+    },
+    "10116": {
+      "AKT_family": [
+        "Akt1",
+        "Akt2",
+        "Akt3"
+      ],
+      "ERK1_2_family": [
+        "Mapk1",
+        "Mapk3"
+      ],
+      "MEK1_2_family": [
+        "Map2k1",
+        "Map2k2"
+      ],
+      "mTOR": [
+        "Mtor"
+      ],
+      "S6K_family": [
+        "Rps6kb1",
+        "Rps6kb2"
+      ],
+      "RSK_family": [
+        "Rps6ka1",
+        "Rps6ka2",
+        "Rps6ka3",
+        "Rps6ka6"
+      ],
+      "GSK3_family": [
+        "Gsk3a",
+        "Gsk3b"
+      ]
+    },
+    "10090": {
+      "AKT_family": [
+        "Akt1",
+        "Akt2",
+        "Akt3"
+      ],
+      "ERK1_2_family": [
+        "Mapk1",
+        "Mapk3"
+      ],
+      "MEK1_2_family": [
+        "Map2k1",
+        "Map2k2"
+      ],
+      "mTOR": [
+        "Mtor"
+      ],
+      "S6K_family": [
+        "Rps6kb1",
+        "Rps6kb2"
+      ],
+      "RSK_family": [
+        "Rps6ka1",
+        "Rps6ka2",
+        "Rps6ka3",
+        "Rps6ka6"
+      ],
+      "GSK3_family": [
+        "Gsk3a",
+        "Gsk3b"
+      ]
+    }
+  }
+}

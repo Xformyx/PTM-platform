@@ -54,7 +54,7 @@ export function sampleManifest(value: unknown): SampleManifest | null {
 export function designErrors(context: AnalysisContext, samples: DesignSample[], secondary: DesignSample[] = []): string[] {
   // Generic drafts are saved through the server resolver. Execution validates
   // its resolved design, raw column coverage, capabilities and frozen digest.
-  if (['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(context.quantitation_export_mode))) return [];
+  if (['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(context.quantitation_export_mode))) return [];
   const errors: string[] = [];
   for (const [key, rows, label] of [["sample_manifest", samples, "Primary"], ["secondary_sample_manifest", secondary, "Secondary"]] as const) {
     if (context[key] == null) continue;

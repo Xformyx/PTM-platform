@@ -71,12 +71,24 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--base-url',default='http://127.0.0.1:8000/api');p.add_argument('--fixture',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--prepare-only',action='store_true')
+    p.add_argument('--science',action='store_true',help='Exercise the experimental v5 observation and reference contract')
     args=p.parse_args();url=urlparse(args.base_url)
     if url.scheme!='http' or url.hostname!='127.0.0.1':p.error('Only an isolated localhost service is allowed')
     fixture=make_fixture(args.fixture)
     fixture['analysis_context'].update(quantitation_export_mode='astra_analysis.v4', custom_extension={'zero':0,'false':False,'empty':[],'text':'한글 α\n원문'})
     fixture['analysis_context'].pop('annotation_mode',None)
     fixture['analysis_context'].pop('annotation_snapshot_sha256',None)
+    if args.science:
+        fixture['analysis_context'].update(quantitation_export_mode='astra_analysis.v5',
+            science={'experimental_enabled':True,'diann_version':'2.7.0'})
+        matrix=pd.read_csv(args.fixture/'PR.tsv',sep='\t');observations=[]
+        for row in matrix.to_dict('records'):
+            for sample in fixture['sample_config']['samples']:
+                if pd.notna(row[sample['file_name']]):
+                    observations.append({'Run':sample['file_name'],**{k:row[k] for k in
+                        ['Precursor.Id','Modified.Sequence','Precursor.Charge','Protein.Group','Protein.Ids']},
+                        'PTM.Site.Confidence':.9,'Lib.PTM.Site.Confidence':.99,'Q.Value':.001})
+        pd.DataFrame(observations).to_csv(args.fixture/'diann.tsv',sep='\t',index=False)
     if args.prepare_only:return
     args.output.mkdir(parents=True,exist_ok=True)
     client=httpx.Client(base_url=args.base_url,timeout=180)
@@ -103,7 +115,9 @@ def main():
         created=request('POST','/orders',data={'project_name':name,'ptm_type':'phosphorylation','species':'human',
             'sample_config':json.dumps(fixture['sample_config']),'analysis_context':json.dumps(fixture['analysis_context']),
             'analysis_options':json.dumps({'mode':'full','quick_analysis':False}),'report_options':json.dumps({'report_type':'co_scientist','research_questions':['한글 원문 질문\n'+('EGF / αβ ' * 1000)],'output_format':'Nature full article'}),'rag_collections':'[]'},
-            files={'pr_matrix':('PR.tsv',pr),'pg_matrix':('PG.tsv',pg),'research_attachments':('제공 논문.txt','사용자가 제공한 연구 자료\n원문 αβ'.encode())})
+            files={'pr_matrix':('PR.tsv',pr),'pg_matrix':('PG.tsv',pg),'research_attachments':('제공 논문.txt','사용자가 제공한 연구 자료\n원문 αβ'.encode()),
+                **({'fasta_file':('reference.fasta',(args.fixture/'reference.fasta').read_bytes()),
+                    'diann_report':('diann.tsv',(args.fixture/'diann.tsv').read_bytes())} if args.science else {})})
     oid=created['id'];request('POST',f'/orders/{oid}/start');original=wait(oid)
     def download(oid,label,record):
         r=client.get(f'/orders/{oid}/enrichment-free-evidence',params={'artifact':'astra'});r.raise_for_status()
@@ -134,6 +148,15 @@ def main():
             assert 'START_HERE_ASTRA.md' in archive.namelist()
             assert len(pd.read_csv(archive.open('temporal/ptm_temporal_features.csv')))>0
             assert len(pd.read_csv(archive.open('temporal/cross_layer_links.csv')))>0
+            if args.science:
+                observations=pd.read_csv(archive.open('science/measurement_observations.csv'))
+                assert observations.match_status.eq('matched').all()
+                assert observations.localization_metric_value.eq(.9).all()
+                assert len(observations)==len(pd.read_csv(args.fixture/'diann.tsv',sep='\t'))
+                calls=pd.read_csv(archive.open('science/kinase_calls.csv'))
+                assert len(calls)>0 and calls.resolution.eq('no_call').all()
+                assert calls.no_call_reasons.str.contains('uncalibrated_policy').all()
+                assert pd.read_csv(archive.open('science/observation_sites.csv')).individual_site_posterior.isna().all()
         return comparisons,profiles
     initial_tables=download(oid,'original',original)
     copied=request('POST',f'/orders/{oid}/duplicate',json={'new_order_name':name+'_copy'});copy_id=copied['id']
@@ -141,17 +164,50 @@ def main():
     request('POST',f'/orders/{copy_id}/start');copy=wait(copy_id);copy_tables=download(copy_id,'copy',copy)
     request('PATCH',f'/orders/{oid}',json={'analysis_context':{'biological_question':'다른 pathway를 기대해도 수치 계산은 동일해야 한다'}})
     assert request('GET',f'/orders/{oid}/enrichment-free-evidence')['provenance']==original['provenance']
-    request('POST',f'/orders/{oid}/run-stage',json={'stage':'report_generation'});rerun=wait(oid);rerun_tables=download(oid,'rerun',rerun)
+    request('POST',f'/orders/{oid}/run-stage',json={'stage':'preprocessing'});rerun=wait(oid);rerun_tables=download(oid,'rerun',rerun)
     for old,copy_frame,new in zip(initial_tables,copy_tables,rerun_tables):
         pd.testing.assert_frame_equal(old,copy_frame);pd.testing.assert_frame_equal(old,new)
     assert original['provenance']['input_context_hash']!=rerun['provenance']['input_context_hash']
     assert len({original['run_id'],copy['run_id'],rerun['run_id']})==3
     assert original['source_pin_sha256']==copy['source_pin_sha256']==rerun['source_pin_sha256']
-    assert rerun['provenance']['stage_reuse']['quant']['status']=='reused'
+    assert rerun['provenance']['stage_reuse']['quant']['status']==('computed' if args.science else 'reused')
     report={'passed':True,'order_id':oid,'copy_id':copy_id,'runs':[r['run_id'] for r in [original,copy,rerun]],
         'services':['FastAPI','MySQL','Redis','Celery'],'source_pin_sha256':original['source_pin_sha256'],
         'copy_design_context_preserved':True,'prior_result_immutable':True,'question_does_not_change_scientific_tables':True,
         'download_checksums_verified':True,'multiarm_same_time_separated':True,'fixture_only_not_biological_validation':True,'lossless_research_input_transfer':True,'manual_snapshot_not_required':True,'question_only_quant_cache_reused':True,'events':events}
+    report.update(profile='astra_analysis.v5' if args.science else 'astra_analysis.v4',
+        question_only_quant_cache_reused=not args.science,
+        observation_upload_copy_replay_contract_tested=args.science)
+    if args.science:
+        # The same existing Order species drives both entry points. No new species input.
+        common={'project_name':name+'_species_conflict','ptm_type':'phosphorylation','species':'mouse',
+            'sample_config':json.dumps(fixture['sample_config']),'analysis_context':json.dumps(fixture['analysis_context']),
+            'report_options':'{}','rag_collections':'[]'}
+        bad=request('POST','/orders',data=common,files={key:(file,(args.fixture/file).read_bytes()) for key,file in
+            [('pr_matrix','PR.tsv'),('pg_matrix','PG.tsv'),('fasta_file','reference.fasta')]})
+        conflict=client.post(f"/orders/{bad['id']}/start")
+        assert conflict.status_code==422 and conflict.json()['detail']['code']=='species_reference_conflict'
+        assert request('GET',f"/orders/{bad['id']}")['status']=='registered'
+        protein_context={**fixture['analysis_context'],'design_axis':'cross_sectional','analysis_target':'proteomics'}
+        for field in ('study_design','time_points'):protein_context.pop(field,None)
+        protein=request('POST','/orders',data={**common,'project_name':name+'_protein_only','ptm_type':'proteomics',
+            'analysis_context':json.dumps(protein_context)},files={'pg_matrix':('PG.tsv',(args.fixture/'PG.tsv').read_bytes()),
+            'fasta_file':('mouse.fasta',(args.fixture/'reference.fasta').read_text().replace('9606','10090').encode())})
+        request('POST',f"/orders/{protein['id']}/start");protein_result=wait(protein['id'])
+        assert protein_result['analysis_readiness']['kinase']['status']=='not_applicable'
+        assert protein_result['analysis_readiness']['temporal']['status']=='not_applicable'
+        # User entry point auto-starts through the same administrator start service.
+        user_config={'project_name':name+'_user_entry','organism':'human','ptm_type':'phosphorylation',
+            'sample_config':fixture['sample_config'],'analysis_context':fixture['analysis_context']}
+        user=request('POST','/orders/create-from-user',data={'config':json.dumps(user_config),
+            'file_types':['search_result','search_result','fasta','diann_report'],'description':'합성 검증 원문 α',
+            'research_questions':json.dumps(['질문 원문'])},files=[('files',(file,(args.fixture/file).read_bytes())) for file in
+                ['PR.tsv','PG.tsv','reference.fasta','diann.tsv']])
+        user_result=wait(user['order_id'])
+        assert user_result['schema_version']=='astra_analysis_package.v5.experimental'
+        assert user_result['analysis_readiness']['measurement_evidence']['status']=='audit_available'
+        report.update(species_conflict_blocks_before_queue=True,protein_only_cross_sectional_order=protein['id'],
+            user_entry_order=user['order_id'],both_entry_points_use_order_species=True)
     (args.output/'validation.json').write_text(json.dumps(report,indent=2))
     print(json.dumps({k:v for k,v in report.items() if k!='events'},indent=2))
 

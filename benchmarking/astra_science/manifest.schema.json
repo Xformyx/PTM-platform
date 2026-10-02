@@ -1,0 +1,11 @@
+{
+ "$schema":"https://json-schema.org/draft/2020-12/schema",
+ "$id":"urn:ptm:astra_science_benchmark_manifest.v1",
+ "type":"array","items":{"type":"object",
+ "required":["dataset_id","study_id","cohort_id","raw_sha256","taxon","split","truth_scope","license","independent_unit_definition","source_overlap"],
+ "properties":{"dataset_id":{"type":"string"},"study_id":{"type":"string"},"cohort_id":{"type":"string"},
+ "raw_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"taxon":{"type":"string"},
+ "split":{"enum":["development","calibration","locked_test"]},"truth_scope":{"type":"string"},
+ "license":{"type":"string"},"source_overlap":{"type":"array"},"independent_unit_definition":{"type":"string"},
+ "ancestry_id":{"type":["string","null"]},"leakage_group":{"type":["string","null"]},"used_for_development":{"type":"boolean"}}}
+}

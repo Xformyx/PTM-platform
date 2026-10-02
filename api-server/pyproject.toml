@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "PTM Analysis Platform - API Server"
 requires-python = ">=3.11"
 dependencies = [
+    "pyarrow>=18,<26",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "sqlalchemy[asyncio]>=2.0.0",

@@ -26,8 +26,8 @@ def main():
         section=page.get_by_role('region',name='Primary A evidence')
         expect(section.get_by_role('heading',name='Astra 분석 패키지')).to_be_visible(timeout=30000)
         page.get_by_label('Candidate kinase / family').select_option('EGFR')
-        expect(section.get_by_text('AB 60min / vehicle 0min (60)',exact=True)).to_be_visible()
-        expect(section.get_by_text('CuAB 60min / vehicle 0min (60)',exact=True)).to_be_visible()
+        expect(section.get_by_text('AB 60min / vehicle 0min (60 min)',exact=True)).to_be_visible()
+        expect(section.get_by_text('CuAB 60min / vehicle 0min (60 min)',exact=True)).to_be_visible()
         section.screenshot(path=str(args.output/'astra-evidence.png'))
         section.get_by_text('전달되는 실험 정보 · 누락 0개',exact=True).click()
         expect(section.locator('pre').first).to_contain_text('User research questions — complete original')
@@ -61,7 +61,7 @@ def main():
         old_run=re.search(r'Recorded run: (\S+)',section.inner_text()).group(1)
         page.get_by_role('button',name='Re-run from Beginning',exact=True).click()
         confirm=page.get_by_role('dialog');expect(confirm.get_by_label('Time AB 60min',exact=True)).to_have_value('60')
-        confirm.get_by_role('button',name='Confirm & Re-run Primary A evidence',exact=True).click()
+        confirm.get_by_role('button',name='Confirm & create Astra package',exact=True).click()
         expect(section.locator('p').filter(has_text='Recorded run:')).not_to_contain_text(old_run,timeout=1200000)
         assert not errors,errors
         record={'passed':True,'order_id':args.order_id,'ui_copy_order_id':copy_id,'page_errors':errors,

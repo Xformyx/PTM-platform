@@ -182,7 +182,7 @@ def _build_condition_map(sample_cfg: dict | list | None) -> dict:
 class InferredConfig(BaseModel):
     project_name: str
     ptm_type: str  # "phosphorylation" | "ubiquitylation"
-    organism: str  # "mouse" | "human" | "rat"
+    organism: Optional[str] = None  # Unconfirmed LLM suggestion, never a species default.
     conditions: List[str]
     contrasts: List[dict]  # [{treatment, control}]
     sample_mapping: List[dict]  # [{filename, shortname, condition, replicate}]
@@ -352,7 +352,7 @@ Based on the above information, infer the analysis configuration. Respond with O
             if config.get("ptm_type") not in ("phosphorylation", "ubiquitylation"):
                 config["ptm_type"] = "phosphorylation"
             if config.get("organism") not in ("mouse", "human", "rat"):
-                config["organism"] = "mouse"
+                config["organism"] = None
             if "detected_modifications" not in config:
                 config["detected_modifications"] = []
             if "confidence" not in config:
@@ -522,7 +522,7 @@ async def _create_order_from_user_impl(
     # Resolve the registered reference before writing any uploaded files. A
     # custom Rat_hir reference must not silently fall back to the standard rat
     # FASTA because the human INSR entry is part of the reference contract.
-    organism = config_data.get("organism", "mouse")
+    organism = config_data.get("organism")
     from ptm_shared.species_registry import resolve_species_context
     try:
         species_context = resolve_species_context(organism)
@@ -532,13 +532,22 @@ async def _create_order_from_user_impl(
     uploaded_fasta = any(file_type == "fasta" for file_type in file_types)
     from ptm_shared.reference_fasta import missing_reference_detail, resolve_reference_fasta
     resolved_reference_fasta = None
+    registered_mapping=None
     if not uploaded_fasta:
-        resolved_reference_fasta = resolve_reference_fasta(settings.REFERENCE_DIR, species_context.label)
+        context=config_data.get('analysis_context') or {}
+        if context.get('quantitation_export_mode')=='astra_analysis.v5':
+            from ptm_shared.science_reference import bind_registered_reference
+            try:
+                resolved_reference_fasta,context,registered_mapping=bind_registered_reference(settings.REFERENCE_DIR,context)
+                config_data['analysis_context']=context
+            except ValueError as error:raise HTTPException(status_code=422,detail={'code':getattr(error,'code','reference_invalid'),'message':str(error)}) from error
+        else:resolved_reference_fasta = resolve_reference_fasta(settings.REFERENCE_DIR, species_context.label)
     if not uploaded_fasta and not resolved_reference_fasta:
         raise HTTPException(status_code=422, detail=missing_reference_detail(settings.REFERENCE_DIR, species_context))
 
     search_names = [f.filename or "" for f, ft in zip(files, file_types) if ft == "search_result"]
-    if len(search_names) < 2:
+    protein_only=config_data.get("ptm_type")=="proteomics" and (config_data.get("analysis_context") or {}).get("quantitation_export_mode")=="astra_analysis.v5"
+    if len(search_names) < (1 if protein_only else 2):
         raise HTTPException(
             status_code=422,
             detail=(
@@ -558,13 +567,18 @@ async def _create_order_from_user_impl(
     pg_path = None
     fasta_path = resolved_reference_fasta
     reference_pdfs = []
+    scientific_paths={'taxonomy_mapping_path':registered_mapping} if registered_mapping else {}
+    from ptm_shared.astra_science import INPUT_FIELDS
+    scientific_roles={v.removesuffix("_path"):v for v in INPUT_FIELDS.values()}
 
     for f, ft in zip(files, file_types):
         original_name = f.filename or "file"
         content = await f.read()
         file_path = _write_under_dir(input_dir, original_name, content)
 
-        if ft == "raw_data":
+        if ft in scientific_roles:
+            scientific_paths[scientific_roles[ft]]=str(file_path)
+        elif ft == "raw_data":
             # mzML files — stored in input dir
             pass
         elif ft == "fasta":
@@ -592,7 +606,7 @@ async def _create_order_from_user_impl(
     if not fasta_path:
         raise HTTPException(status_code=400, detail="No FASTA file provided or found in reference directory")
 
-    if not pr_path or not pg_path:
+    if (not pr_path and not protein_only) or not pg_path:
         raise HTTPException(
             status_code=422,
             detail=(
@@ -604,7 +618,7 @@ async def _create_order_from_user_impl(
 
     # Build sample_config from ACTUAL TSV columns (same as Admin mode)
     # Read real sample columns from PR matrix and auto-parse with regex
-    tsv_columns = _read_tsv_sample_columns(pr_path) if pr_path else []
+    tsv_columns = _read_tsv_sample_columns(pr_path or pg_path)
     contrasts_for_parse = config_data.get("contrasts", [])
 
     if tsv_columns:
@@ -689,17 +703,18 @@ async def _create_order_from_user_impl(
 
     # Build analysis_context
     analysis_context = {
+        **(config_data.get("analysis_context") or {}),
         "description": description,
         "conditions": config_data.get("conditions", []),
         "contrasts": config_data.get("contrasts", []),
         "detected_modifications": config_data.get("detected_modifications", []),
         "reference_pdfs": reference_pdfs,
-        "organism": config_data.get("organism", "mouse"),
+        "organism": config_data.get("organism"),
         "source": "user_ui",
     }
 
     ptm_type = config_data.get("ptm_type", "phosphorylation")
-    species = config_data.get("organism", "mouse")
+    species = config_data.get("organism")
 
     # Create Order
     order = Order(
@@ -710,15 +725,26 @@ async def _create_order_from_user_impl(
         species=species,
         sample_config=sample_config,
         analysis_context=analysis_context,
-        analysis_options=None,
+        analysis_options=config_data.get("analysis_options"),
         report_options=report_options,
         pr_matrix_path=pr_path,
         pg_matrix_path=pg_path,
         fasta_path=fasta_path,
+        **scientific_paths,
     )
+    if (order.analysis_context or {}).get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'}:
+        from app.api.orders import _updated_analysis_context
+        if config_data.get('sample_config') is not None:order.sample_config=config_data['sample_config']
+        order.analysis_context=_updated_analysis_context(order,{},for_execution=True)
     db.add(order)
     await db.commit()
     await db.refresh(order)
+    if (order.analysis_context or {}).get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'}:
+        # One dispatch/capture/preflight contract for user and administrator entry points.
+        from app.api.orders import start_order
+        await start_order(order.id,db,user)
+        return {'order_id':order.id,'order_code':order.order_code,'status':'queued',
+            'message':'Astra package requested using the persisted Order design and species'}
 
     logger.info(f"User order created: {order_code} (id={order.id}) by user {getattr(user, 'email', 'internal')}")
 

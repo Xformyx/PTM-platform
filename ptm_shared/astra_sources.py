@@ -281,7 +281,7 @@ def retain_unreplaced_prior_successes(priors, result):
                 pubmed_done = True
 
 
-def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refresh=False, fixtures=None, checkpoint=lambda: None, budget_seconds=None, max_requests=None, prior_pins=None):
+def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refresh=False, fixtures=None, checkpoint=lambda: None, budget_seconds=None, max_requests=None, prior_pins=None, query_policy=None):
     root = Path(root)
     if pin_sha and not refresh:
         path = root/'source_pins'/(pin_sha+'.json')
@@ -290,6 +290,7 @@ def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refre
         raise ValueError('Pinned source bytes missing/corrupt; do not silently refresh an immutable source pin')
     client = SourceClient(root, fixtures, budget_seconds=budget_seconds, max_requests=max_requests, checkpoint=checkpoint, refresh=refresh)
     result = {'schema_version': VERSION, 'queries': client.records, 'snapshots': [], 'relations': [], 'kea': [], 'context': [], 'bibliography': []}
+    if query_policy:result['query_budget_policy']=query_policy
     if ptm_type not in {'phosphorylation', 'phospho'}:
         result['status'] = 'not_applicable_nonphosphorylation'; return pin_sources(root, result)
     taxa = sorted({str(r['fasta_taxonomy_id']) for r in mapping if r.get('fasta_taxonomy_id')})
@@ -343,6 +344,14 @@ def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refre
     for source in result['snapshots']:
         substrates.update(str(row.get('substrate')) for row in source.get('rows') or [] if row.get('substrate'))
     ordered = accession_query_order(by_accession, substrates)
+    if query_policy=='taxon_round_robin.v1':
+        from collections import defaultdict,deque
+        by_taxon=defaultdict(deque)
+        for accession in ordered:by_taxon[str(by_accession[accession].get('fasta_taxonomy_id') or 'unknown')].append(accession)
+        ordered=[]
+        while any(by_taxon.values()):
+            for tax in sorted(by_taxon):
+                if by_taxon[tax]:ordered.append(by_taxon[tax].popleft())
     parser_module = None
     queried=set()
     for accession in ordered:

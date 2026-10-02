@@ -111,7 +111,7 @@ def quantitative_evidence(tables,alternative,design,normalization,alternative_no
         series_id=stable_id('series',[conditions[cid]['arm_id'],reference_id,pairing]) if contrast_id else None
         candidates=candidateedges.loc[candidateedges.form_id.eq(fid)]
         emergence.append({'emergence_id':stable_id('emergence',[fid,cid,contrast_id]),'contrast_id':contrast_id,'reference_condition_id':reference_id,'series_id':series_id,'form_id':fid,'condition_id':cid,'arm_id':conditions[cid]['arm_id'],
-            'time_min':conditions[cid]['time']['minutes'],'detected_n':len(positive),'scheduled_n':len(group),'parent_n':len(parent),
+            'time_min':(conditions[cid].get('time') or {}).get('minutes'),'detected_n':len(positive),'scheduled_n':len(group),'parent_n':len(parent),
             'detected_injection_ids':';'.join(group.loc[group.U_observed,'injection_id']),'parent_injection_ids':';'.join(group.loc[group.P_observed,'injection_id']),
             'positive_intensity_min':positive.min() if len(positive) else np.nan,'positive_intensity_median':positive.median() if len(positive) else np.nan,
             'positive_intensity_max':positive.max() if len(positive) else np.nan,'repeatability_tier':'repeated_detection' if len(positive)>=2 else 'single_detection' if len(positive) else 'not_detected',
@@ -152,7 +152,7 @@ def quantitative_evidence(tables,alternative,design,normalization,alternative_no
         'technical_dispersion':pd.DataFrame(qc,columns=['form_id','condition_id','material_id','track','observed_n','scheduled_n','log2_SD','statistical_scope'])}
 
 
-def candidate_context_and_omissions(tables,discovery,technical_omissions):
+def candidate_context_and_omissions(tables,discovery,technical_omissions,reference=None):
     """Kinase abundance/self-sites never substitute for a substrate footprint."""
     edges=discovery['kinase_candidate_edges'];members=discovery['substrate_contributions']
     proteins=tables['protein_contrasts'];forms=tables['summary'];context=[];self_sites=[];omissions=[]
@@ -161,6 +161,9 @@ def candidate_context_and_omissions(tables,discovery,technical_omissions):
         for symbol in str(gene).split(';'):groups_by_gene.setdefault(symbol,set()).add(group)
     for candidate,g in edges.groupby('candidate_id',sort=True):
         gene=g.candidate_gene.iloc[0];groups=groups_by_gene.get(gene,set())
+        if reference is not None:
+            from .science_reference import candidate_protein_groups
+            groups=candidate_protein_groups(g,proteins.protein_group.unique(),reference)
         for contrast in tables['comparisons'].contrast_id.unique():
             abundance=proteins.loc[proteins.protein_group.isin(groups)&proteins.contrast_id.eq(contrast)]
             if abundance.empty:context.append({'candidate_id':candidate,'contrast_id':contrast,'protein_group':None,'log2_abundance':None,'status':'unavailable_kinase_protein_not_observed_or_family_unresolved'})
@@ -170,7 +173,7 @@ def candidate_context_and_omissions(tables,discovery,technical_omissions):
             self_sites.append({'candidate_id':candidate,'form_id':r.form_id,'contrast_id':r.contrast_id,'A':r.A,'U_all':r.U_all,
                 'site_function_status':'regulatory_function_not_annotated','interpretation':'observed_kinase_PTM_not_activity_proof'})
     loo_index={(cid,omitted):rows.set_index('form_id').A.to_dict() for (cid,omitted),rows in technical_omissions.groupby(['contrast_id','omitted_injection_id'])}
-    for (candidate,cid,track),rows in members.loc[members.track.isin(['curated_A','motif_A'])].groupby(['candidate_id','contrast_id','track'],sort=True):
+    for (candidate,cid,track),rows in members.loc[members.track.isin(['curated_A','motif_A','specificity_A'])].groupby(['candidate_id','contrast_id','track'],sort=True):
         for (contrast,omitted),values in loo_index.items():
             if contrast!=cid:continue
             gene_values={}

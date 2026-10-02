@@ -287,7 +287,7 @@ def _validate_order_code(code: str) -> None:
 def _validated_order_sample_manifest(order, context=None, *, secondary=False):
     from ptm_shared.sample_manifest import validate_sample_manifest
     context = context if context is not None else (order.analysis_context or {})
-    if context.get('quantitation_export_mode')=='astra_analysis.v4' or (context.get('quantitation_export_mode')=='enrichment_free_timecourse.v3' and not secondary):
+    if context.get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'} or (context.get('quantitation_export_mode')=='enrichment_free_timecourse.v3' and not secondary):
         return None  # v1 is an import source; canonical v3 is validated at execution.
     manifest = context.get("secondary_sample_manifest" if secondary else "sample_manifest")
     sample_config = order.secondary_sample_config if secondary else order.sample_config
@@ -327,7 +327,7 @@ def _reject_undeclared_export_mode(existing, submitted) -> None:
 
 def _reject_astra_downstream_stage(order, stage: str) -> None:
     mode = (order.analysis_context or {}).get("quantitation_export_mode") if isinstance(getattr(order, "analysis_context", None), dict) else None
-    if mode == "astra_analysis.v4" and stage in {"rag_enrichment", "report_generation"}:
+    if mode in {"astra_analysis.v4","astra_analysis.v5"} and stage in {"rag_enrichment", "report_generation"}:
         raise HTTPException(
             status_code=409,
             detail="Astra analysis package orders stop after preprocessing. Re-run preprocessing to regenerate the downloadable package. RAG enrichment and report generation are not part of this purpose.",
@@ -340,10 +340,12 @@ def _updated_analysis_context(order, patch, existing=None, *, for_execution=Fals
         context = merge_analysis_context(existing if existing is not None else order.analysis_context, patch)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    if context.get('quantitation_export_mode') in {'enrichment_free_timecourse.v3','astra_analysis.v4'}:
+    if context.get('quantitation_export_mode') in {'enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'}:
         from ptm_shared.study_execution import resolve_context,validate_execution
-        if context.get('quantitation_export_mode')=='astra_analysis.v4':
+        if context.get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'}:
             from ptm_shared.astra_plan import effective_context,validate_execution as astra_validate
+            if context.get('quantitation_export_mode')=='astra_analysis.v5':
+                from ptm_shared.astra_science import validate_execution as astra_validate
             context=effective_context(context)
             def validate_execution(ctx,ptm,tax,opts,root,*columns):
                 return astra_validate(ctx,ptm,tax,opts,*columns)
@@ -351,15 +353,23 @@ def _updated_analysis_context(order, patch, existing=None, *, for_execution=Fals
             species=_require_species_context(order.species)
             context=resolve_context(context,order.sample_config,taxonomy_id=species.taxonomy_id,species=order.species,ptm_type=order.ptm_type)
             if for_execution:
-                if context.get('quantitation_export_mode')!='astra_analysis.v4' and (getattr(order,'secondary_pr_matrix_path',None) or getattr(order,'secondary_pg_matrix_path',None)):
+                if context.get('quantitation_export_mode') not in {'astra_analysis.v4','astra_analysis.v5'} and (getattr(order,'secondary_pr_matrix_path',None) or getattr(order,'secondary_pg_matrix_path',None)):
                     raise ValueError('Generic primary A currently supports one PR/PG pair; use standard cross-talk analysis for paired PTMs')
                 columns=[]
                 for path in [order.pr_matrix_path,order.pg_matrix_path]:
+                    if not path:columns.append(None);continue
                     with open(path,encoding='utf-8-sig') as handle:columns.append(next(csv.reader(handle,delimiter='\t')))
                 validate_execution(context,order.ptm_type,species.taxonomy_id,order.analysis_options,
                     Path(get_settings().REFERENCE_DIR)/'frozen_annotations',*columns)
+                if context.get('quantitation_export_mode')=='astra_analysis.v5':
+                    from ptm_shared.science_reference import preflight
+                    from ptm_shared.astra_science import INPUT_FIELDS
+                    preflight({'species':order.species,'species_tax_id':species.taxonomy_id,
+                        'kegg_organism':species.kegg_organism,'fasta_path':order.fasta_path,
+                        'pr_matrix_path':order.pr_matrix_path,'pg_matrix_path':order.pg_matrix_path,
+                        **{field:getattr(order,field,None) for field in INPUT_FIELDS.values()}},context)
         except (ValueError,OSError,StopIteration,TypeError) as error:
-            raise HTTPException(status_code=422,detail={'code':'study_design_execution_invalid','issues':getattr(error,'issues',[]),'message':str(error)}) from error
+            raise HTTPException(status_code=422,detail={'code':getattr(error,'code','study_design_execution_invalid'),'field':getattr(error,'field',None),'issues':getattr(error,'issues',[]),'message':str(error)}) from error
         return context
     _validated_order_sample_manifest(order, context)
     if context.get("secondary_sample_manifest") is not None:
@@ -393,8 +403,17 @@ def _attach_enrichment_free_profile(order, config):
         context['literature_context']={'selected_collection_ids':order.rag_collections,'collection_contents_included':False,
             'interpretation_only':True,'legacy_RAG_execution':False}
         config['experimental_context']=context
-        if context.get('quantitation_export_mode')=='astra_analysis.v4':
+        if context.get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'}:
             config['reference_root']=get_settings().REFERENCE_DIR
+            if context.get('quantitation_export_mode')=='astra_analysis.v5':
+                from ptm_shared.astra_science import INPUT_FIELDS
+                from ptm_shared.science_reference import preflight
+                config.update({field:getattr(order,field,None) for field in INPUT_FIELDS.values()})
+                config['species']=order.species
+                try:preflight(config,context)
+                except ValueError as error:
+                    raise HTTPException(status_code=422,detail={'code':getattr(error,'code','science_input_invalid'),
+                        'field':getattr(error,'field',None),'message':str(error)}) from error
             config['frozen_annotation']=None
             config['source_fixtures_path']=os.getenv('PTM_ASTRA_PROVIDER_FIXTURES')
             from ptm_shared.astra_inputs import capture_order
@@ -430,12 +449,14 @@ async def list_frozen_annotations(taxonomy_id:Optional[str]=None,ptm_type:Option
 @router.post('/resolve-design')
 async def resolve_order_design(body:dict=Body(...),user=Depends(get_current_user)):
     from ptm_shared.study_execution import resolve_context
-    species=_require_species_context(body.get('species','human'))
+    species=_require_species_context(body.get('species'))
     try:
         context=resolve_context(body.get('analysis_context') or {},body.get('sample_config') or [],
-            taxonomy_id=species.taxonomy_id,species=body.get('species','human'),ptm_type=body.get('ptm_type','phosphorylation'))
+            taxonomy_id=species.taxonomy_id,species=body.get('species'),ptm_type=body.get('ptm_type','phosphorylation'))
         from ptm_shared.astra_plan import resolve_plan
-        return {'study_design':context['study_design'],'analysis_plan':resolve_plan(context) if context.get('quantitation_export_mode')=='astra_analysis.v4' else None}
+        if context.get('quantitation_export_mode')=='astra_analysis.v5':
+            from ptm_shared.astra_science import resolve_plan
+        return {'study_design':context['study_design'],'analysis_plan':resolve_plan(context) if context.get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'} else None}
     except (ValueError,TypeError,KeyError) as error:
         raise HTTPException(status_code=422,detail={'code':'design_input_invalid','message':str(error)}) from error
 
@@ -1025,6 +1046,7 @@ async def get_order(
         "ptm_type": order.ptm_type,
         "species": order.species,
         "organism_code": order.organism_code,
+        "scientific_inputs": {field:{"filename":Path(getattr(order,field)).name,"status":"provided"} if getattr(order,field,None) else {"status":"not_provided"} for field in ('diann_report_path','diann_site_report_path','run_crosswalk_path','search_fasta_path','transgene_manifest_path','taxonomy_mapping_path','specificity_manifest_path','perturbation_manifest_path')},
         "sample_config": order.sample_config,
         "analysis_context": order.analysis_context,
         "analysis_options": order.analysis_options,
@@ -1167,7 +1189,16 @@ async def create_order(
     analysis_context: Optional[str] = Form(None),
     analysis_options: Optional[str] = Form(None),
     rag_collections: Optional[str] = Form(None),
-    pr_matrix: UploadFile = File(...),
+    pr_matrix: Optional[UploadFile] = File(None),
+    fasta_file: Optional[UploadFile] = File(None),
+    diann_report: Optional[UploadFile] = File(None),
+    diann_site_report: Optional[UploadFile] = File(None),
+    run_crosswalk: Optional[UploadFile] = File(None),
+    search_fasta: Optional[UploadFile] = File(None),
+    transgene_manifest: Optional[UploadFile] = File(None),
+    taxonomy_mapping: Optional[UploadFile] = File(None),
+    specificity_manifest: Optional[UploadFile] = File(None),
+    perturbation_manifest: Optional[UploadFile] = File(None),
     pg_matrix: UploadFile = File(...),
     config_file: Optional[UploadFile] = File(None),
     research_attachments: Optional[List[UploadFile]] = File(None),
@@ -1212,13 +1243,19 @@ async def create_order(
         # back to the standard rat reference because its custom human INSR entry
         # is part of the reproducible reference contract.
         species_context = _require_species_context(species)
-        fasta_path = _resolve_fasta(settings.REFERENCE_DIR, species_context.label)
-        if not fasta_path:
+        posted_context = _safe_json_loads(analysis_context) or {}
+        science=posted_context.get('quantitation_export_mode')=='astra_analysis.v5'
+        registered_mapping=None
+        if science and not fasta_file:
+            from ptm_shared.science_reference import bind_registered_reference
+            try:fasta_path,posted_context,registered_mapping=bind_registered_reference(settings.REFERENCE_DIR,posted_context)
+            except ValueError as error:raise HTTPException(status_code=422,detail={'code':getattr(error,'code','reference_invalid'),'message':str(error)}) from error
+        else:fasta_path = None if fasta_file else _resolve_fasta(settings.REFERENCE_DIR, species_context.label)
+        if not fasta_path and not fasta_file:
             raise HTTPException(
                 status_code=422,
                 detail=_missing_reference_detail(settings.REFERENCE_DIR, species_context),
             )
-        posted_context = _safe_json_loads(analysis_context)
         _reject_undeclared_export_mode(None, posted_context if isinstance(posted_context, dict) else None)
 
         order_dir = input_dir
@@ -1238,7 +1275,12 @@ async def create_order(
             file_path.write_bytes(content)
             return str(file_path)
 
-        pr_path = await save_upload(pr_matrix)
+        if not pr_matrix and not (science and ptm_type=='proteomics'):raise HTTPException(status_code=422,detail='PR input required for PTM analysis')
+        pr_path = await save_upload(pr_matrix) if pr_matrix else None
+        if fasta_file:fasta_path=await save_upload(fasta_file,'reference')
+        science_paths={'taxonomy_mapping_path':registered_mapping} if registered_mapping else {}
+        for field,upload in [('diann_report_path',diann_report),('diann_site_report_path',diann_site_report),('run_crosswalk_path',run_crosswalk),('search_fasta_path',search_fasta),('transgene_manifest_path',transgene_manifest),('taxonomy_mapping_path',taxonomy_mapping),('specificity_manifest_path',specificity_manifest),('perturbation_manifest_path',perturbation_manifest)]:
+            if upload:science_paths[field]=await save_upload(upload,'science/'+field)
         pg_path = await save_upload(pg_matrix)
 
         research_records=[]
@@ -1291,7 +1333,7 @@ async def create_order(
             analysis_options_data["protein_list_path"] = protein_list_path
 
         report_options_data = _safe_json_loads(report_options, {})
-        generic_profile=(_safe_json_loads(analysis_context) or {}).get('quantitation_export_mode') in {'enrichment_free_timecourse.v3','astra_analysis.v4'}
+        generic_profile=(_safe_json_loads(analysis_context) or {}).get('quantitation_export_mode') in {'enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'}
         if generic_profile:
             try:
                 report_options_data=json.loads(report_options or '{}')
@@ -1321,13 +1363,14 @@ async def create_order(
             ptm_type=ptm_type,
             species=species,
             sample_config=sample_config_data,
-            analysis_context=_safe_json_loads(analysis_context),
+            analysis_context=posted_context,
             analysis_options=analysis_options_data,
             report_options=report_options_data,
             rag_collections=rag_collections_data,
             pr_matrix_path=pr_path,
             pg_matrix_path=pg_path,
             fasta_path=fasta_path,
+            **science_paths,
             config_xlsx_path=config_path,
             secondary_pr_matrix_path=secondary_pr_path,
             secondary_pg_matrix_path=secondary_pg_path,
@@ -1336,7 +1379,7 @@ async def create_order(
         )
 
         order.analysis_context = {**(order.analysis_context or {}),'uploaded_file_metadata':{
-            'PR':{'filename':pr_matrix.filename},'PG':{'filename':pg_matrix.filename},
+            'PR':{'filename':pr_matrix.filename if pr_matrix else None},'PG':{'filename':pg_matrix.filename},
             'configuration':{'filename':config_file.filename if config_file else None}}}
         if research_records:order.analysis_context['research_attachment_records']=research_records
         order.analysis_context = _updated_analysis_context(order, {})
@@ -1423,7 +1466,7 @@ async def duplicate_order(
         analysis_ctx = _updated_analysis_context(source, body.analysis_context)
         rag_cols = body.rag_collections if "rag_collections" in body.model_fields_set else source.rag_collections
 
-        if analysis_ctx.get('quantitation_export_mode')=='astra_analysis.v4' and not analysis_ctx.get('refresh_references',False):
+        if analysis_ctx.get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'} and not analysis_ctx.get('refresh_references',False):
             recorded_path=Path(settings.OUTPUT_DIR)/source.order_code/'enrichment_free_current.json'
             if recorded_path.is_file():
                 recorded=json.loads(recorded_path.read_text())
@@ -1449,6 +1492,7 @@ async def duplicate_order(
             pg_matrix_path=_remap_path(source.pg_matrix_path),
             fasta_path=source.fasta_path,
             config_xlsx_path=_remap_path(source.config_xlsx_path),
+            **{field:_remap_path(getattr(source,field,None)) for field in ['diann_report_path', 'diann_site_report_path', 'run_crosswalk_path', 'search_fasta_path', 'transgene_manifest_path', 'taxonomy_mapping_path', 'specificity_manifest_path', 'perturbation_manifest_path']},
             secondary_pr_matrix_path=_remap_path(source.secondary_pr_matrix_path),
             secondary_pg_matrix_path=_remap_path(source.secondary_pg_matrix_path),
             secondary_ptm_type=source.secondary_ptm_type,
@@ -1610,7 +1654,7 @@ async def start_order(
     celery_app.conf.broker_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
     celery_app.conf.result_backend = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
 
-    if (order.analysis_context or {}).get('quantitation_export_mode')=='astra_analysis.v4':
+    if (order.analysis_context or {}).get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'}:
         from app.services.astra_input_capture import prepare_astra_inputs
         task_config['user_input_snapshot'],task_config['literature_pin']=await prepare_astra_inputs(order,db,get_settings().REFERENCE_DIR)
     _attach_enrichment_free_profile(order, task_config)
@@ -1953,7 +1997,7 @@ async def run_stage(
                 bench_run.status = "preprocessing"
                 bench_run.error_message = None
                 await db.commit()
-        if (order.analysis_context or {}).get('quantitation_export_mode')=='astra_analysis.v4':
+        if (order.analysis_context or {}).get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'}:
             from app.services.astra_input_capture import prepare_astra_inputs
             task_config['user_input_snapshot'],task_config['literature_pin']=await prepare_astra_inputs(order,db,get_settings().REFERENCE_DIR)
         _attach_enrichment_free_profile(order, task_config)
@@ -10079,15 +10123,20 @@ async def substrate_go_localization(
     if not genes:
         raise HTTPException(status_code=400, detail="No genes provided")
 
+    from ptm_shared.annotation_registry import digest
+    species_context=_require_species_context(order.species)
+    uniprot_organism_id=species_context.taxonomy_id
+    cache_scope={"taxon":uniprot_organism_id,"reference_sha256":digest(order.fasta_path),"provider":"UniProt_GO_CC","parser_version":"go_cc.v2","identity_policy":"exact_symbol_in_declared_taxon"}
+    cache_valid=bool(order.substrate_go_localization and order.substrate_go_localization.get('scope')==cache_scope)
     # Check cache
-    if not force_refresh and order.substrate_go_localization:
+    if not force_refresh and cache_valid:
         cached = order.substrate_go_localization
         cached_genes = set(cached.get("gene_localizations", {}).keys())
-        requested_genes = set(g.upper() for g in genes)
+        requested_genes = set(g for g in genes)
         # If all requested genes are already cached, return immediately
         if requested_genes.issubset(cached_genes):
             # Filter to only requested genes
-            filtered = {g: cached["gene_localizations"].get(g.upper(), []) for g in genes}
+            filtered = {g: cached["gene_localizations"].get(g, []) for g in genes}
             summary: dict[str, int] = {}
             for locs in filtered.values():
                 for loc in locs:
@@ -10097,15 +10146,6 @@ async def substrate_go_localization(
                 "summary": dict(sorted(summary.items(), key=lambda x: -x[1])),
                 "_cached": True,
             }
-
-    # Determine species/organism
-    species_lower = (order.species or "human").lower()
-    uniprot_organism_id = (
-        "10090" if "mouse" in species_lower or "mus" in species_lower
-        else "9606" if "human" in species_lower or "homo" in species_lower
-        else "10116" if "rat" in species_lower or "rattus" in species_lower
-        else ""
-    )
 
     UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb"
 
@@ -10196,10 +10236,10 @@ async def substrate_go_localization(
     # Batch fetch with concurrency limit
     import asyncio
     gene_localizations: dict[str, list[str]] = {}
-    unique_genes = list(set(g.upper() for g in genes))
+    unique_genes = list(set(g for g in genes))
 
     # Use existing cache as base
-    if order.substrate_go_localization:
+    if cache_valid:
         gene_localizations = dict(order.substrate_go_localization.get("gene_localizations", {}))
 
     # Only fetch genes not already cached (unless force_refresh)
@@ -10236,6 +10276,7 @@ async def substrate_go_localization(
     cache_data = {
         "gene_localizations": gene_localizations,
         "fetched_at": _dt.utcnow().isoformat(),
+        "scope":cache_scope,
     }
     order.substrate_go_localization = cache_data
     await db.commit()

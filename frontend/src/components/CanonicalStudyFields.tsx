@@ -13,7 +13,7 @@ type Contrast={contrast_id:string;target_condition_id:string;reference_condition
 type Design={schema_version:string;status:string;replication_declaration:string;conditions:Condition[];arms:Arm[];materials:Material[];injections:Injection[];contrasts:Contrast[];issues:Array<{code:string;path:string;message:string;severity:string}>;[key:string]:unknown};
 
 export default function CanonicalStudyFields({context,onChange,samples,species,ptmType}:{context:AnalysisContext;onChange:(v:AnalysisContext)=>void;samples:DesignSample[];species:string;ptmType:string}) {
-  const astra=context.quantitation_export_mode==='astra_analysis.v4';
+  const astra=['astra_analysis.v4','astra_analysis.v5'].includes(String(context.quantitation_export_mode));
   const [plan,setPlan]=useState<Record<string,unknown>|null>(null);
   const [error,setError]=useState('');const [pending,setPending]=useState(false);const [revision,setRevision]=useState(0);
   const current=useRef({context,onChange});current.current={context,onChange};
@@ -39,9 +39,9 @@ export default function CanonicalStudyFields({context,onChange,samples,species,p
     <p className="text-xs text-muted-foreground">Files and conditions come from the configured samples. Rep numbers alone do not establish biological or technical replication. Drafts can be saved; only unresolved execution requirements block Start.</p>
     <label className="flex gap-2 text-sm"><input type="checkbox" checked={context.enrichment_status==='enrichment_free'} onChange={e=>put('enrichment_status',e.target.checked?'enrichment_free':'unknown')}/>These PR/PG inputs were acquired without PTM enrichment</label>
     {astra?<div className="rounded border bg-muted/30 p-3 text-sm" aria-label="Automatic analysis plan">
-      <p>정량: 공급 intensity · 동일 주입 parent 보정 · 대체 parent/정규화 민감도</p>
-      <p>탐색: {ptmType==='phosphorylation'?'kinase DB + 관측 잔기 중심 motif + 기질 footprint':'지원 PTM 정량·등장·단백질 통합; kinase 해당 없음'}</p>
-      <p>통합: PTM/kinase 시간 패턴 + 전체 단백질 변화 + 등장 PTM</p>
+      <p>정량: {ptmType==='proteomics'?'단백질 abundance 비교 · 공급 intensity · 정규화 민감도':'공급 intensity · 동일 주입 parent 보정 · 대체 parent/정규화 민감도'}</p>
+      <p>탐색: {ptmType==='phosphorylation'?'kinase DB + 관측 잔기 중심 motif + 기질 footprint':ptmType==='proteomics'?'단백질 비교; PTM/kinase 단계 해당 없음':'지원 PTM 정량·등장·단백질 통합; kinase 해당 없음'}</p>
+      <p>통합: {context.design_axis==='cross_sectional'?'선언한 조건 대비 비교. 시간 사건·AUC·선후관계 해당 없음':'실제 관측 시간에 따른 전체 단백질 및 지원 PTM/kinase 변화'}</p>
       <p>참조 자료는 자동 준비 후 이번 실행에 고정됩니다. 일부 DB 실패는 제한 사항과 함께 전달됩니다.</p>
       <details><summary>참조 자료 갱신</summary><label className="flex gap-2"><input type="checkbox" checked={context.refresh_references===true} onChange={e=>put('refresh_references',e.target.checked)}/>다음 새 실행에서 참조 자료 갱신 요청 (완료된 패키지는 보존)</label></details>
       {plan&&<details><summary>Recorded plan details</summary><pre className="whitespace-pre-wrap text-xs">{JSON.stringify(plan,null,2)}</pre></details>}
@@ -58,8 +58,8 @@ export default function CanonicalStudyFields({context,onChange,samples,species,p
       <div className="overflow-auto"><table className="w-full text-xs"><thead><tr><th>Condition</th><th>Arm</th><th>Time</th><th>Unit</th><th>Role</th></tr></thead><tbody>
         {design.conditions.map(c=><tr key={c.condition_id}><td>{c.label}</td><td><select aria-label={`Arm ${c.label}`} className={selectClass} value={c.arm_id} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,arm_id:e.target.value}:v)})}>
           {design.arms.map(a=><option key={a.arm_id} value={a.arm_id}>{a.name}</option>)}</select></td>
-          <td><Input aria-label={`Time ${c.label}`} type="number" step="any" value={c.time?.value??''} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,time:e.target.value===''?null:{...(v.time??{unit:'min',minutes:0,original:''}),value:Number(e.target.value)}}:v)})}/></td>
-          <td><select aria-label={`Time unit ${c.label}`} className={selectClass} value={c.time?.unit??'min'} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,time:{value:v.time?.value??0,minutes:v.time?.minutes??0,original:v.time?.original??'',unit:e.target.value}}:v)})}>
+          <td><Input disabled={context.design_axis==='cross_sectional'} aria-label={`Time ${c.label}`} type="number" step="any" value={c.time?.value??''} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,time:e.target.value===''?null:{...(v.time??{unit:'min',minutes:0,original:''}),value:Number(e.target.value)}}:v)})}/></td>
+          <td><select disabled={context.design_axis==='cross_sectional'} aria-label={`Time unit ${c.label}`} className={selectClass} value={c.time?.unit??'min'} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,time:{value:v.time?.value??0,minutes:v.time?.minutes??0,original:v.time?.original??'',unit:e.target.value}}:v)})}>
             {[...new Set(['s','min','h','d',c.time?.unit??'min'])].map(u=><option key={u}>{u}</option>)}</select></td>
           <td><select aria-label={`Role ${c.label}`} className={selectClass} value={c.role} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,role:e.target.value}:v),contrasts:[]})}>
             <option value="target">Target</option><option value="reference">Reference</option><option value="unknown">Unconfirmed</option></select></td></tr>)}

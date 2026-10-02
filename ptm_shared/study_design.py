@@ -14,6 +14,7 @@ import math
 import re
 
 VERSION = 'study_design.v3'
+SCIENCE_VERSION = 'study_design.v4'
 MIGRATION_VERSION = 'legacy_to_study_design.v1'
 PROFILE = 'enrichment_free_timecourse.v3'
 TIME_ABS_TOL_MINUTES = 1e-8
@@ -133,8 +134,10 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
         if context.get(key) is not None and not isinstance(context[key],dict):raise ValueError(key+' must be an object')
     rows=legacy_samples(sample_config)
     explicit=deepcopy(context.get('study_design') or {})
-    if explicit and explicit.get('schema_version')!=VERSION:raise DesignError([issue('schema_version','study_design.schema_version','Unsupported study design schema; explicit migration is required')])
-    previous=explicit if explicit.get('schema_version')==VERSION else {}
+    if explicit and explicit.get('schema_version') not in {VERSION,SCIENCE_VERSION}:raise DesignError([issue('schema_version','study_design.schema_version','Unsupported study design schema; explicit migration is required')])
+    previous=explicit if explicit.get('schema_version') in {VERSION,SCIENCE_VERSION} else {}
+    science=context.get('quantitation_export_mode')=='astra_analysis.v5' or previous.get('schema_version')==SCIENCE_VERSION
+    axis=context.get('design_axis',previous.get('study',{}).get('design_axis','time_course')) if science else 'time_course'
     structural=validate_structure(previous) if previous else []
     if structural:
         return {**previous,'issues':structural,'status':'draft'}
@@ -183,6 +186,9 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
         cid=c.get('condition_id'); path=f'conditions.{cid}.time'
         source_labels=sorted({r['raw_condition'] for r in rows if r['condition']==c.get('label')})
         c['source_labels']=source_labels
+        if axis=='cross_sectional':
+            c.setdefault('time',None)
+            continue
         explicit_time=c.get('time')
         parsed=label_time(c.get('label',''))
         m=manifest_conditions.get(c.get('label'),{})
@@ -282,7 +288,8 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
         else:errors.append(issue('legacy_insulin_dose_conflict','arms','Legacy insulin dose is not assigned to a different treatment','warning',original_value=legacy_dose))
     study={**previous.get('study',{}),**_metadata(context),'taxonomy_id':str(taxonomy_id) if taxonomy_id is not None else previous.get('study',{}).get('taxonomy_id'),
            'species':species or previous.get('study',{}).get('species'),'ptm_type':ptm_type}
-    design={'schema_version':VERSION,'migration_version':MIGRATION_VERSION,'study':study,
+    if science:study.update(design_axis=axis,analysis_target=context.get('analysis_target',previous.get('study',{}).get('analysis_target','proteomics' if ptm_type=='proteomics' else 'phosphoproteomics' if ptm_type in {'phospho','phosphorylation'} else 'other_ptm')))
+    design={'schema_version':SCIENCE_VERSION if science else VERSION,'migration_version':MIGRATION_VERSION,'study':study,
         'arms':arms,'conditions':conditions,'materials':materials,'injections':injections,'contrasts':contrasts,
         'replication_declaration':declaration,'field_provenance':provenance,'metadata_conflicts':pending_conflicts,
         'time_policy':{'internal_unit':'min','absolute_tolerance_minutes':TIME_ABS_TOL_MINUTES,'relative_tolerance':1e-12,
@@ -303,7 +310,7 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
 def validate_study_design(design, rows=None):
     errors=validate_structure(design)
     if errors:return errors
-    if design.get('schema_version')!=VERSION:return [issue('schema_version','schema_version','Unsupported study design schema')]
+    if design.get('schema_version') not in {VERSION,SCIENCE_VERSION}:return [issue('schema_version','schema_version','Unsupported study design schema')]
     for collection,key in [('arms','arm_id'),('conditions','condition_id'),('materials','material_id'),('injections','injection_id'),('contrasts','contrast_id')]:
         ids=[r.get(key) for r in design.get(collection,[])]
         if any(not isinstance(v,str) or not v for v in ids) or len(set(ids))!=len(ids):
@@ -312,8 +319,12 @@ def validate_study_design(design, rows=None):
     conditions={c['condition_id']:c for c in design.get('conditions',[])}
     materials={m['material_id']:m for m in design.get('materials',[])}
     columns=[]
+    cross_sectional=design.get('schema_version')==SCIENCE_VERSION and design.get('study',{}).get('design_axis')=='cross_sectional'
+    if design.get('schema_version')==SCIENCE_VERSION and design.get('study',{}).get('design_axis') not in {'time_course','cross_sectional'}:
+        errors.append(issue('design_axis_invalid','study.design_axis','Choose time_course or cross_sectional'))
     for c in conditions.values():
         if c.get('arm_id') not in arms:errors.append(issue('arm_missing',f'conditions.{c["condition_id"]}.arm_id','Arm does not exist'))
+        if cross_sectional and c.get('time') is None:continue
         try:
             t=c.get('time') or {}; converted=time_value(t.get('value'),t.get('unit'))
             if not same_time(converted['minutes'],t.get('minutes')):raise ValueError()

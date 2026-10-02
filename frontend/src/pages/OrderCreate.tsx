@@ -252,6 +252,7 @@ export default function OrderCreate() {
   const [files, setFiles] = useState<{
     pr_matrix: File | null; pg_matrix: File | null; config_file: File | null;
   }>({ pr_matrix: null, pg_matrix: null, config_file: null });
+  const [scienceFiles,setScienceFiles] = useState<Record<string,File>>({});
   const [researchAttachments, setResearchAttachments] = useState<File[]>([]);
   const [referenceStatus, setReferenceStatus] = useState<{
     ready: boolean;
@@ -499,7 +500,7 @@ export default function OrderCreate() {
 
   // Submit
   const handleSubmit = async () => {
-    if (!files.pr_matrix || !files.pg_matrix) {
+    if ((!files.pr_matrix && form.ptm_type!=="proteomics") || !files.pg_matrix) {
       setError("PR Matrix and PG Matrix files are required");
       return;
     }
@@ -515,7 +516,7 @@ export default function OrderCreate() {
       setError("Sample configuration is required. Go back to Step 2 and configure samples.");
       return;
     }
-    if (form.species === "rat_hir" && referenceStatus?.ready === false) {
+    if (form.species === "rat_hir" && referenceStatus?.ready === false && !scienceFiles.fasta_file) {
       setError(referenceStatus.message);
       return;
     }
@@ -597,7 +598,8 @@ export default function OrderCreate() {
     if (!useAllCollections) {
       formData.append("rag_collections", JSON.stringify(selectedCollectionIds));
     }
-    formData.append("pr_matrix", files.pr_matrix);
+    if(files.pr_matrix) formData.append("pr_matrix", files.pr_matrix);
+    for(const [field,file] of Object.entries(scienceFiles)) formData.append(field,file);
     formData.append("pg_matrix", files.pg_matrix);
     if (files.config_file) formData.append("config_file", files.config_file);
     for (const file of researchAttachments) formData.append("research_attachments", file);
@@ -699,9 +701,10 @@ export default function OrderCreate() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>PTM Type</Label>
-                    <Select value={form.ptm_type} onValueChange={(v) => setForm({ ...form, ptm_type: v })}>
+                    <Select value={form.ptm_type} onValueChange={(v) => {setForm({ ...form, ptm_type: v });if(v==='proteomics')setStructuredContext(c=>({...c,quantitation_export_mode:'astra_analysis.v5',analysis_target:'proteomics',science:{...((c.science??{}) as Record<string,unknown>),experimental_enabled:true}}));}}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="proteomics">Protein abundance only (experimental v5)</SelectItem>
                         <SelectItem value="phosphorylation">Phosphorylation</SelectItem>
                         <SelectItem value="ubiquitylation">Ubiquitylation</SelectItem>
                         <SelectItem value="acetylation">Acetylation</SelectItem>
@@ -729,7 +732,7 @@ export default function OrderCreate() {
                 />
                 <FileDropZone label="PG Matrix (.tsv)" accept=".tsv,.csv"
                   file={files.pg_matrix}
-                  onChange={(f) => setFiles({ ...files, pg_matrix: f })}
+                  onChange={async (f) => {setFiles({ ...files, pg_matrix: f });if(form.ptm_type==='proteomics'&&f){setSampleColumns(extractSampleColumns(await readTsvHeaders(f)));setSamples([]);}}}
                 />
 
                 <div className="space-y-2">
@@ -740,6 +743,10 @@ export default function OrderCreate() {
                   {researchAttachments.length > 0 && <p className="text-xs">{researchAttachments.map(f => f.name).join(', ')}</p>}
                 </div>
 
+                <details className="rounded border p-3"><summary>측정 근거 파일 (선택 · experimental v5)</summary>
+                  <p className="text-xs">기존 주문의 종 정보를 재사용합니다. 보고서는 관측 audit에 사용하며 실제 검증 상태를 패키지에 표시합니다.</p>
+                  {[['fasta_file','Analysis FASTA'],['diann_report','DIA-NN long report (TSV/Parquet)'],['diann_site_report','DIA-NN site report (raw provenance)'],['run_crosswalk','Run ↔ injection crosswalk'],['search_fasta','Search FASTA'],['transgene_manifest','Transgene manifest'],['taxonomy_mapping','Accession taxonomy/gene mapping']].map(([field,label])=><label key={field} className="block text-sm">{label}<Input type="file" onChange={e=>{const file=e.target.files?.[0];setScienceFiles(old=>{const next={...old};if(file)next[field]=file;else delete next[field];return next;});}}/></label>)}
+                </details>
                 <div className="rounded-lg border border-dashed border-muted-foreground/25 bg-muted/30 p-4">
                   <p className="text-sm font-medium">Reference FASTA</p>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -774,7 +781,7 @@ export default function OrderCreate() {
                 )}
 
                 <div className="flex justify-end">
-                  <Button onClick={() => goTo(1)} disabled={!form.project_name || !files.pr_matrix || !files.pg_matrix}>
+                  <Button onClick={() => goTo(1)} disabled={!form.project_name || (!files.pr_matrix && form.ptm_type!=="proteomics") || !files.pg_matrix}>
                     Next <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                 </div>
@@ -967,8 +974,8 @@ export default function OrderCreate() {
                   </Button>
                 </div>
                 {/* Analysis Mode Selection */}
-                {['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))&&<p className="text-sm">Primary A uses canonical contrasts and the deterministic evidence report. Legacy network and temporal-contract selections are inactive.</p>}
-                <fieldset disabled={['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))} className={['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))?'hidden':'space-y-4'}>
+                {['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))&&<p className="text-sm">Primary A uses canonical contrasts and the deterministic evidence report. Legacy network and temporal-contract selections are inactive.</p>}
+                <fieldset disabled={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))} className={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))?'hidden':'space-y-4'}>
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Analysis Mode</Label>
                   <div className="grid grid-cols-3 gap-3">
@@ -1329,9 +1336,9 @@ export default function OrderCreate() {
                 initial="enter" animate="center" exit="exit"
                 transition={{ duration: 0.25, ease: "easeInOut" }} className="space-y-5"
               >
-                {['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))&&<div className="rounded border p-4 space-y-2"><p className="font-medium">Primary A evidence report and Astra export</p><p className="text-sm">The automatic plan uses your existing design, prepares reference evidence and exports questions, literature inclusion status and all calculated evidence for Astra. Legacy manuscript generation is not required.</p></div>}
-                {structuredContext.quantitation_export_mode==='astra_analysis.v4'&&<AstraWritingIntent questions={researchQuestions} setQuestions={setResearchQuestions} collections={ragCollections} selected={selectedCollectionIds} setSelected={setSelectedCollectionIds} all={useAllCollections} setAll={setUseAllCollections}/>}
-                <fieldset disabled={['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))} className={['enrichment_free_timecourse.v3','astra_analysis.v4'].includes(String(structuredContext.quantitation_export_mode))?'hidden':'space-y-5'}>
+                {['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))&&<div className="rounded border p-4 space-y-2"><p className="font-medium">Primary A evidence report and Astra export</p><p className="text-sm">The automatic plan uses your existing design, prepares reference evidence and exports questions, literature inclusion status and all calculated evidence for Astra. Legacy manuscript generation is not required.</p></div>}
+                {['astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))&&<AstraWritingIntent questions={researchQuestions} setQuestions={setResearchQuestions} collections={ragCollections} selected={selectedCollectionIds} setSelected={setSelectedCollectionIds} all={useAllCollections} setAll={setUseAllCollections}/>}
+                <fieldset disabled={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))} className={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))?'hidden':'space-y-5'}>
                 <div
                   className={cn(
                     "w-full rounded-lg border text-left transition-colors",
