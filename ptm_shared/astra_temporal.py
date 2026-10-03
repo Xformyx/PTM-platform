@@ -142,7 +142,7 @@ def integrate_temporal(tables,discovery,design,context,source_context=None,impac
                     'entered_sites':len(available-previous),'departed_sites':len(previous-available),
                     'membership_turnover':len(available^previous)/len(available|previous) if available|previous else None})
                 previous=available
-            if track not in {'curated_A','motif_A'} or members.empty:continue
+            if track not in {'curated_A','motif_A','specificity_A'} or members.empty:continue
             # Existing target-exclusion engine receives A values and exact numeric time labels.
             times=[conditions[next(c['target_condition_id'] for c in design['contrasts'] if c['contrast_id']==cid)]['time']['minutes'] for cid in s['contrast_ids']]
             if len(set(times))!=len(times):continue
@@ -180,12 +180,18 @@ def integrate_temporal(tables,discovery,design,context,source_context=None,impac
         target=pindex.get((forms.loc[f['entity_id'],'parent_pg'],f['series_id'],'PG'))
         if target:link(f,target,'same_parent_mathematical_dependence','PR_PG_identity')
     candidate_names=discovery['kinase_candidate_edges'].drop_duplicates('candidate_id').set_index('candidate_id').candidate_gene.to_dict()
+    reference=context.get('_runtime_reference')
+    verified_groups={}
+    if reference is not None:
+        from .science_reference import candidate_protein_groups
+        for candidate,edges in discovery['kinase_candidate_edges'].groupby('candidate_id'):
+            verified_groups[candidate]=candidate_protein_groups(edges,tables['protein_contrasts'].protein_group.unique(),reference)
     protein_names=tables['protein_contrasts'].drop_duplicates('protein_group').set_index('protein_group').gene.to_dict()
     for f in kinase:
-        if f['track'] not in {'curated_A','motif_A'}:continue
+        if f['track'] not in {'curated_A','motif_A','specificity_A'}:continue
         gene=candidate_names.get(f['entity_id'])
         for group,name in protein_names.items():
-            if gene in str(name).split(';'):
+            if (group in verified_groups.get(f['entity_id'],set())) if reference is not None else gene in str(name).split(';'):
                 target=pindex.get((group,f['series_id'],'PG'))
                 if target:link(f,target,'kinase_protein_abundance_not_activity','exact_gene_symbol_within_species')
     # Only recorded network relations select downstream comparisons. They are
@@ -196,6 +202,10 @@ def integrate_temporal(tables,discovery,design,context,source_context=None,impac
         for gene in str(name).split(';'):gene_groups[gene].append(group)
     for item in source_context or []:
         if item.get('provider')!='STRING':continue
+        if reference is not None:
+            # Symbol-only network joins cannot establish enzyme identity in mixed
+            # references; keep the raw provider context, without a timing claim.
+            continue
         record=item['record'];left=record.get('preferredName_A');right=record.get('preferredName_B')
         for a,b in [(left,right),(right,left)]:
             for sid in series:

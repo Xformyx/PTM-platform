@@ -113,3 +113,6 @@ docs/implementation/*
 !docs/implementation/signaling-explorer-status.md
 !docs/implementation/signaling-explorer-contract.md
 !docs/implementation/signaling-explorer-validation.json
+
+# Versioned Astra science contracts and validation evidence
+!docs/astra_science_upgrade/

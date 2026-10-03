@@ -58,6 +58,13 @@ def _blank(value):
 
 def discover(tables, design, fasta_path, context, sources):
     mapped, curated, fasta = mapped_sites(tables, design, fasta_path, context, sources['snapshots'])
+    science=context.get('quantitation_export_mode')=='astra_analysis.v5'
+    reference=context.get('_science_reference',{})
+    identities={r['accession']:r for r in reference.get('entries',[])}
+    family_groups=GENE_GROUPS
+    if science:
+        from pathlib import Path
+        family_groups=json.loads(Path(__file__).with_name('kinase_family_registry.json').read_text())['taxa']
     forms = tables['summary'].set_index('form_id'); library = load_motif_library(); sites = []
     for r in mapped.to_dict('records'):
         sequence = fasta[r['mapped_accession']]['sequence']; center = int(r['residue_offset'])-1
@@ -73,7 +80,7 @@ def discover(tables, design, fasta_path, context, sources):
     localized={(str(r['protein_group']),str(r['modified_sequence']),str(r['accession']),str(r['residue_type']),str(r['residue_offset'])):r for r in context.get('localization_evidence',[])}
     for s in sites:
         f = forms.loc[s['form_id']]; site_id = s['mapped_accession']+':'+s['residue_type']+str(s['residue_offset'])
-        mg = stable_id('measurement',[str(f['Protein.Group']),str(f['Stripped.Sequence'])])
+        mg = stable_id('measurement',[str(f['Stripped.Sequence'])] if science else [str(f['Protein.Group']),str(f['Stripped.Sequence'])])
         restrictions = []
         if not s['gene']:restrictions.append('substrate_gene_unresolved')
         if not f.primary_mapping_eligible: restrictions.append('mapping_ineligible')
@@ -91,6 +98,14 @@ def discover(tables, design, fasta_path, context, sources):
             'restriction_reasons':restrictions,'footprint_eligible':bool(f.primary_adjustment_eligible and f.n_modifications==1 and s['gene'])}
         supplied=localized.get((str(f['Protein.Group']),str(f['Modified.Sequence']),str(s['mapped_accession']),str(s['residue_type']),str(s['residue_offset'])))
         if supplied:base.update(localization_probability=float(supplied['probability']),localization_source=supplied['source'],localization_status='provided')
+        if science:
+            identity=identities.get(s['mapped_accession'],{})
+            base.update(site_id=stable_id('site_identity',[s['fasta_taxonomy_id'],s['mapped_accession'],identity.get('sequence_sha256'),s['residue_type'],s['residue_offset'],reference.get('reference_sha256')]))
+            base['ambiguity_group']=mg
+            mappings=json.loads(f.mapping_json)
+            if len(mappings)!=1:
+                base['restriction_reasons'].append('site_mapping_ambiguous')
+                base['footprint_eligible']=False
         base_by_site[(s['form_id'],site_id)] = base
     def add(base, candidate, kind, provider, query_id, *, accession=None, resources='', pmids='', probability=None, loc_source=None, extra=None):
         if probability is None or pd.isna(probability):probability=base.get('localization_probability');loc_source=base.get('localization_source')
@@ -105,6 +120,24 @@ def discover(tables, design, fasta_path, context, sources):
             localization_probability=probability,localization_source=loc_source,localization_status='provided' if probability is not None else 'unknown',
             duplicate_evidence_group=stable_id('publication_edge',[base['site_id'],candidate,sorted(set(re.findall(r'\d{5,9}',str(pmids))))]),
             motif_id=None,motif_version=None,motif_information_bits=None,motif_background=None,relative_candidate_weight=None,source_caution=None)
+        if science:
+            enzyme=identities.get(accession,{})
+            enzyme_taxon=enzyme.get('taxon')
+            enzyme_taxa={str(enzyme_taxon)} if enzyme_taxon is not None else set()
+            for snap in sources.get('snapshots',[]):
+                if snap.get('query_id')==query_id:
+                    for source_row in snap.get('rows',[]):
+                        if source_row.get('enzyme')==accession:
+                            stated=source_row.get('enzyme_taxon',source_row.get('enzyme_taxonomy_id'))
+                            if stated is not None and str(stated):enzyme_taxa.add(str(stated))
+            enzyme_taxon=next(iter(enzyme_taxa)) if len(enzyme_taxa)==1 else None
+            if len(enzyme_taxa)>1:restrictions.append('enzyme_taxonomy_conflict')
+            row.update(kinase_taxon=str(enzyme_taxon) if enzyme_taxon is not None else None,
+                candidate_id=stable_id('candidate',[str(enzyme_taxon) if enzyme_taxon is not None else 'unknown:'+query_id,accession or candidate]),
+                host_taxon=reference.get('host_taxon'),reference_assay_taxon=None,
+                enzyme_taxonomy_source='explicit_accession_evidence' if enzyme_taxon is not None else 'unknown',
+                candidate_resolution='motif_class' if kind=='sequence_motif_candidate' else 'gene_or_accession')
+            if enzyme_taxon is None:restrictions.append('enzyme_taxonomy_unresolved')
         if kind=='curated_site_orthology':restrictions.append('provider_site_translation_not_independently_aligned')
         if probability is None: restrictions.append('unresolved_localization')
         row.update(extra or {}); row['restriction_reasons']=';'.join(sorted(set(restrictions+str(row.get('additional_restrictions','')).split(';'))-{''}))
@@ -123,10 +156,10 @@ def discover(tables, design, fasta_path, context, sources):
                        'source_caution':r['source_caution'],'additional_restrictions':r['exclusion_reason']})
     # Curated family rollups preserve original members/source IDs, with no isoform claim.
     for row in list(records):
-        for family,members in GENE_GROUPS.get(str(row['substrate_taxon']),{}).items():
+        for family,members in family_groups.get(str(row['kinase_taxon'] if science else row['substrate_taxon']),{}).items():
             if row['candidate_gene'] in members:
                 family_row={**row,'candidate_gene':family,'candidate_accession':None,'candidate_resolution':'family',
-                    'candidate_id':stable_id('candidate',[row['substrate_taxon'],family]),
+                    'candidate_id':stable_id('candidate',[row['kinase_taxon'] if science else row['substrate_taxon'],family]),
                     'edge_id':stable_id('edge',[row['edge_id'],family])}
                 records.append(family_row)
     for relation in sources.get('relations',[]):
@@ -145,24 +178,25 @@ def discover(tables, design, fasta_path, context, sources):
                     resources=library['source'],extra={'motif_id':name,'motif_version':library['version'],
                         'motif_information_bits':background[name]['information_bits'],'motif_background':json.dumps(background[name],sort_keys=True),
                         'relative_candidate_weight':max(background[name]['information_bits'],.05)/total})
-    edges=pd.DataFrame(records,columns=EDGE_COLUMNS).drop_duplicates('edge_id')
+    edges=pd.DataFrame(records,columns=EDGE_COLUMNS+(['host_taxon','reference_assay_taxon','enzyme_taxonomy_source'] if science else [])).drop_duplicates('edge_id')
     return mapped, edges, {'library_version':library['version'],'background':background,'weight_meaning':'relative_sequence_support_not_probability',
                           'background_policy':'unique_gene_sequence_center; equal_gene_weight','anchoring':'named_ptm_group_exactly_at_center; terminal_padding_preserved'}
 
 
-def score_candidates(tables,edges,design):
+def score_candidates(tables,edges,design,*,science=False):
     contributions=[];profiles=[];sensitivity=[]
     strict=tables['strict_parent_paired'].set_index(['form_id','contrast_id']).strict_parent_A.to_dict()
     comparisons=tables['comparisons']; estimator=ContrastEstimator(design)
     tracks={'curated_A':'A','localized_A':'A','motif_A':'A','U_all':'U_all','U_joint':'U_joint','P_all':'P_all','P_joint':'P_joint','strict_parent_A':'strict_parent_A','repeated_A':'A','native_A':'A','shared_site_excluded_A':'A','source_caution_excluded_A':'A','unadjusted_only_U':'U_all'}
     sharing=edges.loc[edges.edge_type.str.startswith('curated')&edges.candidate_resolution.ne('family')].groupby('ambiguity_group').candidate_id.nunique().to_dict()
+    if science:tracks['specificity_A']='A'
     for (candidate,gene), candidate_edges in edges.groupby(['candidate_id','candidate_gene'],sort=True):
         for contrast in design['contrasts']:
             meta=estimator.metadata(contrast); comp=comparisons.loc[comparisons.contrast_id.eq(contrast['contrast_id'])]
             joined=candidate_edges.merge(comp,on='form_id',suffixes=('','_quant'))
             for track,value_col in tracks.items():
                 rows=joined.loc[~joined.restriction_reasons.str.contains('mapping_ineligible|inseparable_multisite|substrate_gene_unresolved')].copy() if track=='unadjusted_only_U' else joined.loc[joined.footprint_eligible.astype(bool)&joined.included.astype(bool)].copy()
-                rows=rows.loc[rows.edge_type.eq('sequence_motif_candidate') if track=='motif_A' else rows.edge_type.isin(['curated_exact_site_native','curated_site_orthology'])]
+                rows=rows.loc[rows.edge_type.eq('sequence_motif_candidate') if track=='motif_A' else rows.edge_type.eq('experimental_specificity_prediction') if track=='specificity_A' else rows.edge_type.isin(['curated_exact_site_native','curated_site_orthology'])]
                 if track=='localized_A':rows=rows.loc[pd.to_numeric(rows.localization_probability,errors='coerce').ge(.75)&~rows.restriction_reasons.str.contains('multi_accession')]
                 if track=='native_A':rows=rows.loc[rows.edge_type.eq('curated_exact_site_native')]
                 if track=='shared_site_excluded_A':rows=rows.loc[rows.ambiguity_group.map(sharing).fillna(0).le(1)]
@@ -173,7 +207,7 @@ def score_candidates(tables,edges,design):
                 site_rows=[]
                 # Group record indices once; avoid constructing a DataFrame for every site.
                 grouped=defaultdict(list)
-                for item in rows.to_dict('records'):grouped[(item['substrate_gene'],item['sequence_window'])].append(item)
+                for item in rows.to_dict('records'):grouped[((str(item['substrate_taxon'])+':'+item['substrate_gene']) if science else item['substrate_gene'],item['site_id'] if science else item['sequence_window'])].append(item)
                 for (substrate,window),group in sorted(grouped.items()):
                     values_by_form={r['form_id']:r[value_col] for r in group}
                     combined=lambda field:';'.join(sorted({r[field] for r in group}))
@@ -197,8 +231,8 @@ def score_candidates(tables,edges,design):
                     'positive_genes':positive,'negative_genes':negative,'direction_consistency':max(positive,negative)/len(genes) if genes else np.nan,
                     'coverage_adequate':adequate,'activity_status':'descriptive_footprint' if adequate else 'low_coverage' if genes else 'not_evaluable',
                     'membership_hash':stable_id('members',member_ids),'identifiability_group':stable_id('identical_support',[contrast['contrast_id'],track,member_ids]),
-                    'priority_tier':'curated_supported' if track!='motif_A' and adequate else 'exploratory','statistic_type':'gene_balanced_effect_not_kinase_activity_test'})
-                if track not in {'curated_A','motif_A'} or not site_rows:continue
+                    'priority_tier':'curated_supported' if track not in {'motif_A','specificity_A'} and adequate else 'exploratory','statistic_type':'gene_balanced_effect_not_kinase_activity_test'})
+                if track not in {'curated_A','motif_A','specificity_A'} or not site_rows:continue
                 # Recompute medians only for genes touched by an omission; all other
                 # gene medians retain their original order and values.
                 by_gene=defaultdict(list)

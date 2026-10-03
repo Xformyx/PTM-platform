@@ -76,6 +76,9 @@ def object_hash(value):return hashlib.sha256(json_bytes(value)).hexdigest()
 
 
 def temporal_layers(analysis,design,context):
+    if design.get('study',{}).get('design_axis')=='cross_sectional':
+        return {'validation_panel':pd.DataFrame(columns=KEY_COLUMNS+['protein_group','gene','layer','log2_change','declared_windows','selection_timing','interpretation']),
+                'temporal_protein_summary':pd.DataFrame(columns=['protein_group','arm_id','reference_condition_id','layer','measured_contrasts','evaluable_contrasts','first_evaluable_time_min','last_evaluable_time_min','observed_direction_changes','grid_resolution_minutes','temporal_context_status','interpretation'])},{'status':'not_applicable'}
     conditions={c['condition_id']:c for c in design['conditions']};by_arm=defaultdict(set)
     for c in design['contrasts']:
         arm=conditions[c['target_condition_id']]['arm_id']
@@ -110,9 +113,10 @@ def temporal_layers(analysis,design,context):
         'temporal_protein_summary':pd.DataFrame(summaries,columns=['protein_group','arm_id','reference_condition_id','layer','measured_contrasts','evaluable_contrasts','first_evaluable_time_min','last_evaluable_time_min','observed_direction_changes','grid_resolution_minutes','temporal_context_status','interpretation'])},temporal
 
 
-def calculate(inputs,design,context,registration=None):
+def calculate(inputs,design,context,registration=None,*,raw_pr=None,raw_pg=None):
     require_resolved(design)
-    raw_pr=pd.read_csv(inputs['PR'],sep='\t');raw_pg=pd.read_csv(inputs['PG'],sep='\t')
+    raw_pr=pd.read_csv(inputs['PR'],sep='\t') if raw_pr is None else raw_pr
+    raw_pg=pd.read_csv(inputs['PG'],sep='\t') if raw_pg is None else raw_pg
     columns=sorted(i['input_column'] for i in design['injections'])
     require_resolved(design,raw_pr.columns,raw_pg.columns)
     pr,pg,norm=normalize_supplied_matrices(raw_pr,raw_pg,columns,context['normalization_policy'])
@@ -131,7 +135,8 @@ def calculate(inputs,design,context,registration=None):
     states=[];profiles=tables['kinase_profiles'];members=tables['kinase_membership']
     for comparison in tables['comparisons'].to_dict('records'):
         fid=comparison['form_id'];form=tables['summary'].set_index('form_id').loc[fid]
-        detected=tables['detection'].loc[tables['detection'].form_id.eq(fid) & tables['detection'].contrast_id.eq(comparison['contrast_id'])].iloc[0]
+        detection_rows=tables['detection'].loc[tables['detection'].form_id.eq(fid) & tables['detection'].contrast_id.eq(comparison['contrast_id'])]
+        detected=detection_rows.iloc[0] if len(detection_rows) else type('Detection',(),{'detected_n':int(analysis['runlevel'].loc[analysis['runlevel'].form_id.eq(fid)&analysis['runlevel'].condition_id.eq(comparison['condition_id']),'U_observed'].sum())})()
         own=edges.loc[edges.form_id.eq(fid) & edges.primary_edge_eligible.astype(bool)]
         involved=members.loc[members.contrast_id.eq(comparison['contrast_id']) & members['mode'].eq('primary_A') & members.form_ids.str.split(';').map(lambda ids:fid in ids)]
         adequate=profiles.loc[profiles.contrast_id.eq(comparison['contrast_id']) & profiles['mode'].eq('primary_A') & profiles.entity.isin(involved.entity)].coverage_adequate.any()

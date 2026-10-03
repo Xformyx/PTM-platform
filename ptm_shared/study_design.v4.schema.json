@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ptm-platform:study_design.v4",
+  "title": "Canonical study design v4",
+  "description": "Draft structural schema. Server validate_study_design and require_resolved additionally enforce foreign keys, time conversion, pair mapping, raw-column coverage and execution readiness.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "study",
+    "arms",
+    "conditions",
+    "materials",
+    "injections",
+    "contrasts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "study_design.v4"
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "resolved"
+      ]
+    },
+    "study": {
+      "type": "object",
+      "properties": {
+        "taxonomy_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ptm_type": {
+          "type": "string"
+        },
+        "original_context": {
+          "type": "object"
+        },
+        "acquisition": {
+          "type": "object"
+        },
+        "processing": {
+          "type": "object"
+        },
+        "design_axis": {
+          "enum": [
+            "time_course",
+            "cross_sectional"
+          ]
+        },
+        "analysis_target": {
+          "enum": [
+            "phosphoproteomics",
+            "proteomics",
+            "other_ptm"
+          ]
+        }
+      }
+    },
+    "replication_declaration": {
+      "enum": [
+        "unknown",
+        "mixed",
+        "technical_per_condition",
+        "independent_biological_units"
+      ]
+    },
+    "arms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "arm_id",
+          "name"
+        ],
+        "properties": {
+          "arm_id": {
+            "$ref": "#/$defs/id"
+          },
+          "name": {
+            "type": "string"
+          },
+          "treatments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "dose": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "unit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "dose_status": {
+                  "enum": [
+                    "unknown",
+                    "provided",
+                    "unresolved",
+                    "not_applicable",
+                    "none"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "conditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "condition_id",
+          "arm_id",
+          "label",
+          "role"
+        ],
+        "properties": {
+          "condition_id": {
+            "$ref": "#/$defs/id"
+          },
+          "arm_id": {
+            "$ref": "#/$defs/id"
+          },
+          "label": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "target",
+              "reference",
+              "unknown"
+            ]
+          },
+          "reference_condition_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "time": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value",
+                  "unit"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "minutes": {
+                    "type": "number"
+                  },
+                  "original": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "material_id"
+        ],
+        "properties": {
+          "material_id": {
+            "$ref": "#/$defs/id"
+          },
+          "biological_unit_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pair_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "donor_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "injections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "injection_id",
+          "input_column",
+          "condition_id"
+        ],
+        "properties": {
+          "injection_id": {
+            "$ref": "#/$defs/id"
+          },
+          "input_column": {
+            "$ref": "#/$defs/id"
+          },
+          "condition_id": {
+            "$ref": "#/$defs/id"
+          },
+          "material_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "technical_injection_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "contrasts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "contrast_id",
+          "target_condition_id",
+          "reference_condition_id",
+          "pairing"
+        ],
+        "properties": {
+          "contrast_id": {
+            "$ref": "#/$defs/id"
+          },
+          "target_condition_id": {
+            "$ref": "#/$defs/id"
+          },
+          "reference_condition_id": {
+            "$ref": "#/$defs/id"
+          },
+          "pairing": {
+            "enum": [
+              "paired",
+              "unpaired",
+              "unknown"
+            ]
+          },
+          "purpose": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "field_provenance": {
+      "type": "object"
+    },
+    "issues": {
+      "type": "array"
+    },
+    "validation_panel": {
+      "type": "object"
+    },
+    "temporal_windows": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

@@ -29,7 +29,7 @@ def validate_execution(context, ptm_type, taxonomy_id, options=None, pr_columns=
     if str(design['study'].get('taxonomy_id')) != str(taxonomy_id) or design['study'].get('ptm_type') != ptm_type:
         raise ValueError('Canonical organism/PTM conflicts with inputs')
     from .contrast_quantification import PTM_CODES
-    if ptm_type not in PTM_CODES:
+    if ptm_type not in PTM_CODES or ptm_type=='proteomics':
         raise ValueError('Unsupported quantitative PTM code')
     if effective_context(context)['normalization_policy'] not in {'already_normalized.v1', 'legacy_median.v1'}:
         raise ValueError('Unsupported explicit normalization policy')

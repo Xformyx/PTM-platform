@@ -49,17 +49,26 @@ class Order(Base):
 
     # Sample info
     ptm_type: Mapped[str] = mapped_column(
-        Enum("phosphorylation", "ubiquitylation", "ubiquitination", name="ptm_type"), nullable=False  # ubiquitination kept for backward compat
+        Enum("phosphorylation", "ubiquitylation", "ubiquitination", "acetylation", "proteomics", name="ptm_type"), nullable=False  # ubiquitination kept for backward compat
     )
     species: Mapped[str] = mapped_column(String(50), nullable=False)
     organism_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     sample_config: Mapped[dict] = mapped_column(JSON, nullable=False)
 
     # File references
-    pr_matrix_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    pr_matrix_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     pg_matrix_path: Mapped[str] = mapped_column(String(500), nullable=False)
     fasta_path: Mapped[str] = mapped_column(String(500), nullable=False)
     config_xlsx_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    diann_report_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    diann_site_report_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    run_crosswalk_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    search_fasta_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    transgene_manifest_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    taxonomy_mapping_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    specificity_manifest_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    perturbation_manifest_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Secondary file references (Cross-Talk mode)
     secondary_pr_matrix_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
