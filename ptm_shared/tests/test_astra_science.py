@@ -18,7 +18,7 @@ from benchmarking.astra_science.evaluate import validate_manifest,selective_metr
 @pytest.fixture
 def config(tmp_path):
     f=tmp_path/'fixture';d=make_fixture(f)
-    c={**d['analysis_context'],'quantitation_export_mode':'astra_analysis.v5','science':{'experimental_enabled':True}}
+    c={**d['analysis_context'],'quantitation_export_mode':'astra_analysis.v5','science':{}}
     c['study_design']=resolve_study_design(c,d['sample_config'],taxonomy_id='9606',species='human')
     return {'experimental_context':c,'species_tax_id':'9606','species':'human','order_code':'synthetic_science',
         'reference_root':str(tmp_path/'registry'),'source_fixtures':{'OmniPath':{'raw':(f/'snapshot.tsv').read_text()},
@@ -30,6 +30,72 @@ def switch_species(config,species,tax):
     c=copy.deepcopy(config);c['species']=species;c['species_tax_id']=tax
     c['experimental_context']['study_design']['study'].update(species=species,taxonomy_id=tax)
     return c
+
+
+@pytest.mark.parametrize('species,tax',[('human','9606'),('mouse','10090'),('rat','10116')])
+def test_alias_sources_pool_before_scoring_and_temporal(config,species,tax):
+    from ptm_shared.astra_discovery import discover,score_candidates
+    from ptm_shared.astra_temporal import integrate_temporal
+    c=switch_species(config,species,tax)
+    fasta=Path(c['fasta_path']);fasta.write_text(fasta.read_text().replace('9606',tax))
+    ctx=c['experimental_context'];design=ctx['study_design']
+    ctx['_science_reference']=preflight(c,ctx)
+    inputs={short:Path(c[key]) for short,key in [('PR','pr_matrix_path'),('PG','pg_matrix_path'),('FASTA','fasta_path')]}
+    tables,_,_=calculate(inputs,design,ctx)
+    rows=pd.read_csv(fasta.with_name('snapshot.tsv'),sep='\t')
+    rows=rows.loc[rows.enzyme.eq('EGFR')].copy();rows['enzyme']='SYNTHETIC4'
+    sources={'snapshots':[{'query_id':'omnipath','sha256':'synthetic',
+        'metadata':{'taxonomy_ids':[tax],'orthology_translation':False},'rows':rows.to_dict('records')}],
+        'relations':[]}
+    _,original,_=discover(tables,design,fasta,ctx,sources)
+    original=original.loc[original.candidate_accession.eq('SYNTHETIC4')]
+    expected=score_candidates(tables,original,design,science=True)
+    # iPTMnet can supply only the accession; OmniPath supplies the gene label.
+    sources['relations']=[{'enzyme_id':'SYNTHETIC4','accession':r.substrate,
+        'site':r.residue_type+str(r.residue_offset),'query_id':'iptmnet','sources':['PhosphoSite'],'pmids':[]}
+        for r in rows.itertuples()]
+    _,edges,_=discover(tables,design,fasta,ctx,sources)
+    edges=edges.loc[edges.candidate_accession.eq('SYNTHETIC4')].copy()
+    assert set(edges.candidate_gene)=={'EGFR'}
+    assert edges.candidate_id.nunique()==1 and set(edges.kinase_taxon)=={tax}
+    # Defend the scoring contract even for noncanonical display labels from an
+    # additional adapter (e.g. a specificity resource).
+    edges.loc[edges.provider.eq('iPTMnet'),'candidate_gene']='SYNTHETIC4'
+    actual=score_candidates(tables,edges,design,science=True)
+    profiles=actual['kinase_temporal_profiles']
+    pd.testing.assert_frame_equal(profiles,expected['kinase_temporal_profiles'])
+    assert not profiles.duplicated(['candidate_id','contrast_id','track']).any()
+    contributions=actual['substrate_contributions']
+    assert not contributions.contribution_id.duplicated().any()
+    assert len(contributions)==len(expected['substrate_contributions'])
+    assert contributions.source_query_ids.str.contains('iptmnet').all()
+    assert contributions.source_query_ids.str.contains('omnipath').all()
+    temporal=integrate_temporal(tables,actual,design,ctx)
+    assert temporal['kinase_temporal_features'].feature_id.is_unique
+    # Same label with a different identity must remain a separate candidate.
+    other=original.copy();other['candidate_id']='different_accession_identity';other['candidate_accession']='OTHER'
+    separate=score_candidates(tables,pd.concat([original,other]),design,science=True)
+    assert separate['kinase_temporal_profiles'].candidate_id.nunique()==2
+    broken={**actual,'kinase_temporal_profiles':pd.concat([profiles,profiles.iloc[:1]])}
+    with pytest.raises(ValueError,match='duplicate_temporal_observations: entity='):
+        integrate_temporal(tables,broken,design,ctx)
+
+
+def test_current_astra_request_and_obsolete_opt_in(config):
+    from ptm_shared.analysis_context import current_astra_context,merge_analysis_context
+    from ptm_shared.astra_science import validate_execution
+    old=copy.deepcopy(config['experimental_context']);old['quantitation_export_mode']='astra_analysis.v4'
+    old['science']={'experimental_enabled':False,'diann_version':'2.7.0'}
+    updated=current_astra_context(old)
+    assert updated['quantitation_export_mode']=='astra_analysis.v5'
+    assert old['quantitation_export_mode']=='astra_analysis.v4'
+    assert updated['science']==old['science'] and updated['study_design']==old['study_design']
+    validate_execution(updated,'phosphorylation','9606')
+    for mode in ['legacy_only.v1','enrichment_free_primary.v2','enrichment_free_timecourse.v3']:
+        context={**old,'quantitation_export_mode':mode}
+        assert current_astra_context(context)==context
+    assert current_astra_context({})=={}  # API still requires an explicit purpose.
+    assert merge_analysis_context(old,{})==old  # PATCH/replay is not migration.
 
 
 @pytest.mark.parametrize('species,tax,fasta_tax',[('mouse','10090','9606'),('human','9606','10090')])

@@ -1,4 +1,4 @@
-"""Upgrade a frozen v4 test package into a NEW experimental v5 run, offline.
+"""Upgrade a frozen v4 test package into a NEW current Astra run, offline.
 
 The supplied archive is immutable. This checks engineering parity, not biological
 performance. Source bytes are pinned; no remote reference is requested.
@@ -28,7 +28,10 @@ def main():
             if not path.is_relative_to(baseline.resolve()):raise ValueError('Unsafe archive path')
         archive.extractall(baseline)
     saved=json.loads((baseline/'reproducibility/replay_config.json').read_text());context=saved['context']
-    context.update(quantitation_export_mode='astra_analysis.v5',science={'experimental_enabled':True})
+    # A saved order may have requested live refresh. This comparison must use
+    # the archived source bytes even in that case, with network still disabled.
+    context.update(quantitation_export_mode='astra_analysis.v5',refresh_references=False)
+    context.setdefault('science',{}).pop('experimental_enabled',None)
     design=saved['design'];design['schema_version']='study_design.v4'
     design['study'].update(design_axis='time_course',analysis_target='phosphoproteomics');context['study_design']=design
     source=baseline/'references/source_pin.json';sha=hashlib.sha256(source.read_bytes()).hexdigest()

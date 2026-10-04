@@ -533,6 +533,8 @@ async def _create_order_from_user_impl(
     from ptm_shared.reference_fasta import missing_reference_detail, resolve_reference_fasta
     resolved_reference_fasta = None
     registered_mapping=None
+    from ptm_shared.analysis_context import current_astra_context
+    config_data['analysis_context']=current_astra_context(config_data.get('analysis_context'))
     if not uploaded_fasta:
         context=config_data.get('analysis_context') or {}
         if context.get('quantitation_export_mode')=='astra_analysis.v5':

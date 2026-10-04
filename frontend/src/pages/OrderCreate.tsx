@@ -197,7 +197,7 @@ export default function OrderCreate() {
   const [direction, setDirection] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [structuredContext, setStructuredContext] = useState<Record<string, unknown>>({quantitation_export_mode:"astra_analysis.v4",normalization_policy:"already_normalized.v1"});
+  const [structuredContext, setStructuredContext] = useState<Record<string, unknown>>({quantitation_export_mode:"astra_analysis.v5",normalization_policy:"already_normalized.v1"});
 
   // Step 0: Project & Files
   const [form, setForm] = useState({
@@ -701,10 +701,10 @@ export default function OrderCreate() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>PTM Type</Label>
-                    <Select value={form.ptm_type} onValueChange={(v) => {setForm({ ...form, ptm_type: v });if(v==='proteomics')setStructuredContext(c=>({...c,quantitation_export_mode:'astra_analysis.v5',analysis_target:'proteomics',science:{...((c.science??{}) as Record<string,unknown>),experimental_enabled:true}}));}}>
+                    <Select value={form.ptm_type} onValueChange={(v) => {setForm({ ...form, ptm_type: v });if(v==='proteomics')setStructuredContext(c=>({...c,quantitation_export_mode:'astra_analysis.v5',analysis_target:'proteomics'}));}}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="proteomics">Protein abundance only (experimental v5)</SelectItem>
+                        <SelectItem value="proteomics">Protein abundance only</SelectItem>
                         <SelectItem value="phosphorylation">Phosphorylation</SelectItem>
                         <SelectItem value="ubiquitylation">Ubiquitylation</SelectItem>
                         <SelectItem value="acetylation">Acetylation</SelectItem>
@@ -743,14 +743,16 @@ export default function OrderCreate() {
                   {researchAttachments.length > 0 && <p className="text-xs">{researchAttachments.map(f => f.name).join(', ')}</p>}
                 </div>
 
-                <details className="rounded border p-3"><summary>측정 근거 파일 (선택 · experimental v5)</summary>
+                <details className="rounded border p-3"><summary>측정 근거 파일</summary>
                   <p className="text-xs">기존 주문의 종 정보를 재사용합니다. 보고서는 관측 audit에 사용하며 실제 검증 상태를 패키지에 표시합니다.</p>
                   {[['fasta_file','Analysis FASTA'],['diann_report','DIA-NN long report (TSV/Parquet)'],['diann_site_report','DIA-NN site report (raw provenance)'],['run_crosswalk','Run ↔ injection crosswalk'],['search_fasta','Search FASTA'],['transgene_manifest','Transgene manifest'],['taxonomy_mapping','Accession taxonomy/gene mapping']].map(([field,label])=><label key={field} className="block text-sm">{label}<Input type="file" onChange={e=>{const file=e.target.files?.[0];setScienceFiles(old=>{const next={...old};if(file)next[field]=file;else delete next[field];return next;});}}/></label>)}
                 </details>
                 <div className="rounded-lg border border-dashed border-muted-foreground/25 bg-muted/30 p-4">
                   <p className="text-sm font-medium">Reference FASTA</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Automatically resolved from <code className="text-xs bg-muted px-1 rounded">data/reference/{form.species}/</code>
+                    {['astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))
+                      ? '새 Astra 주문은 분석에 사용한 FASTA를 업로드하거나 Sample Design에 등록 Reference ID를 입력하세요. 기존 주문의 재실행은 저장된 FASTA를 사용합니다.'
+                      : `Automatically resolved for ${form.species}.`}
                   </p>
                   {form.species === "rat_hir" && (
                     <>
