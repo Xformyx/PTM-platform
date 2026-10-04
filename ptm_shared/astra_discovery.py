@@ -132,6 +132,11 @@ def discover(tables, design, fasta_path, context, sources):
                             if stated is not None and str(stated):enzyme_taxa.add(str(stated))
             enzyme_taxon=next(iter(enzyme_taxa)) if len(enzyme_taxa)==1 else None
             if len(enzyme_taxa)>1:restrictions.append('enzyme_taxonomy_conflict')
+            # Display labels never define identity. A provider may name the same
+            # accession by its gene or by the accession itself (e.g. Eef2k/P70531).
+            # Use the verified reference label; raw source records remain pinned.
+            if enzyme_taxon is not None and _blank(enzyme.get('gene')):
+                row['candidate_gene']=_blank(enzyme['gene'])
             row.update(kinase_taxon=str(enzyme_taxon) if enzyme_taxon is not None else None,
                 candidate_id=stable_id('candidate',[str(enzyme_taxon) if enzyme_taxon is not None else 'unknown:'+query_id,accession or candidate]),
                 host_taxon=reference.get('host_taxon'),reference_assay_taxon=None,
@@ -190,7 +195,14 @@ def score_candidates(tables,edges,design,*,science=False):
     tracks={'curated_A':'A','localized_A':'A','motif_A':'A','U_all':'U_all','U_joint':'U_joint','P_all':'P_all','P_joint':'P_joint','strict_parent_A':'strict_parent_A','repeated_A':'A','native_A':'A','shared_site_excluded_A':'A','source_caution_excluded_A':'A','unadjusted_only_U':'U_all'}
     sharing=edges.loc[edges.edge_type.str.startswith('curated')&edges.candidate_resolution.ne('family')].groupby('ambiguity_group').candidate_id.nunique().to_dict()
     if science:tracks['specificity_A']='A'
-    for (candidate,gene), candidate_edges in edges.groupby(['candidate_id','candidate_gene'],sort=True):
+    for candidate, candidate_edges in edges.groupby('candidate_id',sort=True):
+        # Pool all records for one taxon/accession BEFORE site/gene balancing.
+        # Grouping by display label emits duplicate candidate/contrast/track keys
+        # and counts the same measured substrate twice in downstream summaries.
+        labels=sorted({_blank(v) for v in candidate_edges.candidate_gene}-{''})
+        accessions={_blank(v) for v in candidate_edges.candidate_accession}-{''}
+        named=[label for label in labels if label not in accessions]
+        gene=named[0] if len(named)==1 else labels[0] if len(labels)==1 else sorted(accessions)[0] if accessions else candidate
         for contrast in design['contrasts']:
             meta=estimator.metadata(contrast); comp=comparisons.loc[comparisons.contrast_id.eq(contrast['contrast_id'])]
             joined=candidate_edges.merge(comp,on='form_id',suffixes=('','_quant'))

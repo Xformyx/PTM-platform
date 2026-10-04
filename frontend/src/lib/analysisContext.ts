@@ -17,12 +17,12 @@ export function mergeAnalysisContext(existing: AnalysisContext | null | undefine
   return { ...(existing ?? {}), ...fields };
 }
 
-/** Persist the purpose the dropdown shows. A missing mode is not legacy. */
+/** Prepare a new request/rerun with current Astra; recorded archives stay pinned. */
 export function withPersistedExportMode(context: AnalysisContext | null | undefined): AnalysisContext {
   const next: AnalysisContext = { ...(context ?? {}) };
   const mode = next.quantitation_export_mode;
-  if (typeof mode === "string" && mode.trim() !== "") return next;
-  next.quantitation_export_mode = "astra_analysis.v4";
+  if (typeof mode === "string" && mode.trim() !== "" && mode !== "astra_analysis.v4") return next;
+  next.quantitation_export_mode = "astra_analysis.v5";
   if (next.normalization_policy == null || next.normalization_policy === "") {
     next.normalization_policy = "already_normalized.v1";
   }

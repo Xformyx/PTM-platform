@@ -24,22 +24,19 @@ export default function SampleDesignFields({ context, onChange, samples, seconda
     <div className="space-y-2">
       <Label>Analysis purpose</Label>
       <select aria-label="Analysis purpose" className="block w-full rounded border bg-background p-2 text-sm"
-        value={mode}
+        value={astra?'astra_analysis.v5':mode}
         onChange={e=>onChange({...context,quantitation_export_mode:e.target.value,normalization_policy:context.normalization_policy??'already_normalized.v1'})}>
         {mode === "" && <option value="">분석 목적을 선택하세요</option>}
-        <option value={astra?mode:'astra_analysis.v4'}>Astra 분석 패키지 생성</option>
+        <option value="astra_analysis.v5">Astra 분석 패키지 생성</option>
         <option value="legacy_only.v1">Legacy platform reports</option>
         {mode !== "" && !['astra_analysis.v4','astra_analysis.v5','legacy_only.v1'].includes(mode)&&<option value={mode}>Recorded legacy analysis — preserved</option>}
       </select>
-      {astra && <details><summary className="cursor-pointer text-sm">Experimental science validation</summary>
-        <p className="text-xs">종은 현재 주문의 {species} 값을 사용합니다. v5는 실험적 분석이며 독립 benchmark 정확도와 실제 atlas parity는 미검증입니다.</p>
-        <label className="text-sm"><input type="checkbox" checked={mode==='astra_analysis.v5'} onChange={e=>onChange({...context,quantitation_export_mode:e.target.checked?'astra_analysis.v5':'astra_analysis.v4',science:{...science,experimental_enabled:e.target.checked}})}/> v5 scientific evidence (experimental)</label>
-        {mode==='astra_analysis.v5'&&<>
-          <label className="block text-sm">Design axis<select aria-label="Design axis" value={String(context.design_axis??'time_course')} onChange={e=>put('design_axis',e.target.value)}><option value="time_course">Time course</option><option value="cross_sectional">Condition contrasts without time</option></select></label>
-          <label className="block text-sm">DIA-NN version (only when a report is provided)<Input value={String(science.diann_version??'')} onChange={e=>put('science',{...science,diann_version:e.target.value})}/></label>
-          <p className="text-xs">기존 matrix 정량은 유지됩니다. 새 원본 보고서는 관측 audit에 사용하며 run confidence를 개별 site posterior로 바꾸지 않습니다.</p>
-        </>}
-      </details>}
+      {astra && <div className="space-y-2">
+        <p className="text-xs text-muted-foreground">종: {species}. 측정·서열 근거와 분석 가능한 범위를 패키지에 함께 기록합니다.</p>
+        <label className="block text-sm">Design axis<select aria-label="Design axis" value={String(context.design_axis??'time_course')} onChange={e=>put('design_axis',e.target.value)}><option value="time_course">Time course</option><option value="cross_sectional">Condition contrasts without time</option></select></label>
+        <label className="block text-sm">DIA-NN version (only when a report is provided)<Input value={String(science.diann_version??'')} onChange={e=>put('science',{...science,diann_version:e.target.value})}/></label>
+        <label className="block text-sm">등록 Reference ID (FASTA를 업로드하지 않는 새 주문)<Input value={String((science.reference as Record<string,unknown>|undefined)?.reference_id??'')} onChange={e=>put('science',{...science,reference:{...((science.reference??{}) as Record<string,unknown>),reference_id:e.target.value}})}/></label>
+      </div>}
       <details><summary className="cursor-pointer text-sm">Advanced normalization override</summary>
         <p className="text-xs">New Astra studies preserve supplied intensities. This does not establish upstream DIA-NN normalization. The alternative scaling track is calculated automatically.</p>
         <select aria-label="Additional global normalization" className="block w-full rounded border bg-background p-2 text-sm"

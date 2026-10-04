@@ -106,6 +106,10 @@ def integrate_temporal(tables,discovery,design,context,source_context=None,impac
     impacts_by_form={fid:rows for fid,rows in impacts.groupby('form_id')} if impacts is not None else {}
     features=[];protein=[];kinase=[];fixed=[];anchors=[];membership=discovery['substrate_contributions'];profiles=discovery['kinase_temporal_profiles']
     def feature(entity,sid,track,rows,column):
+        duplicates=rows.loc[rows.contrast_id.duplicated(keep=False),'contrast_id'].unique()
+        if len(duplicates):
+            raise ValueError(f'duplicate_temporal_observations: entity={entity}, track={track}, '
+                             f'contrasts={list(duplicates)}; expected one aggregated observation per contrast')
         ordered=rows.set_index('contrast_id').reindex(series[sid]['contrast_ids'])
         times=[conditions[next(c['target_condition_id'] for c in design['contrasts'] if c['contrast_id']==cid)]['time']['minutes'] for cid in series[sid]['contrast_ids']]
         # Duplicate target times are valid contrasts but do not imply a temporal ordering.

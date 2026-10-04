@@ -1,10 +1,10 @@
 # 사용 및 운영 인계
 
-기본 제품 경로는 기존 Astra v4이다. v5는 `Experimental science validation`에서 명시적으로 켠 새 실행만 사용한다. 주문에 이미 있는 species, sample/condition/material, reference, 정규화와 질문을 재사용한다. species 입력을 별도로 추가하지 않았다.
+기본 제품 경로는 Astra v5이다. 별도의 `Experimental science validation` 항목과 체크박스 없이 실행한다. 기존 v4 주문의 Copy/Rerun도 새 v5 실행으로 처리하며, 완료된 패키지는 변경하지 않는다. 주문에 이미 있는 species, sample/condition/material, reference, 정규화와 질문을 재사용한다.
 
-새 주문에서는 기존 PR/PG 및 FASTA 업로드와 선택적 과학 입력 파일을 사용한다. 기존 주문의 Copy/Rerun은 저장된 경로와 canonical design을 승계한다. DIA-NN 원본이 있을 때만 정확한 version을 입력한다. 보고서 Run과 matrix column이 정확히 다르면 `Run,input_column,injection_id` crosswalk를 제공한다. 비시계열은 Design axis를 cross-sectional로 지정하며 time=null이 허용된다. Protein-only는 proteomics와 PG를 사용한다. 현재 U-only PTM 분석은 입력 오류로 명시적으로 거절한다.
+새 주문에서는 PR/PG와 분석 FASTA 업로드 또는 등록 Reference ID를 사용한다. 측정 근거 파일은 필요할 때 추가한다. 기존 주문의 Copy/Rerun은 저장된 경로와 canonical design을 승계한다. DIA-NN 원본이 있을 때만 정확한 version을 입력한다. 보고서 Run과 matrix column이 정확히 다르면 `Run,input_column,injection_id` crosswalk를 제공한다. 비시계열은 Design axis를 cross-sectional로 지정하며 time=null이 허용된다. Protein-only는 proteomics와 PG를 사용한다. 현재 U-only PTM 분석은 입력 오류로 명시적으로 거절한다.
 
-Results의 Astra 분석 패키지 카드에서 패키지, 전달 지침, 판단·보류 근거, 측정 audit, 단백질 비교를 받는다. 카드의 recorded run과 provenance는 완료 시점 값이며 현재 form 변경으로 덮어쓰지 않는다. v5는 항상 experimental이며 아직 calibration된 kinase call을 생성하지 않는다.
+Results의 Astra 분석 패키지 카드에서 패키지, 전달 지침, 판단·보류 근거, 측정 audit, 단백질 비교를 받는다. 카드의 recorded run과 provenance는 완료 시점 값이며 현재 form 변경으로 덮어쓰지 않는다. 패키지의 experimental/uncalibrated 표기는 과학적 검증 상태이며 기능 활성화 스위치가 아니다. 아직 calibration된 kinase call을 생성하지 않는다.
 
 ## 배포 전 순서
 
@@ -37,4 +37,4 @@ python replay.py --output NEW_EMPTY_REPLAY_DIRECTORY
 - v5 quant 단계는 재계산한다. 단계별 source/hash 무효화는 기록하지만 성공한 quant cache 재사용까지 구현됐다고 표시하지 않는다.
 - 외부 공식 comparator 실행 adapter는 고정된 argv/resource/code 계약과 실행 로그를 제공하는 process interface이다. 방법별 입력 변환/출력 동등성은 공식 도구 및 데이터 확보 후 별도 검증해야 한다.
 
-Rollback은 새 요청을 v4로 돌리고 v5 입력/DB/완료 archive를 보존하는 방식이다. v5 archive를 v4로 읽거나 이름만 바꾸지 않는다. 운영 기본 활성화, 정확도 향상, 독립 실험 검증 완료를 주장하지 않는다.
+Rollback은 이전 application release와 요청 경로를 복원하고 v5 입력/DB/완료 archive를 보존하는 방식이다. v5 archive를 v4로 읽거나 이름만 바꾸지 않는다. 기본 실행 경로 변경은 정확도 향상이나 독립 실험 검증 완료를 의미하지 않는다.

@@ -62,3 +62,22 @@ def test_generic_draft_save_and_execution_validation_share_resolver(tmp_path):
 def test_standard_other_ptm_not_subject_to_generic_constraints(tmp_path):
     source=order(tmp_path);source.ptm_type='acetylation'
     assert _updated_analysis_context(source,{'treatment':'hypoxia'})['treatment']=='hypoxia'
+
+
+def test_astra_v4_rerun_resolves_current_engine_without_opt_in(tmp_path):
+    from scripts.validate_generic_platform import make_fixture
+    fixture=tmp_path/'fixture';definition=make_fixture(fixture)
+    source=order(tmp_path)
+    source.species='human';source.analysis_options={'mode':'full'}
+    source.sample_config=definition['sample_config']
+    source.pr_matrix_path=str(fixture/'PR.tsv');source.pg_matrix_path=str(fixture/'PG.tsv')
+    source.fasta_path=str(fixture/'reference.fasta')
+    source.analysis_context={**definition['analysis_context'],'quantitation_export_mode':'astra_analysis.v4',
+        'science':{'experimental_enabled':False},'custom_future':{'keep':True}}
+    updated=_updated_analysis_context(source,{},for_execution=True)
+    assert updated['quantitation_export_mode']=='astra_analysis.v5'
+    assert updated['study_design']['schema_version']=='study_design.v4'
+    assert updated['study_design']['status']=='resolved'
+    assert updated['custom_future']=={'keep':True}
+    assert updated['normalization_policy']==source.analysis_context['normalization_policy']
+    assert source.analysis_context['quantitation_export_mode']=='astra_analysis.v4'

@@ -2,6 +2,18 @@
 from copy import deepcopy
 
 
+def current_astra_context(context):
+    """Select the current engine for a NEW request, including v4 order reruns.
+
+    Do not apply to recorded packages/replay or the generic PATCH merger. Keep
+    explicit legacy purposes and every supplied design/science setting intact.
+    """
+    result = deepcopy(context or {})
+    if result.get('quantitation_export_mode') == 'astra_analysis.v4':
+        result['quantitation_export_mode'] = 'astra_analysis.v5'
+    return result
+
+
 def merge_analysis_context(existing, patch):
     """Omitted keys survive; an explicit null removes a key.
 

@@ -24,7 +24,7 @@ test('filenames establish condition matching but never biological replication', 
 
 test('a missing analysis purpose is stored as Astra, and a saved purpose is kept', () => {
   const saved = withPersistedExportMode({ cell_type: 'hepatocyte', treatment: 'insulin' });
-  assert.equal(saved.quantitation_export_mode, 'astra_analysis.v4');
+  assert.equal(saved.quantitation_export_mode, 'astra_analysis.v5');
   assert.equal(saved.normalization_policy, 'already_normalized.v1');
   assert.equal(saved.treatment, 'insulin');
   const legacy = withPersistedExportMode({ quantitation_export_mode: 'legacy_only.v1', normalization_policy: 'legacy_median.v1' });
@@ -32,4 +32,15 @@ test('a missing analysis purpose is stored as Astra, and a saved purpose is kept
   assert.equal(legacy.normalization_policy, 'legacy_median.v1');
   const recorded = withPersistedExportMode({ quantitation_export_mode: 'enrichment_free_timecourse.v3', normalization_policy: 'already_normalized.v1' });
   assert.equal(recorded.quantitation_export_mode, 'enrichment_free_timecourse.v3');
+});
+
+test('v4 reruns select current Astra without dropping design or science inputs', () => {
+  const old = { quantitation_export_mode: 'astra_analysis.v4', normalization_policy: 'legacy_median.v1',
+    study_design: { injections: [{ injection_id: 'c' }] }, science: { diann_version: '2.7.0', experimental_enabled: false } };
+  const next = withPersistedExportMode(old);
+  assert.equal(next.quantitation_export_mode, 'astra_analysis.v5');
+  assert.equal(old.quantitation_export_mode, 'astra_analysis.v4');
+  assert.equal(next.normalization_policy, old.normalization_policy);
+  assert.deepEqual(next.study_design, old.study_design);
+  assert.deepEqual(next.science, old.science);
 });

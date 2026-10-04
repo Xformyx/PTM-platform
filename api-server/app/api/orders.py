@@ -335,9 +335,9 @@ def _reject_astra_downstream_stage(order, stage: str) -> None:
 
 
 def _updated_analysis_context(order, patch, existing=None, *, for_execution=False):
-    from ptm_shared.analysis_context import merge_analysis_context
+    from ptm_shared.analysis_context import merge_analysis_context, current_astra_context
     try:
-        context = merge_analysis_context(existing if existing is not None else order.analysis_context, patch)
+        context = current_astra_context(merge_analysis_context(existing if existing is not None else order.analysis_context, patch))
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     if context.get('quantitation_export_mode') in {'enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'}:
@@ -449,9 +449,10 @@ async def list_frozen_annotations(taxonomy_id:Optional[str]=None,ptm_type:Option
 @router.post('/resolve-design')
 async def resolve_order_design(body:dict=Body(...),user=Depends(get_current_user)):
     from ptm_shared.study_execution import resolve_context
+    from ptm_shared.analysis_context import current_astra_context
     species=_require_species_context(body.get('species'))
     try:
-        context=resolve_context(body.get('analysis_context') or {},body.get('sample_config') or [],
+        context=resolve_context(current_astra_context(body.get('analysis_context')),body.get('sample_config') or [],
             taxonomy_id=species.taxonomy_id,species=body.get('species'),ptm_type=body.get('ptm_type','phosphorylation'))
         from ptm_shared.astra_plan import resolve_plan
         if context.get('quantitation_export_mode')=='astra_analysis.v5':
@@ -1243,7 +1244,8 @@ async def create_order(
         # back to the standard rat reference because its custom human INSR entry
         # is part of the reproducible reference contract.
         species_context = _require_species_context(species)
-        posted_context = _safe_json_loads(analysis_context) or {}
+        from ptm_shared.analysis_context import current_astra_context
+        posted_context = current_astra_context(_safe_json_loads(analysis_context))
         science=posted_context.get('quantitation_export_mode')=='astra_analysis.v5'
         registered_mapping=None
         if science and not fasta_file:

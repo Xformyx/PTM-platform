@@ -27,7 +27,8 @@ KEYS={'reference_inventory':['accession'],'measurement_observations':['observati
 
 
 def validate_execution(context,ptm_type,taxonomy_id,options=None,pr_columns=None,pg_columns=None):
-    if context.get('science',{}).get('experimental_enabled') is not True:raise ValueError('astra_v5_experimental_flag_required')
+    # v5 is the current Astra execution path. Scientific readiness is reported
+    # per evidence layer; an obsolete UI opt-in is not an execution prerequisite.
     design=require_resolved(context.get('study_design') or {},pr_columns,pg_columns)
     if taxonomy_id is None or str(taxonomy_id)!=str(design['study'].get('taxonomy_id')):raise ValueError('species_contract_conflict')
     from .contrast_quantification import PTM_CODES
