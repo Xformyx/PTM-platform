@@ -41,8 +41,15 @@ def load_resource(manifest_path):
         'scope':'declared_matrix_adapter_not_PhosX_or_Kinase_Library_full_algorithm'}
 
 
-def score_sites(sites, entries, manifest_path=None):
+def score_sites(sites, entries, manifest_path=None, *, official=False):
     if not manifest_path:return pd.DataFrame(columns=COLUMNS),{'status':'resource_unavailable','official_parity_status':'official_parity_not_verified'}
+    declared=json.loads(Path(manifest_path).read_text())
+    if official and (declared.get('local_use_permission')!='permitted' or declared.get('derived_export_permission')!='permitted'):
+        return pd.DataFrame(columns=COLUMNS),{**declared,'status':'license_unresolved','reason':'local_use_and_derived_export_permissions_required'}
+    if declared.get('adapter')=='phosx_official.v1':
+        if not official:raise ValueError('official_specificity_requires_v6_engine')
+        from .official_specificity import score_phosx
+        return score_phosx(sites,entries,manifest_path)
     resource,metadata=load_resource(manifest_path)
     if resource is None:return pd.DataFrame(columns=COLUMNS),metadata
     meta,matrices,background=resource;fasta={r['accession']:r for r in entries};rows=[]
@@ -76,3 +83,25 @@ def score_sites(sites, entries, manifest_path=None):
     frame=pd.DataFrame(rows,columns=COLUMNS)
     if len(frame):frame['rank']=frame.groupby(['form_id','site_id']).score.rank(method='min',ascending=False)
     return frame,metadata
+
+
+def select_membership(scores,policy=None):
+    """Declared percentile/top-rank gate, not a fitted probability or PhosX run.
+
+    All scored pairs stay in the score ledger. Ties at the top-N boundary are
+    retained; no candidate is selected by its name or expected pathway.
+    """
+    policy=policy or {'policy_id':'specificity_percentile_gate.v1','minimum_percentile':95.,'top_rank':5,
+                      'selection_source':'operational_exploratory_not_calibrated'}
+    threshold=float(policy['minimum_percentile']);top=int(policy['top_rank'])
+    if not 0<=threshold<=100 or top<1:raise ValueError('invalid_specificity_membership_policy')
+    out=scores.copy()
+    # Percentiles compare each kinase with its own background; raw scores need
+    # not have comparable scales across different enzymes.
+    out['selection_rank']=out.groupby(['form_id','site_id']).percentile.rank(method='min',ascending=False)
+    out['membership_selected']=out.status.eq('scored')&out.percentile.ge(threshold)&out.selection_rank.le(top)
+    out['selection_policy_id']=policy['policy_id'];out['selection_threshold']=threshold
+    out['membership_weight']=np.where(out.membership_selected,1.,0.)
+    out['selection_reason']=np.where(out.membership_selected,'percentile_and_rank_pass',
+        np.where(out.status.ne('scored'),'not_evaluable',np.where(out.percentile.isna(),'background_percentile_unavailable','percentile_or_rank_below_policy')))
+    return out,policy

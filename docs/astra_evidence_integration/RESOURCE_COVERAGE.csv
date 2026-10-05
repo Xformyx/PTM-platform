@@ -1,0 +1,13 @@
+provider,status,query_records
+KEA3,not_supported,1
+OmniPath,hit,1
+OmniPath_registered,hit,1
+PubMed,hit,1
+Reactome,access_unavailable,3
+Reactome,not_run_budget,1
+STRING,access_unavailable,1
+STRING,hit,1
+iPTMnet,hit,1
+iPTMnet,not_run_budget,1
+iPTMnet,parse_failure,12
+repository_motif_library,hit,1

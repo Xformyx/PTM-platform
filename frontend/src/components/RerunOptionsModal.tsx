@@ -378,7 +378,7 @@ export default function RerunOptionsModal({
   };
 
   if (!order) return null;
-  const generic=['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode));
+  const generic=['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode));
 
   return (
     <>
@@ -978,7 +978,7 @@ export default function RerunOptionsModal({
             </fieldset>
 
             {/* Advanced Report Settings */}
-            {['astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))&&<AstraWritingIntent questions={researchQuestions} setQuestions={setResearchQuestions} collections={ragCollections} selected={selectedCollectionIds} setSelected={setSelectedCollectionIds} all={useAllCollections} setAll={setUseAllCollections}/>}
+            {['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))&&<AstraWritingIntent questions={researchQuestions} setQuestions={setResearchQuestions} collections={ragCollections} selected={selectedCollectionIds} setSelected={setSelectedCollectionIds} all={useAllCollections} setAll={setUseAllCollections}/>}
                 <fieldset disabled={generic} className={generic?'hidden':'rounded-lg border'}>
               <button
                 type="button"
@@ -1110,7 +1110,7 @@ export default function RerunOptionsModal({
               Cancel
             </Button>
             <Button onClick={handleConfirm} disabled={submitting}>
-              {submitting ? "Saving..." : (["astra_analysis.v4","astra_analysis.v5"].includes(String(structuredContext.quantitation_export_mode)) && confirmLabel !== "Create Duplicate" ? "Confirm & create Astra package" : confirmLabel)}
+              {submitting ? "Saving..." : (["astra_analysis.v4","astra_analysis.v5","astra_analysis.v6"].includes(String(structuredContext.quantitation_export_mode)) && confirmLabel !== "Create Duplicate" ? "Confirm & create Astra package" : confirmLabel)}
             </Button>
           </DialogFooter>
         </DialogContent>

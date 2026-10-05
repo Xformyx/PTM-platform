@@ -72,7 +72,8 @@ def main():
     p.add_argument('--base-url',default='http://127.0.0.1:8000/api');p.add_argument('--fixture',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--prepare-only',action='store_true')
     p.add_argument('--science',action='store_true',help='Exercise the experimental v5 observation and reference contract')
-    args=p.parse_args();url=urlparse(args.base_url)
+    p.add_argument('--evidence-v6',action='store_true',help='Exercise v6 site-probability lineage, cached quantification and package contract')
+    args=p.parse_args();args.science=args.science or args.evidence_v6;url=urlparse(args.base_url)
     if url.scheme!='http' or url.hostname!='127.0.0.1':p.error('Only an isolated localhost service is allowed')
     fixture=make_fixture(args.fixture)
     fixture['analysis_context'].update(quantitation_export_mode='astra_analysis.v4', custom_extension={'zero':0,'false':False,'empty':[],'text':'한글 α\n원문'})
@@ -88,6 +89,10 @@ def main():
                     observations.append({'Run':sample['file_name'],**{k:row[k] for k in
                         ['Precursor.Id','Modified.Sequence','Precursor.Charge','Protein.Group','Protein.Ids']},
                         'PTM.Site.Confidence':.9,'Lib.PTM.Site.Confidence':.99,'Q.Value':.001})
+        if args.evidence_v6:
+            fixture['analysis_context']['quantitation_export_mode']='astra_analysis.v6'
+            for row in observations:
+                row['Site.Occupancy.Probabilities']=row['Modified.Sequence'].replace('(UniMod:21)','(UniMod:21){0.97}')+str(row['Precursor.Charge'])
         pd.DataFrame(observations).to_csv(args.fixture/'diann.tsv',sep='\t',index=False)
     if args.prepare_only:return
     args.output.mkdir(parents=True,exist_ok=True)
@@ -156,7 +161,12 @@ def main():
                 calls=pd.read_csv(archive.open('science/kinase_calls.csv'))
                 assert len(calls)>0 and calls.resolution.eq('no_call').all()
                 assert calls.no_call_reasons.str.contains('uncalibrated_policy').all()
-                assert pd.read_csv(archive.open('science/observation_sites.csv')).individual_site_posterior.isna().all()
+                children=pd.read_csv(archive.open('science/observation_sites.csv'))
+                if args.evidence_v6:
+                    assert children.individual_site_posterior.dropna().eq(.97).all() and children.individual_site_posterior.notna().any()
+                    assert pd.read_csv(archive.open('science/localization_by_contrast.csv')).localized_eligible.any()
+                    assert 'study/input_lineage.csv' in archive.namelist()
+                else:assert children.individual_site_posterior.isna().all()
         return comparisons,profiles
     initial_tables=download(oid,'original',original)
     copied=request('POST',f'/orders/{oid}/duplicate',json={'new_order_name':name+'_copy'});copy_id=copied['id']
@@ -170,13 +180,13 @@ def main():
     assert original['provenance']['input_context_hash']!=rerun['provenance']['input_context_hash']
     assert len({original['run_id'],copy['run_id'],rerun['run_id']})==3
     assert original['source_pin_sha256']==copy['source_pin_sha256']==rerun['source_pin_sha256']
-    assert rerun['provenance']['stage_reuse']['quant']['status']==('computed' if args.science else 'reused')
+    assert rerun['provenance']['stage_reuse']['quant']['status']==('computed' if args.science and not args.evidence_v6 else 'reused')
     report={'passed':True,'order_id':oid,'copy_id':copy_id,'runs':[r['run_id'] for r in [original,copy,rerun]],
         'services':['FastAPI','MySQL','Redis','Celery'],'source_pin_sha256':original['source_pin_sha256'],
         'copy_design_context_preserved':True,'prior_result_immutable':True,'question_does_not_change_scientific_tables':True,
         'download_checksums_verified':True,'multiarm_same_time_separated':True,'fixture_only_not_biological_validation':True,'lossless_research_input_transfer':True,'manual_snapshot_not_required':True,'question_only_quant_cache_reused':True,'events':events}
-    report.update(profile='astra_analysis.v5' if args.science else 'astra_analysis.v4',
-        question_only_quant_cache_reused=not args.science,
+    report.update(profile='astra_analysis.v6' if args.evidence_v6 else 'astra_analysis.v5' if args.science else 'astra_analysis.v4',
+        question_only_quant_cache_reused=args.evidence_v6 or not args.science,
         observation_upload_copy_replay_contract_tested=args.science)
     if args.science:
         # The same existing Order species drives both entry points. No new species input.
@@ -204,7 +214,7 @@ def main():
             'research_questions':json.dumps(['질문 원문'])},files=[('files',(file,(args.fixture/file).read_bytes())) for file in
                 ['PR.tsv','PG.tsv','reference.fasta','diann.tsv']])
         user_result=wait(user['order_id'])
-        assert user_result['schema_version']=='astra_analysis_package.v5.experimental'
+        assert user_result['schema_version']==('astra_analysis_package.v6.experimental' if args.evidence_v6 else 'astra_analysis_package.v5.experimental')
         assert user_result['analysis_readiness']['measurement_evidence']['status']=='audit_available'
         report.update(species_conflict_blocks_before_queue=True,protein_only_cross_sectional_order=protein['id'],
             user_entry_order=user['order_id'],both_entry_points_use_order_species=True)

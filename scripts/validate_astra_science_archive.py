@@ -20,7 +20,10 @@ from ptm_shared.astra_package import replay_package
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--archive',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--replay',action='store_true');args=p.parse_args()
+    p.add_argument('--replay',action='store_true');p.add_argument('--profile',choices=['v5','v6'],default='v5');args=p.parse_args()
+    if args.profile=='v6':
+        from ptm_shared.astra_evidence_v6 import run as execute_run
+    else:execute_run=run
     args.output.mkdir(parents=True,exist_ok=False);baseline=args.output/'baseline';baseline.mkdir()
     with zipfile.ZipFile(args.archive) as archive:
         for member in archive.infolist():
@@ -30,7 +33,7 @@ def main():
     saved=json.loads((baseline/'reproducibility/replay_config.json').read_text());context=saved['context']
     # A saved order may have requested live refresh. This comparison must use
     # the archived source bytes even in that case, with network still disabled.
-    context.update(quantitation_export_mode='astra_analysis.v5',refresh_references=False)
+    context.update(quantitation_export_mode='astra_analysis.'+args.profile,refresh_references=False)
     context.setdefault('science',{}).pop('experimental_enabled',None)
     design=saved['design'];design['schema_version']='study_design.v4'
     design['study'].update(design_axis='time_course',analysis_target='phosphoproteomics');context['study_design']=design
@@ -48,8 +51,8 @@ def main():
             objects=args.output/'registry/literature_objects';objects.mkdir(exist_ok=True)
             (objects/doc['sha256']).write_bytes(payload)
     with patch('socket.socket',side_effect=AssertionError('Offline validation attempted network')):
-        result=run('frozen-input-validation',config,args.output/'v5',progress=lambda message:print(message,flush=True))
-        root=args.output/'v5/enrichment_free_runs'/result['run_id'];checks=[]
+        result=execute_run('frozen-input-validation',config,args.output/args.profile,progress=lambda message:print(message,flush=True))
+        root=args.output/args.profile/'enrichment_free_runs'/result['run_id'];checks=[]
         for old in sorted((baseline/'quant').glob('*.csv')):
             name=old.stem;new=root/'quant'/(name+'.csv')
             if not new.exists():raise ValueError('Missing quantitative table: '+name)
@@ -61,7 +64,7 @@ def main():
                 cwd=args.output.resolve(),env={**os.environ,'PYTHONPATH':''},check=True)
     report={'passed':True,'archive_sha256':hashlib.sha256(args.archive.read_bytes()).hexdigest(),'run_id':result['run_id'],
         'quantitative_comparisons':checks,'counts':result['counts'],'source_pin_sha256':sha,
-        'replay_performed':args.replay,'scope':'same_input_reference_engineering_regression_not_independent_biological_validation'}
+        'replay_performed':args.replay,'scope':'same_input_reference_engineering_regression_not_independent_biological_validation','profile':args.profile}
     (args.output/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))
 
 

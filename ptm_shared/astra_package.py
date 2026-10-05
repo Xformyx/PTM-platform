@@ -48,7 +48,7 @@ EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['ca
     'kinase_technical_omissions':['candidate_id','contrast_id','track','omitted_injection_id']}
 
 
-def quant_cached(inputs,design,context,root,fingerprint):
+def quant_cached(inputs,design,context,root,fingerprint,calculator=None):
     """Validated immutable stage cache, including failed-run successes; never a stale relabel."""
     cache=Path(root)/'.astra_stage_cache'/fingerprint;descriptor=cache/'stage.json'
     if descriptor.is_file():
@@ -62,26 +62,48 @@ def quant_cached(inputs,design,context,root,fingerprint):
             from .generic_workflow import temporal_layers
             layers,_=temporal_layers(tables,design,context);tables.update(layers)
             return (tables,meta['normalization'],meta['readiness']),{'status':'reused','fingerprint':fingerprint,'origin_analysis_run_id':meta['origin_run_id']}
-    result=calculate(inputs,design,{**context,'annotation_mode':'quantification_only'},None)
+    result=(calculator or calculate)(inputs,design,{**context,'annotation_mode':'quantification_only'},None)
     tables,norm,readiness=result;pending=cache.with_name('.'+fingerprint+'-'+uuid4().hex);pending.mkdir(parents=True)
     files={}
     for name,df in tables.items():
         path=pending/(name+'.csv');df.to_csv(path,index=False);files[name]={'sha256':digest(path),'rows':len(df)}
-    json_write(pending/'stage.json',{'fingerprint':fingerprint,'origin_run_id':Path(inputs['PR']).parents[1].name,
+    origin=Path(inputs.get('PR',inputs['PG'])).parents[1].name
+    json_write(pending/'stage.json',{'fingerprint':fingerprint,'origin_run_id':origin,
                                     'tables':files,'normalization':norm,'readiness':readiness})
     if not cache.exists():pending.rename(cache)
     # Concurrent writers keep the first complete immutable stage; no deletion of another run.
-    return result,{'status':'computed','fingerprint':fingerprint,'origin_analysis_run_id':Path(inputs['PR']).parents[1].name}
+    return result,{'status':'computed','fingerprint':fingerprint,'origin_analysis_run_id':origin}
+
+
+class StageLedger(list):
+    """Durable per-run transitions. A failed run never edits the completed pointer."""
+    def __init__(self,path,profile,code_hash):
+        super().__init__();self.path=path;self.profile=profile;self.code_hash=code_hash;self.plan={}
+
+    def persist(self):
+        from .astra_plan import STAGES
+        dependencies={**STAGES,'identity_localization':['quantify_evidence'],
+            'discover_regulators':['identity_localization','resolve_annotation']}
+        seen={r['stage']:r for r in self}
+        rows=[{**{'stage':name,'status':'queued'},**seen.get(name,{}),'dependencies':deps,
+            'code_hash':self.code_hash,'config_hash':object_hash(self.plan),'checkpoint':self.plan.get('fingerprints',{})} for name,deps in dependencies.items()]
+        temporary=self.path.with_suffix('.tmp');json_write(temporary,{'profile':self.profile,'stages':rows});temporary.replace(self.path)
 
 
 @contextmanager
 def stage(name,metrics,checkpoint,progress):
+    from datetime import datetime,timezone
     checkpoint();progress(name);start=time.monotonic()
+    row={'stage':name,'status':'running','started_utc':datetime.now(timezone.utc).isoformat()};metrics.append(row)
+    if hasattr(metrics,'persist'):metrics.persist()
     try:yield
     except Exception:
-        metrics.append({'stage':name,'status':'failed','elapsed_seconds':time.monotonic()-start});raise
-    metrics.append({'stage':name,'status':'completed','elapsed_seconds':time.monotonic()-start,
-        'process_peak_memory_bytes':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*(1 if platform.system()=='Darwin' else 1024)})
+        row.update(status='failed',elapsed_seconds=time.monotonic()-start)
+        if hasattr(metrics,'persist'):metrics.persist()
+        raise
+    row.update(status='completed',elapsed_seconds=time.monotonic()-start,finished_utc=datetime.now(timezone.utc).isoformat(),
+        process_peak_memory_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*(1 if platform.system()=='Darwin' else 1024))
+    if hasattr(metrics,'persist'):metrics.persist()
     checkpoint()
 
 
@@ -101,9 +123,13 @@ def compute_science(inputs,design,context,sources,*,quant=None,alternative=None,
         other='legacy_median.v1' if context['normalization_policy']=='already_normalized.v1' else 'already_normalized.v1'
         alternative=calculate_stage(inputs,design,{**context,'normalization_policy':other,'annotation_mode':'quantification_only'},None)
     alt_tables,alt_norm,_=alternative;checkpoint()
+    if engine and hasattr(engine,'prepare_evidence'):
+        context['_source_pin_sha256']=sources.get('pin_sha256')
+        canonical=execute('identity_localization',lambda:engine.prepare_evidence(tables,inputs,design,context)['_canonical_evidence'])
+        context={**context,'_canonical_evidence':canonical}
     mapped,edges,motif=execute('discover_regulators',lambda:discover_stage(tables,design,science_inputs['FASTA'],context,sources))
     tables['site_mapping']=mapped
-    discovery=execute('score_regulator_footprints',lambda:score_candidates(tables,edges,design,science=bool(engine)));checkpoint()
+    discovery=execute('score_regulator_footprints',lambda:engine.score_candidates(tables,edges,design,context) if engine and hasattr(engine,'score_candidates') else score_candidates(tables,edges,design,science=bool(engine)));checkpoint()
     evidence=quantitative_evidence(tables,alt_tables,design,norm,alt_norm,{**discovery,'source_queries':sources['queries']})
     temporal=execute('integrate_temporal_layers',lambda:temporal_stage(tables,discovery,design,context,sources.get('context'),evidence['parent_adjustment_impact']));checkpoint()
     evidence['censoring_bounds']=censoring_bounds(tables,design,context.get('detection_limit_model'))
@@ -151,6 +177,12 @@ def compute_science(inputs,design,context,sources,*,quant=None,alternative=None,
 
 
 def validate_science(tables,design):
+    if 'science/inference_results' in tables:
+        from . import astra_evidence_v6 as science_engine
+    elif any(name.startswith('science/') for name in tables):
+        from . import astra_science as science_engine
+    else:
+        science_engine=None
     forms=set(tables['quant/summary'].form_id);contrasts={c['contrast_id'] for c in design['contrasts']};candidates=set(tables['kinase/kinase_candidate_edges'].candidate_id)
     edges=set(tables['kinase/kinase_candidate_edges'].edge_id)
     conditions={c['condition_id'] for c in design['conditions']}
@@ -162,8 +194,9 @@ def validate_science(tables,design):
     for name,df in tables.items():
         short=name.split('/')[-1];keys=TABLE_KEYS.get(short) if name.startswith('quant/') else EXTRA_KEYS.get(short)
         if name.startswith('science/'):
-            from .astra_science import KEYS
-            keys=KEYS.get(short)
+            keys=science_engine.KEYS.get(short)
+        elif science_engine and hasattr(science_engine,'ADDITIONAL_KEYS'):
+            keys=keys or science_engine.ADDITIONAL_KEYS.get(name)
         if keys and (any(k not in df for k in keys) or df.duplicated(keys).any()):raise ValueError('Duplicate/missing row key: '+name)
         if not len(df.columns):raise ValueError('Missing header: '+name)
         for column,universe in [('form_id',forms),('contrast_id',contrasts),('candidate_id',candidates),('condition_id',conditions),('reference_condition_id',conditions),('series_id',series),('source_evidence_id',feature_ids),('target_evidence_id',feature_ids)]:
@@ -174,12 +207,11 @@ def validate_science(tables,design):
                 if not values<=universe:raise ValueError('Foreign key mismatch: '+name+'/'+column)
         checks.append({'check_id':name,'schema_keys_FK':'passed','rows':len(df),'unique_key':keys})
     if design.get('schema_version')=='study_design.v4':
-        from .astra_science import KEYS
-        missing_science={'science/'+key for key in KEYS}-set(tables)
+        missing_science={'science/'+key for key in science_engine.KEYS}-set(tables)
+        missing_science|=set(getattr(science_engine,'ADDITIONAL_KEYS',{}))-set(tables)
         if missing_science:raise ValueError('Required science table missing: '+','.join(sorted(missing_science)))
     if any(name.startswith('science/') for name in tables):
-        from .astra_science import validate_tables
-        validate_tables(tables,design)
+        science_engine.validate_tables(tables,design)
     comparison=tables['quant/comparisons'];finite_rows=comparison.loc[comparison.included]
     if len(finite_rows) and not np.allclose(finite_rows.A.to_numpy(float),(finite_rows.U_joint-finite_rows.P_joint).to_numpy(float),atol=1e-10,rtol=1e-10):raise ValueError('Same-mask form identity failed')
     offset=tables['evidence/normalization_offsets'].dropna(subset=['expected_A_offset','observed_A_offset'])
@@ -189,6 +221,12 @@ def validate_science(tables,design):
 
 
 def write_tables(tables,directory):
+    if 'science/inference_results' in tables:
+        from . import astra_evidence_v6 as science_engine
+    elif any(name.startswith('science/') for name in tables):
+        from . import astra_science as science_engine
+    else:
+        science_engine=None
     dictionary={}
     for name,frame in tables.items():
         path=directory/(name+'.csv');path.parent.mkdir(parents=True,exist_ok=True);frame.to_csv(path,index=False)
@@ -196,8 +234,9 @@ def write_tables(tables,directory):
         if list(read)!=list(frame) or len(read)!=len(frame):raise ValueError('CSV write truncated: '+name)
         short=name.split('/')[-1];keys=TABLE_KEYS.get(short) if name.startswith('quant/') else EXTRA_KEYS.get(short)
         if name.startswith('science/'):
-            from .astra_science import KEYS
-            keys=KEYS.get(short)
+            keys=science_engine.KEYS.get(short)
+        elif science_engine and hasattr(science_engine,'ADDITIONAL_KEYS'):
+            keys=keys or science_engine.ADDITIONAL_KEYS.get(name)
         dictionary[name+'.csv']={'rows':len(frame),'columns':list(frame),'unique_key':keys,
             'dtypes':{k:str(v) for k,v in frame.dtypes.items()},'nullable':True,
             'missing':'unobserved/unavailable; never zero; status/reasons accompany quantities',
@@ -226,7 +265,7 @@ def start_here(snapshot,counts,readiness):
         'If Nature full article is requested, prepare Abstract, Introduction, Results, Discussion, Methods, Data/Code availability, Figure legends, numbered references and limitations. Validate citation-order PMID/DOI/title/author/year. Incomplete bibliography requires lookup.',
         'Retain a claim-to-evidence table linking each main result to exact table/row IDs, supporting and opposing observations, and source queries. Database relationships are prior knowledge, not direct measurements in this experiment.',
         'No superiority over Astra-only or enriched experiments has been established. See evidence/readiness.json for performed, limited and unavailable stages.',
-        'Offline: install reproducibility/requirements.txt in an isolated environment, then python replay.py --output <new-directory>. All raw inputs and permitted pinned source records are included; no network calls occur.'])+'\n'
+        'Replay: install reproducibility/requirements.txt in an isolated environment, then python replay.py --output <new-directory>. Supplied measurement inputs and permitted pinned source records are included. Check reproducibility/replay_config.json for required external restricted resources before claiming self-contained replay; replay makes no network calls.'])+'\n'
 
 
 def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progress=lambda message:None,*,engine=None):
@@ -240,7 +279,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
     root=Path(output_dir);run_id=f"g{int(config.get('run_generation') or 0)}-{uuid4().hex}"
     directory=root/'enrichment_free_runs'/run_id;directory.mkdir(parents=True,exist_ok=False)
     for folder in ['study','inputs','references','methods','evidence','reproducibility']: (directory/folder).mkdir()
-    metrics=[];inputs={};hashes={}
+    metrics=StageLedger(directory/'stage_checkpoint.json',profile,object_hash(code_capture));inputs={};hashes={}
     with stage('resolve_inputs_and_plan',metrics,checkpoint,progress):
         for key,field,name in [('PR','pr_matrix_path','PR.tsv'),('PG','pg_matrix_path','PG.tsv'),('FASTA','fasta_path','reference.fasta')]:
             if engine and not config.get(field):continue
@@ -265,6 +304,9 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                         # Quantification and all other supported stages continue.
                         inputs['SPECIFICITY_RESTRICTED']=inputs.pop('SPECIFICITY')
                         hashes['SPECIFICITY_RESTRICTED']=hashes.pop('SPECIFICITY')
+                        if engine.PROFILE=='astra_analysis.v6' and resource.get('local_use_permission')=='permitted' and resource.get('derived_export_permission')=='permitted':
+                            inputs['_LOCAL_SPECIFICITY']=original
+                            hashes['SPECIFICITY']=sha
                         continue
                     for part in ('matrix','background'):
                         relative=Path(resource[part+'_file'])
@@ -277,12 +319,13 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         snapshot=config.get('user_input_snapshot') or capture_order({'id':order_id,'order_code':config['order_code'],'analysis_context':context})
         snapshot=sanitize_research(snapshot);literature=config.get('literature_pin') or {'collections':[],'documents':[],'status':'not_persisted_in_source_order'}
         plan=plan_resolver(context,hashes,taxa=fasta_taxonomy(inputs['FASTA']).values())
+        metrics.plan=plan
     with stage('quantify_evidence',metrics,checkpoint,progress):
-        quant,quant_reuse=(engine.calculate(inputs,design,context),{'status':'computed','fingerprint':plan['fingerprints']['quant']}) if engine else quant_cached(inputs,design,context,root,plan['fingerprints']['quant'])
+        quant,quant_reuse=quant_cached(inputs,design,context,root,plan['fingerprints']['quant'],calculator=engine.calculate if engine else None) if not engine or engine.PROFILE=='astra_analysis.v6' else (engine.calculate(inputs,design,context),{'status':'computed','fingerprint':plan['fingerprints']['quant']})
         other='legacy_median.v1' if context['normalization_policy']=='already_normalized.v1' else 'already_normalized.v1'
         alt_context={**context,'normalization_policy':other}
         alt_plan=plan_resolver(alt_context,hashes)
-        alternative,alt_reuse=(engine.calculate(inputs,design,alt_context),{'status':'computed','fingerprint':alt_plan['fingerprints']['quant']}) if engine else quant_cached(inputs,design,alt_context,root,alt_plan['fingerprints']['quant'])
+        alternative,alt_reuse=quant_cached(inputs,design,alt_context,root,alt_plan['fingerprints']['quant'],calculator=engine.calculate if engine else None) if not engine or engine.PROFILE=='astra_analysis.v6' else (engine.calculate(inputs,design,alt_context),{'status':'computed','fingerprint':alt_plan['fingerprints']['quant']})
     with stage('resolve_annotation',metrics,checkpoint,progress):
         mapped,_,fasta=mapped_sites(quant[0],design,engine.normalized_reference(inputs,context)[0] if engine else inputs['FASTA'],context,[])
         fixtures=json.loads(Path(config['source_fixtures_path']).read_text()) if config.get('source_fixtures_path') else config.get('source_fixtures')
@@ -290,12 +333,28 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         if context.get('refresh_references'):
             for path in sorted((root/'enrichment_free_runs').glob('*/references/source_pin.json')):
                 prior_pins.append(json.loads(path.read_text()))
-        sources=resolve_sources(config['reference_root'],mapped.to_dict('records'),fasta,design['study']['ptm_type'],
+        query_mapping=engine.source_universe(quant[0],mapped,inputs,context) if engine and hasattr(engine,'source_universe') else mapped.to_dict('records')
+        sources=resolve_sources(config['reference_root'],query_mapping,fasta,design['study']['ptm_type'],
             pin_sha=config.get('source_pin_sha256'),refresh=context.get('refresh_references',False),fixtures=fixtures,checkpoint=checkpoint,prior_pins=prior_pins,
-            **({'query_policy':'taxon_round_robin.v1'} if engine else {}))
+            **({'query_policy':'taxon_round_robin.v1'} if engine else {}),
+            **({'acquisition_policy':context.get('acquisition_policy',{'mode':'research_full'})} if engine and engine.PROFILE=='astra_analysis.v6' else {}))
         plan=plan_resolver(context,hashes,sources['pin_sha256'],fasta_taxonomy(inputs['FASTA']).values())
+        metrics.plan=plan
+    evidence_reuse={}
     def execute(name,fn):
-        with stage(name,metrics,checkpoint,progress):return fn()
+        with stage(name,metrics,checkpoint,progress):
+            if engine and engine.PROFILE=='astra_analysis.v6':
+                from .evidence_stage_cache import cached_stage
+                # Canonical preparation also scores the pinned specificity
+                # resource, so it depends on the discovery fingerprint.
+                stage_keys={'identity_localization':'discovery','discover_regulators':'discovery',
+                    'score_regulator_footprints':'discovery','integrate_temporal_layers':'temporal'}
+                if name in stage_keys:
+                    fingerprint=object_hash([plan['fingerprints'][stage_keys[name]],code_capture['astra_evidence_v6.py']])
+                    result,reuse=cached_stage(root/'evidence_cache',name,fingerprint,fn)
+                    evidence_reuse[name]=reuse
+                    return result
+            return fn()
     scientific,norm,altnorm,readiness,motif,counts=compute_science(inputs,design,context,sources,quant=quant,alternative=alternative,checkpoint=checkpoint,execute=execute,engine=engine)
     with stage('assemble_evidence_package',metrics,checkpoint,progress):
         if engine and code_capture!={name:digest(Path(__file__).parent/name) for name in code_files}:
@@ -306,7 +365,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         provenance={'schema_version':package_version,'order_id':order_id,'order_code':config['order_code'],'run_id':run_id,'analysis_profile':profile,
             'input_hashes':hashes,'design_hash':object_hash(design),'input_context_hash':object_hash(snapshot),'literature_pin_hash':object_hash(literature),
             'source_pin_sha256':sources['pin_sha256'],'stage_fingerprints':plan['fingerprints'],'normalization':norm,
-            'stage_reuse':{'quant':quant_reuse,'normalization_sensitivity':alt_reuse},'context_revision_id':object_hash(snapshot),
+            'stage_reuse':{'quant':quant_reuse,'normalization_sensitivity':alt_reuse,**evidence_reuse},'context_revision_id':object_hash(snapshot),
             'estimator_versions':{'quantification':plan['estimator'],'kinase':KINASE_VERSION,'temporal':'observed_grid_temporal.v1','strict_parent_default':'unit_balanced_same_injection_peptide_ratios.v3','export':package_version},
             'code_sha256':{name:digest(Path(__file__).parent/name) for name in code_files}}
         provenance['provenance_id']=object_hash(provenance)
@@ -315,6 +374,10 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                 measurement='diann_observations.v1',reference='reference_inventory.v1',
                 selective_call='selective_evidence.v1.experimental',specificity='experimental_specificity_adapter.v1',
                 observation_policy=context.get('science',{}).get('observation_policy',{'mode':'audit_only'}))
+            if engine.PROFILE=='astra_analysis.v6':
+                provenance['estimator_versions'].update(kinase='gene_balanced_contrast_evidence.v6.experimental',
+                    measurement='localization_evidence.v2',selective_call='evidence_resolution.v2',
+                    specificity='see_methods_method_registry_and_resource_manifest')
             provenance['provenance_id']=object_hash({k:v for k,v in provenance.items() if k!='provenance_id'})
         json_write(directory/'provenance.json',provenance)
         for name,value in [('study/user_input_snapshot',snapshot),('study/study_context',context),('study/study_design',design),
@@ -333,8 +396,10 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                 original=Path(config['reference_root'])/'literature_objects'/doc['sha256'];target=directory/relative
                 if digest(original)!=doc['sha256']:raise ValueError('Pinned literature content missing or changed')
                 target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(original,target)
+        if engine and hasattr(engine,'write_artifacts'):engine.write_artifacts(directory,scientific,context,inputs,sources,readiness)
         report=start_here(snapshot,counts,readiness);
-        if engine:report+='\n## Experimental scientific evidence\nRead science/measurement_observations.csv and site_identity_audit.csv for exact observation and sequence provenance. Read science/kinase_calls.csv for each uncalibrated abstention; proposals are not validated calls. Specificity parity and independent benchmark improvement are not established. See evidence/readiness.json for resource/assay status. The taxon is inherited from the recorded Order, never inferred from a pathway.\n'
+        if engine and hasattr(engine,'report_addendum'):report+=engine.report_addendum(scientific,readiness)
+        if engine and engine.PROFILE!='astra_analysis.v6':report+='\n## Experimental scientific evidence\nRead science/measurement_observations.csv and site_identity_audit.csv for exact observation and sequence provenance. Read science/kinase_calls.csv for each uncalibrated abstention; proposals are not validated calls. Specificity parity and independent benchmark improvement are not established. See evidence/readiness.json for resource/assay status. The taxon is inherited from the recorded Order, never inferred from a pathway.\n'
         (directory/'START_HERE_ASTRA.md').write_text(report,encoding='utf-8')
         (directory/'evidence_report.html').write_text('<!doctype html><meta charset="utf-8"><title>Astra evidence</title><pre style="white-space:pre-wrap">'+html.escape(report+'\n'+brief)+'</pre>',encoding='utf-8')
         stats=[{'input_ids':'see row-grained tables and data_dictionary','n':{'injections':len(design['injections']),'materials':len(design['materials']),'biological_unit_ids':sorted({m.get('biological_unit_id') for m in design['materials'] if m.get('biological_unit_id')})},'statistic_id':name,'method_version':version,'unit':unit,'status':status,'null_or_universe':universe,'multiple_testing_family':None} for name,version,unit,status,universe in [
@@ -353,7 +418,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                 next(s for s in stats if s['statistic_id']=='temporal_LOTO')['status']='not_applicable_cross_sectional'
         json_write(directory/'methods/statistics_inventory.json',stats)
         (directory/'methods/METHODS.md').write_text('Material → biological-unit equal-weight mean-log contrasts. A=U_joint−P_joint at form level. Generic requires ≥1 joint observation per side; strict alternative parent requires ≥2 joint injections and ≥2 sequences. Repeated subset is separate. No biological p/q. Gene-balanced medians require ≥5 sites/3 genes only for operational coverage; all lower-support candidates remain. Motif patterns are repository heuristics, exactly center-anchored, with relative gene-balanced background support, not posterior probabilities. Adjacent trapezoids never bridge an NA interval and do assume a straight segment between observed endpoints. Onset/recovery are brackets, peaks are sampled maxima. Full proteins and same-experiment links are descriptive, not causal or independent validation. Additional scaling occurs once over the whole recorded study; separate PR/PG factors and A offsets are exported. LOD bounds are unavailable without a validated model.\n',encoding='utf-8')
-        if engine:
+        if engine and engine.PROFILE!='astra_analysis.v6':
             with (directory/'methods/METHODS.md').open('a',encoding='utf-8') as method:
                 method.write('\nExperimental v5: exact run/precursor observation audit; minimum occupied-site confidence is not an individual site posterior. Optional validated-observation filtering requires explicitly recorded thresholds and renormalization scope. Site keys use accession, taxon, sequence hash and residue/position. Enzyme and substrate taxa are separate; unknown enzyme taxonomy restricts protein/context joins. Specificity uses only the declared local matrix semantics and permitted pinned resources; official atlas parity is not established. Confirmed calls remain no_call (uncalibrated_policy). Optional biological percentile intervals require at least 3 declared independent units/pairs and resample joint PTM/parent ratios together; technical-only data have no biological interval. Perturbation records are cohort-scoped. These methods are not MSstatsPTM, PhosX, KSTAR or independent validation. Cross-sectional inputs have no temporal event/AUC analysis. Protein-only inputs have no PTM adjustment or kinase call.\n')
         claims=[]
@@ -369,15 +434,25 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         versions={'python':platform.python_version(),**{p:importlib.metadata.version(p) for p in ['numpy','pandas','matplotlib']}}
         if engine:
             versions['pyarrow']=importlib.metadata.version('pyarrow')
+        if readiness.get('specificity',{}).get('status')=='official_pssm_scored':
+            for dependency in ('phosx','h5py','tables','tqdm'):
+                versions[dependency]=importlib.metadata.version(dependency)
         json_write(directory/'methods/software_versions.json',versions)
-        (directory/'reproducibility/requirements.txt').write_text('\n'.join(p+'=='+versions[p] for p in (['numpy','pandas','matplotlib','pyarrow'] if engine else ['numpy','pandas','matplotlib']))+'\n')
-        json_write(directory/'reproducibility/replay_config.json',{'engine_profile':profile,'context':context,'design':design,'inputs':{k:str(p.relative_to(directory)) for k,p in inputs.items()},'snapshot':snapshot,'literature':literature})
-        (directory/'replay.py').write_text("from pathlib import Path\nimport sys,argparse\nROOT=Path(__file__).resolve().parent\nsys.path.insert(0,str(ROOT/'reproducibility/code'))\nfrom ptm_shared.astra_package import replay_package,validate_package\np=argparse.ArgumentParser()\np.add_argument('--output',type=Path)\np.add_argument('--validate-only',action='store_true')\na=p.parse_args()\nvalidate_package(ROOT) if a.validate_only else replay_package(ROOT,a.output)\n")
+        (directory/'reproducibility/requirements.txt').write_text('\n'.join(
+            'phosx @ git+https://github.com/alussana/phosx.git@b556f59c39f099b5f3fcb574a8a70856c3fdc82c' if p=='phosx' else p+'=='+v
+            for p,v in versions.items() if p!='python')+'\n')
+        if engine and engine.PROFILE=='astra_analysis.v6':
+            with (directory/'methods/METHODS.md').open('a',encoding='utf-8') as method:
+                method.write('\nV6 audit-only preserves matrix quantification. Localization is joined by precursor and injection, then gated on the actual reference and target joint masks. Run minimum confidence, library confidence, q-values and parsed site probability retain separate scopes. Specificity membership consumes a recorded percentile/rank policy; unselected scores remain exported. Method enrichment p/q are separate from biological p/q. Calibrated inference requires a domain/resource-matched policy artifact; descriptive and exploratory signals remain available without one. Actual optional method executions and restrictions are recorded in methods/method_registry.json. Biological improvement and independent experimental validation are not implied.\n')
+        json_write(directory/'reproducibility/replay_config.json',{'engine_profile':profile,'context':context,'design':design,'inputs':{k:str(p.relative_to(directory)) for k,p in inputs.items() if not k.startswith('_')},
+            'required_external_resources':{'specificity_manifest_sha256':digest(inputs['_LOCAL_SPECIFICITY'])} if '_LOCAL_SPECIFICITY' in inputs else {},'snapshot':snapshot,'literature':literature})
+        (directory/'replay.py').write_text("from pathlib import Path\nimport sys,argparse\nROOT=Path(__file__).resolve().parent\nsys.path.insert(0,str(ROOT/'reproducibility/code'))\nfrom ptm_shared.astra_package import replay_package,validate_package\np=argparse.ArgumentParser()\np.add_argument('--output',type=Path)\np.add_argument('--validate-only',action='store_true')\np.add_argument('--specificity-manifest',type=Path)\na=p.parse_args()\nvalidate_package(ROOT) if a.validate_only else replay_package(ROOT,a.output,specificity_manifest=a.specificity_manifest)\n")
         json_write(directory/'reproducibility/v3_migration.json',{'legacy_v3_tables':{name+'.csv':'quant/'+name+'.csv' for name in TABLE_KEYS},'v3_tables_preserve_meanings':True,'new_typed_kinase_tables_are_additional_not_curated_replacements':True})
     with stage('validate_and_publish',metrics,checkpoint,progress):
         publication_started=time.monotonic()
         json_write(directory/'reproducibility/stage_metrics.json',metrics+[{'stage':'validate_and_publish','status':'archive_publication_metrics_recorded_in_platform_run','note':'Archive duration/size cannot be hashed inside that same archive without changing them'}])
-        files={str(p.relative_to(directory)):{'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(directory.rglob('*')) if p.is_file()}
+        shutil.copyfile(directory/'stage_checkpoint.json',directory/'reproducibility/stage_ledger.json')
+        files={str(p.relative_to(directory)):{'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(directory.rglob('*')) if p.is_file() and p.name!='stage_checkpoint.json'}
         json_write(directory/'manifest.json',{'schema_version':package_version,'run_id':run_id,'files':files})
         validate_package(directory)
         archive=root/(f'astra_analysis_package_{run_id}.zip');pending=archive.with_name('.'+archive.name)
@@ -425,16 +500,23 @@ def validate_package(directory):
     return checks
 
 
-def replay_package(directory,output):
+def replay_package(directory,output,*,specificity_manifest=None):
     directory=Path(directory).resolve()
     if output is None:raise ValueError('--output or --validate-only is required')
     output=Path(output).resolve()
     if output==directory or directory in output.parents:raise ValueError('Replay cannot overwrite the source package')
     validate_package(directory);config=json.loads((directory/'reproducibility/replay_config.json').read_text())
     inputs={k:directory/v for k,v in config['inputs'].items()};sources=json.loads((directory/'references/source_pin.json').read_text())
+    required=config.get('required_external_resources',{})
+    if required:
+        if not specificity_manifest or digest(Path(specificity_manifest))!=required.get('specificity_manifest_sha256'):
+            raise ValueError('Conditional replay requires the identical permitted local specificity manifest and resources')
+        inputs['_LOCAL_SPECIFICITY']=Path(specificity_manifest)
     engine=None
     if config.get('engine_profile')=='astra_analysis.v5':
         from . import astra_science as engine
+    if config.get('engine_profile')=='astra_analysis.v6':
+        from . import astra_evidence_v6 as engine
     tables,*_=compute_science(inputs,config['design'],config['context'],sources,engine=engine)
     fields,_,_=transfer_contract(config['snapshot'],config['design'],config['context'],config['literature'])
     tables['study/input_field_manifest']=pd.DataFrame(fields)

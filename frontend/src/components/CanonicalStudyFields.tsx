@@ -13,7 +13,7 @@ type Contrast={contrast_id:string;target_condition_id:string;reference_condition
 type Design={schema_version:string;status:string;replication_declaration:string;conditions:Condition[];arms:Arm[];materials:Material[];injections:Injection[];contrasts:Contrast[];issues:Array<{code:string;path:string;message:string;severity:string}>;[key:string]:unknown};
 
 export default function CanonicalStudyFields({context,onChange,samples,species,ptmType}:{context:AnalysisContext;onChange:(v:AnalysisContext)=>void;samples:DesignSample[];species:string;ptmType:string}) {
-  const astra=['astra_analysis.v4','astra_analysis.v5'].includes(String(context.quantitation_export_mode));
+  const astra=['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(context.quantitation_export_mode));
   const [plan,setPlan]=useState<Record<string,unknown>|null>(null);
   const [error,setError]=useState('');const [pending,setPending]=useState(false);const [revision,setRevision]=useState(0);
   const current=useRef({context,onChange});current.current={context,onChange};

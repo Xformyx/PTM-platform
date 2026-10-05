@@ -1,0 +1,416 @@
+{
+  "atol": 1e-10,
+  "network_requests": 0,
+  "passed": true,
+  "rtol": 1e-10,
+  "tables": [
+    {
+      "byte_equal": true,
+      "rows": 2824,
+      "table": "quant/summary",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 59304,
+      "table": "quant/runlevel",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 16944,
+      "table": "quant/comparisons",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 16944,
+      "table": "quant/detection",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 57150,
+      "table": "quant/protein_contrasts",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 13704,
+      "table": "quant/strict_parent_paired",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 13704,
+      "table": "quant/strict_parent_complete",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 445712,
+      "table": "quant/strict_parent_peptide_masks",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 667866,
+      "table": "quant/strict_unmodified_sequences",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 54456,
+      "table": "quant/strict_unmodified_proteins",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 111311,
+      "table": "quant/strict_selected_sequences",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 11614,
+      "table": "quant/site_mapping",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "quant/annotation_edges",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "quant/kinase_profiles",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "quant/kinase_membership",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "quant/kinase_sensitivity",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "quant/kinase_injection_omissions",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "quant/emergent_kinase_evidence",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 13704,
+      "table": "quant/primary_A_input",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "quant/validation_panel",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 18601,
+      "table": "quant/temporal_protein_summary",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 16944,
+      "table": "quant/form_evidence_status",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 50568,
+      "table": "kinase/kinase_candidate_edges",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 28392,
+      "table": "kinase/kinase_temporal_profiles",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 11832,
+      "table": "kinase/substrate_contributions",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 29234,
+      "table": "kinase/candidate_sensitivity",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 2100,
+      "table": "kinase/kinase_protein_context",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 576,
+      "table": "kinase/kinase_self_site_context",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 2064,
+      "table": "kinase/kinase_technical_omissions",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 1,
+      "table": "temporal/temporal_series",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 11296,
+      "table": "temporal/ptm_temporal_features",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 18601,
+      "table": "temporal/protein_temporal_features",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 4732,
+      "table": "temporal/kinase_temporal_features",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 28392,
+      "table": "temporal/kinase_fixed_membership",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 1650,
+      "table": "temporal/target_excluded_anchors",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 3345,
+      "table": "temporal/cross_layer_links",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 16944,
+      "table": "temporal/interval_contrasts",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 3300,
+      "table": "temporal/group_excluded_cowave",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 16944,
+      "table": "evidence/parent_adjustment_impact",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 101664,
+      "table": "evidence/technical_injection_omissions",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 16944,
+      "table": "evidence/normalization_offsets",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 19768,
+      "table": "evidence/emergence_evidence",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 16944,
+      "table": "evidence/feature_evidence_ledger",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 59304,
+      "table": "evidence/technical_dispersion",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 1722,
+      "table": "evidence/censoring_bounds",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 25,
+      "table": "references/source_query_ledger",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "kinase/kea3_results",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 338,
+      "table": "kinase/kinase_candidate_summary",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 9,
+      "table": "evidence/coverage_funnel",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 41,
+      "table": "kinase/method_scores",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "science/measurement_observations",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "science/site_report_observations",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 11614,
+      "table": "science/site_identity_audit",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "science/observation_sites",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 69684,
+      "table": "science/localization_by_contrast",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "science/specificity_scores",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 54495,
+      "table": "science/reference_inventory",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 16944,
+      "table": "science/replicate_uncertainty",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "science/perturbation_validation",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 6084,
+      "table": "science/kinase_calls",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 19216,
+      "table": "science/group_excluded_anchors",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 6084,
+      "table": "science/inference_results",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "science/calibrated_calls",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 10569,
+      "table": "science/evidence_dependency_groups",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 1,
+      "table": "science/calibration_provenance",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "kinase/method_membership",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 0,
+      "table": "kinase/method_executions",
+      "values_text_keys_masks_equal": true
+    },
+    {
+      "byte_equal": true,
+      "rows": 665,
+      "table": "study/input_field_manifest",
+      "values_text_keys_masks_equal": true
+    }
+  ]
+}

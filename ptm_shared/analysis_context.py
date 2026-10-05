@@ -1,5 +1,6 @@
 """Analysis context PATCH semantics shared by order creation and duplication."""
 from copy import deepcopy
+import os
 
 
 def current_astra_context(context):
@@ -11,6 +12,8 @@ def current_astra_context(context):
     result = deepcopy(context or {})
     if result.get('quantitation_export_mode') == 'astra_analysis.v4':
         result['quantitation_export_mode'] = 'astra_analysis.v5'
+    if result.get('quantitation_export_mode')=='astra_analysis.v5' and os.getenv('PTM_ASTRA_EVIDENCE_V6')=='1':
+        result['quantitation_export_mode']='astra_analysis.v6'
     return result
 
 
@@ -33,6 +36,6 @@ def merge_analysis_context(existing, patch):
     policy = result.get("normalization_policy", "legacy_median.v1")
     if policy not in {"legacy_median.v1", "already_normalized.v1", "use_supplied_intensities"}:
         raise ValueError("Unsupported normalization_policy")
-    if result.get('quantitation_export_mode', 'legacy_only.v1') not in {'legacy_only.v1', 'legacy_plus_report_compatible.v1', 'enrichment_free_primary.v2', 'enrichment_free_timecourse.v3', 'astra_analysis.v4','astra_analysis.v5'}:
+    if result.get('quantitation_export_mode', 'legacy_only.v1') not in {'legacy_only.v1', 'legacy_plus_report_compatible.v1', 'enrichment_free_primary.v2', 'enrichment_free_timecourse.v3', 'astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'}:
         raise ValueError('Unsupported quantitation_export_mode')
     return result

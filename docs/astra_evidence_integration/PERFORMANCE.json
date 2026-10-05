@@ -1,0 +1,18 @@
+{
+  "run_id": "g0-18db51669e094784aece6fe5989b6486",
+  "stage_seconds": {
+    "resolve_inputs_and_plan": 0.89568366704043,
+    "quantify_evidence": 197.8701875830302,
+    "resolve_annotation": 2.1508245829027146,
+    "identity_localization": 4.731455000001006,
+    "discover_regulators": 8.887763916980475,
+    "score_regulator_footprints": 119.98812883300707,
+    "integrate_temporal_layers": 1263.492491500103,
+    "assemble_evidence_package": 29.46575566707179,
+    "validate_and_publish": null
+  },
+  "recorded_stage_seconds_sum": 1627.4822907501366,
+  "process_peak_memory_bytes": 4167876608,
+  "archive_bytes": 179327834,
+  "scope": "same-pin offline run; not full live provider acquisition; replay time separate"
+}

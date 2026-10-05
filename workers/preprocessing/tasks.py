@@ -236,7 +236,7 @@ def run_preprocessing(self, order_id: int, config: dict):
         fasta_path = config["fasta_path"]
         ptm_mode = config.get("ptm_mode", "phospho")
         condition_map = config.get("condition_map")
-        if (config.get('experimental_context') or {}).get('quantitation_export_mode')=='astra_analysis.v5' and not config.get('species_tax_id'):
+        if (config.get('experimental_context') or {}).get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'} and not config.get('species_tax_id'):
             raise ValueError('taxonomy_required: persisted Order species must reach the worker')
         species = config.get("species_tax_id", "10090")
         kegg_org = config.get("kegg_organism", "mmu")
@@ -255,7 +255,7 @@ def run_preprocessing(self, order_id: int, config: dict):
                     logger.warning(f"[Order {order_id}] config.xlsx missing File_Name/Group columns")
 
         for label, path in [("PR Matrix", pr_path), ("PG Matrix", pg_path), ("FASTA", fasta_path)]:
-            if label=='PR Matrix' and not path and (config.get('experimental_context') or {}).get('quantitation_export_mode')=='astra_analysis.v5' and config['experimental_context']['study_design']['study'].get('analysis_target')=='proteomics':continue
+            if label=='PR Matrix' and not path and (config.get('experimental_context') or {}).get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'} and config['experimental_context']['study_design']['study'].get('analysis_target')=='proteomics':continue
             if not path or not os.path.exists(path):
                 raise FileNotFoundError(f"{label} not found: {path}")
 

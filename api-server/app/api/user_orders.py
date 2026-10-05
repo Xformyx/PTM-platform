@@ -537,7 +537,7 @@ async def _create_order_from_user_impl(
     config_data['analysis_context']=current_astra_context(config_data.get('analysis_context'))
     if not uploaded_fasta:
         context=config_data.get('analysis_context') or {}
-        if context.get('quantitation_export_mode')=='astra_analysis.v5':
+        if context.get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'}:
             from ptm_shared.science_reference import bind_registered_reference
             try:
                 resolved_reference_fasta,context,registered_mapping=bind_registered_reference(settings.REFERENCE_DIR,context)
@@ -548,7 +548,7 @@ async def _create_order_from_user_impl(
         raise HTTPException(status_code=422, detail=missing_reference_detail(settings.REFERENCE_DIR, species_context))
 
     search_names = [f.filename or "" for f, ft in zip(files, file_types) if ft == "search_result"]
-    protein_only=config_data.get("ptm_type")=="proteomics" and (config_data.get("analysis_context") or {}).get("quantitation_export_mode")=="astra_analysis.v5"
+    protein_only=config_data.get("ptm_type")=="proteomics" and (config_data.get("analysis_context") or {}).get("quantitation_export_mode") in {"astra_analysis.v5","astra_analysis.v6"}
     if len(search_names) < (1 if protein_only else 2):
         raise HTTPException(
             status_code=422,
@@ -570,7 +570,7 @@ async def _create_order_from_user_impl(
     fasta_path = resolved_reference_fasta
     reference_pdfs = []
     scientific_paths={'taxonomy_mapping_path':registered_mapping} if registered_mapping else {}
-    from ptm_shared.astra_science import INPUT_FIELDS
+    from ptm_shared.astra_evidence_v6 import INPUT_FIELDS
     scientific_roles={v.removesuffix("_path"):v for v in INPUT_FIELDS.values()}
 
     for f, ft in zip(files, file_types):
@@ -734,14 +734,14 @@ async def _create_order_from_user_impl(
         fasta_path=fasta_path,
         **scientific_paths,
     )
-    if (order.analysis_context or {}).get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'}:
+    if (order.analysis_context or {}).get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'}:
         from app.api.orders import _updated_analysis_context
         if config_data.get('sample_config') is not None:order.sample_config=config_data['sample_config']
         order.analysis_context=_updated_analysis_context(order,{},for_execution=True)
     db.add(order)
     await db.commit()
     await db.refresh(order)
-    if (order.analysis_context or {}).get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5'}:
+    if (order.analysis_context or {}).get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'}:
         # One dispatch/capture/preflight contract for user and administrator entry points.
         from app.api.orders import start_order
         await start_order(order.id,db,user)

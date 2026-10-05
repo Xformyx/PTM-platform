@@ -58,7 +58,7 @@ def _blank(value):
 
 def discover(tables, design, fasta_path, context, sources):
     mapped, curated, fasta = mapped_sites(tables, design, fasta_path, context, sources['snapshots'])
-    science=context.get('quantitation_export_mode')=='astra_analysis.v5'
+    science=context.get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'}
     reference=context.get('_science_reference',{})
     identities={r['accession']:r for r in reference.get('entries',[])}
     family_groups=GENE_GROUPS
@@ -188,7 +188,7 @@ def discover(tables, design, fasta_path, context, sources):
                           'background_policy':'unique_gene_sequence_center; equal_gene_weight','anchoring':'named_ptm_group_exactly_at_center; terminal_padding_preserved'}
 
 
-def score_candidates(tables,edges,design,*,science=False):
+def score_candidates(tables,edges,design,*,science=False,localization=None):
     contributions=[];profiles=[];sensitivity=[]
     strict=tables['strict_parent_paired'].set_index(['form_id','contrast_id']).strict_parent_A.to_dict()
     comparisons=tables['comparisons']; estimator=ContrastEstimator(design)
@@ -209,7 +209,12 @@ def score_candidates(tables,edges,design,*,science=False):
             for track,value_col in tracks.items():
                 rows=joined.loc[~joined.restriction_reasons.str.contains('mapping_ineligible|inseparable_multisite|substrate_gene_unresolved')].copy() if track=='unadjusted_only_U' else joined.loc[joined.footprint_eligible.astype(bool)&joined.included.astype(bool)].copy()
                 rows=rows.loc[rows.edge_type.eq('sequence_motif_candidate') if track=='motif_A' else rows.edge_type.eq('experimental_specificity_prediction') if track=='specificity_A' else rows.edge_type.isin(['curated_exact_site_native','curated_site_orthology'])]
-                if track=='localized_A':rows=rows.loc[pd.to_numeric(rows.localization_probability,errors='coerce').ge(.75)&~rows.restriction_reasons.str.contains('multi_accession')]
+                if track=='localized_A':
+                    if localization is None:
+                        rows=rows.loc[pd.to_numeric(rows.localization_probability,errors='coerce').ge(.75)&~rows.restriction_reasons.str.contains('multi_accession')]
+                    else:
+                        eligible=localization.loc[localization.localized_eligible.astype(bool),['form_id','site_id','contrast_id','localization_id']]
+                        rows=rows.merge(eligible,on=['form_id','site_id','contrast_id'],validate='many_to_one')
                 if track=='native_A':rows=rows.loc[rows.edge_type.eq('curated_exact_site_native')]
                 if track=='shared_site_excluded_A':rows=rows.loc[rows.ambiguity_group.map(sharing).fillna(0).le(1)]
                 if track=='source_caution_excluded_A':rows=rows.loc[rows.source_caution.fillna('').eq('')]

@@ -1,0 +1,9 @@
+[
+  {
+    "file": "diann_evidence.py",
+    "run_snapshot_sha256": "a44996ed27b0f93bf8873349f53deb9a55c1952b91bd378860c307144dcd8ab4",
+    "current_source_sha256": "8e0a165a249837ba5d64467ba3f0a5e30e5db91f6da3f2adce99d4f089278c14",
+    "change": "reject report/matrix accession mismatch in v6; no report supplied in this real run",
+    "verification": "final targeted 13 tests passed; original archive remains immutable"
+  }
+]

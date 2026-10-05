@@ -18,6 +18,7 @@ REQUIRED=['Run','Precursor.Id','Modified.Sequence','Precursor.Charge','Protein.G
 OPTIONAL=['PTM.Site.Confidence','Lib.PTM.Site.Confidence','Site.Occupancy.Probabilities','Protein.Sites',
           'Q.Value','Peptidoform.Q.Value','Global.Peptidoform.Q.Value','PG.Q.Value','Global.PG.Q.Value',
           'Precursor.Quantity','Precursor.Normalised']
+OPTIONAL += ['Run.Index','Channel','Precursor.Lib.Index','Global.Q.Value','Lib.Peptidoform.Q.Value','PEP']
 COLUMNS=['schema_version','observation_id','source_file_sha256','source_row_id','diann_version','injection_id',
  'input_column','raw_run','raw_precursor_id','raw_modified_sequence','canonical_modified_sequence','charge','protein_group',
  'form_id','accession_candidates','localization_metric_name','localization_metric_value','localization_scope',
@@ -39,36 +40,43 @@ def batches(path):
         yield from pd.read_csv(path,sep='\t',usecols=[c for c in REQUIRED+OPTIONAL if c in columns],chunksize=50000)
 
 
-def observations(path, version, pr, design, crosswalk_path=None):
+def observations(path, version, pr, design, crosswalk_path=None, *, exact_group_sets=False):
     if not path:return pd.DataFrame(columns=COLUMNS),{'status':'unavailable','reason':'diann_report_not_provided','parser_version':VERSION}
     if version not in SUPPORTED:raise ValueError('unsupported_diann_version: explicit supported version required')
     sha=digest(path);injections={r['input_column']:r['injection_id'] for r in design['injections']}
     from .contrast_quantification import PTM_CODES
     target_token=f"(UniMod:{PTM_CODES.get(design['study']['ptm_type'],-1)})"
     run_map=dict(injections)
+    channel_crosswalk=False
     if crosswalk_path:
         cross=pd.read_csv(crosswalk_path,sep=None,engine='python',dtype=str,keep_default_na=False)
         if not {'Run','input_column','injection_id'}<=set(cross):raise ValueError('crosswalk_schema_required')
-        if cross.Run.duplicated().any() or cross.injection_id.duplicated().any():raise ValueError('crosswalk_not_one_to_one')
+        channel_crosswalk=exact_group_sets and 'Channel' in cross
+        if cross.duplicated(['Run','Channel'] if channel_crosswalk else ['Run']).any() or cross.injection_id.duplicated().any():raise ValueError('crosswalk_not_one_to_one')
         if any(injections.get(r.input_column)!=r.injection_id for r in cross.itertuples()):raise ValueError('crosswalk_design_conflict')
-        run_map={r.Run:r.injection_id for r in cross.itertuples()}
+        run_map={(r.Run,r.Channel) if channel_crosswalk else r.Run:r.injection_id for r in cross.itertuples()}
     columns={v:k for k,v in injections.items()};lookup={}
+    group_key=lambda value:tuple(sorted(str(value).split(';'))) if exact_group_sets else str(value)
     for idx,r in pr.iterrows():
-        key=(str(r['Precursor.Id']),str(r['Modified.Sequence']),str(r['Protein.Group']),int(r['Precursor.Charge']))
+        key=(str(r['Precursor.Id']),str(r['Modified.Sequence']),group_key(r['Protein.Group']),int(r['Precursor.Charge']))
         lookup.setdefault(key,[]).append(idx)
     out=[];seen={};row_number=0
     for batch in batches(path):
         for r in batch.to_dict('records'):
-            row_number+=1;reasons=[];inj=run_map.get(str(r['Run']));col=columns.get(inj)
+            row_number+=1;reasons=[]
+            raw_key=(str(r['Run']),str(r.get('Channel',''))) if channel_crosswalk else str(r['Run'])
+            inj=run_map.get(raw_key);col=columns.get(inj)
             try:
                 charge=int(r['Precursor.Charge'])
                 if float(r['Precursor.Charge'])!=charge:raise ValueError('fractional charge')
             except (ValueError,TypeError):charge=None;reasons.append('invalid_charge')
-            key=(str(r['Precursor.Id']),str(r['Modified.Sequence']),str(r['Protein.Group']),charge)
+            key=(str(r['Precursor.Id']),str(r['Modified.Sequence']),group_key(r['Protein.Group']),charge)
             hits=lookup.get(key,[]);index=hits[0] if len(hits)==1 else None
             if not inj:reasons.append('run_crosswalk_required')
             if not hits:reasons.append('matrix_precursor_unmatched')
             if len(hits)>1:reasons.append('matrix_precursor_ambiguous')
+            if exact_group_sets and index is not None and group_key(r['Protein.Ids'])!=group_key(pr.at[index,'Protein.Ids']):
+                reasons.append('report_matrix_accession_conflict')
             value=pd.to_numeric(pd.Series([r.get('PTM.Site.Confidence')]),errors='coerce').iloc[0]
             library=pd.to_numeric(pd.Series([r.get('Lib.PTM.Site.Confidence')]),errors='coerce').iloc[0]
             for metric,v in [('run_confidence',value),('library_confidence',library)]:
@@ -87,7 +95,7 @@ def observations(path, version, pr, design, crosswalk_path=None):
                 'source_row_id':row_number,'diann_version':version,'injection_id':inj,'input_column':col,'raw_run':r['Run'],
                 'raw_precursor_id':r['Precursor.Id'],'raw_modified_sequence':r['Modified.Sequence'],
                 'canonical_modified_sequence':r['Modified.Sequence'],'charge':charge,'protein_group':r['Protein.Group'],
-                'form_id':form_key('form',str(r['Protein.Group'])+'|'+str(r['Modified.Sequence'])) if index is not None and target_token in str(r['Modified.Sequence']) else None,
+                'form_id':form_key('form',str(pr.at[index,'Protein.Group'] if exact_group_sets else r['Protein.Group'])+'|'+str(r['Modified.Sequence'])) if index is not None and target_token in str(r['Modified.Sequence']) else None,
                 'accession_candidates':r['Protein.Ids'],'localization_metric_name':'PTM.Site.Confidence',
                 'localization_metric_value':value,'localization_scope':'run_precursor_minimum_occupied_site',
                 'library_localization_confidence':library,'site_occupancy_probabilities_raw':r.get('Site.Occupancy.Probabilities'),
@@ -96,7 +104,7 @@ def observations(path, version, pr, design, crosswalk_path=None):
                 'matrix_intensity':intensity,'quantification_contributor':bool(contributor),'match_status':'matched' if not reasons else 'restricted',
                 'restriction_reasons':';'.join(reasons),
                 'source_fields_json':json.dumps({k:None if pd.isna(v) else str(v) if isinstance(v,float) and not np.isfinite(v) else v for k,v in r.items()},ensure_ascii=False,sort_keys=True,allow_nan=False)}
-            duplicate=(str(r['Run']),*key)
+            duplicate=(raw_key,*key)
             if duplicate in seen:
                 # Neither highest confidence nor first row wins; all duplicate keys remain visible.
                 record['restriction_reasons']+=';duplicate_observation_key';record['match_status']='conflict'

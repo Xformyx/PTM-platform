@@ -1,0 +1,28 @@
+{
+  "schema_version": "astra_evidence_evaluation.v2",
+  "baseline_commit": "c63ff3cd5e96f20afb65915df668bddef67b6298",
+  "inherits": "protocol.json",
+  "amendment_date": "2026-10-05",
+  "status": "no_independent_labels_loaded_or_threshold_tuned",
+  "comparisons": ["available_v5", "localization_only", "specificity_membership_only", "v6_full"],
+  "method_comparisons": ["repository_measured_gene_zscore", "official_PhosX_0.23.1", "official_KSEA_pending", "official_PTM_SEA_pending"],
+  "required_universes": ["common_eligible", "each_method_native"],
+  "data_effect_separated_from_code_effect": true,
+  "unknown_targets_are_negative": false,
+  "split_groups": ["study", "cohort", "reprocessing_ancestry", "shared_experiment", "cell_line_perturbation_overlap_review"],
+  "report_strata": ["taxon", "mixed_species", "enrichment", "ST_or_Y", "time_course_or_cross_sectional", "kinase_or_family"],
+  "primary_metrics": ["known_target_retrieval", "known_direction_recovery", "call_coverage_by_resolution", "truth_evaluable_call_fraction", "selective_risk_on_evaluable_truth"],
+  "unlabelled_metrics": ["stability_coverage", "abstention_coverage", "explained_input_loss"],
+  "interval_unit": "study_or_independent_experiment_never_peptide_row",
+  "stress_tests": ["intensity_dependent_dropout", "measurement_group_dropout", "gene_dropout", "timepoint_loss", "STY_coverage"],
+  "stress_test_is_real_enrichment_free_validation": false,
+  "release_operating_point": null,
+  "astra_authoring": {
+    "arms": {"A": "inputs_context_literature", "B": "same_plus_existing_package", "C": "same_plus_v6_package"},
+    "matched_fields": ["model_version", "prompt", "tools", "time_budget", "token_budget", "literature_access", "repetitions"],
+    "blind_review": true,
+    "rubric": ["numeric_accuracy", "row_evidence_linkage", "unsupported_claims", "missingness", "species_site_identity", "literature_alignment", "next_experiment_validity"],
+    "status": "not_run_model_access_unavailable",
+    "llm_self_score_is_sufficient": false
+  }
+}

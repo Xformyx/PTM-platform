@@ -88,8 +88,9 @@ def _write_atomic(path, value):
 
 
 class SourceClient:
-    def __init__(self, root, fixtures=None, budget_seconds=None, max_requests=None, checkpoint=lambda: None, refresh=False):
+    def __init__(self, root, fixtures=None, budget_seconds=None, max_requests=None, checkpoint=lambda: None, refresh=False, research_full=False):
         self.refresh=refresh
+        self.research_full=research_full;self.last_request={}
         self.root = Path(root); self.fixtures = fixtures
         self.checkpoint = checkpoint
         self.requests = 0; self.records = []
@@ -100,6 +101,7 @@ class SourceClient:
     def _spec(self, provider):
         if self.budget_override is not None:
             return self.budget_override
+        if self.research_full:return {'seconds':4*3600,'requests':100000}
         return PROVIDER_BUDGETS.get(provider, {'seconds': 30, 'requests': 1})
 
     def within_budget(self, provider):
@@ -146,6 +148,10 @@ class SourceClient:
                         headers['Content-Type'] = 'application/json'
                     else:
                         data = None
+                    interval=1.0 if provider=='STRING' else .4 if provider=='PubMed' else .2
+                    delay=interval-(time.monotonic()-self.last_request.get(provider,0))
+                    if delay>0:time.sleep(delay)
+                    self.last_request[provider]=time.monotonic()
                     req = urllib.request.Request(url, data=data, headers=headers)
                     # One retry with bounded backoff. Never turn HTTP failures into an empty answer.
                     for attempt in range(2):
@@ -281,16 +287,19 @@ def retain_unreplaced_prior_successes(priors, result):
                 pubmed_done = True
 
 
-def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refresh=False, fixtures=None, checkpoint=lambda: None, budget_seconds=None, max_requests=None, prior_pins=None, query_policy=None):
+def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refresh=False, fixtures=None, checkpoint=lambda: None, budget_seconds=None, max_requests=None, prior_pins=None, query_policy=None, acquisition_policy=None):
     root = Path(root)
     if pin_sha and not refresh:
         path = root/'source_pins'/(pin_sha+'.json')
         if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == pin_sha:
             return {**json.loads(path.read_text()), 'pin_sha256': pin_sha}
         raise ValueError('Pinned source bytes missing/corrupt; do not silently refresh an immutable source pin')
-    client = SourceClient(root, fixtures, budget_seconds=budget_seconds, max_requests=max_requests, checkpoint=checkpoint, refresh=refresh)
+    full=(acquisition_policy or {}).get('mode')=='research_full'
+    client = SourceClient(root, fixtures, budget_seconds=budget_seconds, max_requests=max_requests, checkpoint=checkpoint, refresh=refresh,research_full=full)
     result = {'schema_version': VERSION, 'queries': client.records, 'snapshots': [], 'relations': [], 'kea': [], 'context': [], 'bibliography': []}
     if query_policy:result['query_budget_policy']=query_policy
+    result['acquisition_policy']=acquisition_policy or {'mode':'legacy_bounded'}
+    result['checkpoint_policy']='successful_queries_content_addressed; failure_not_negative_cached; immutable_pin_on_completion'
     if ptm_type not in {'phosphorylation', 'phospho'}:
         result['status'] = 'not_applicable_nonphosphorylation'; return pin_sources(root, result)
     taxa = sorted({str(r['fasta_taxonomy_id']) for r in mapping if r.get('fasta_taxonomy_id')})
@@ -355,7 +364,7 @@ def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refre
     parser_module = None
     queried=set()
     for accession in ordered:
-        if not client.within_budget('iPTMnet'):
+        if not full and not client.within_budget('iPTMnet'):
             _defer(client, 'iPTMnet', 'iptmnet_provider_budget', {'accessions':[a for a in ordered if a not in queried]})
             break
         row = by_accession[accession]
@@ -384,7 +393,7 @@ def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refre
         except (ValueError, TypeError, ImportError, AttributeError) as error:
             rec.update(status='parse_failure',reason=str(error))
     # Secondary views use bounded batch queries, never an all-vs-all network.
-    human = sorted({r['fasta_gene'] for r in mapping if str(r.get('fasta_taxonomy_id'))=='9606'})
+    human = sorted({r['fasta_gene'] for r in mapping if str(r.get('fasta_taxonomy_id'))=='9606' and r.get('source_scope')!='protein_context'})
     if len(human)>=2:
         rec=client.query('KEA3',{'genes':human,'taxon':'9606','mapping':'native_FASTA_OX'},'https://maayanlab.cloud/kea3/api/enrich/',body={'gene_set':human,'query_name':'PTM observed substrates'})
         if rec['status'] in SUCCESS:
@@ -397,6 +406,13 @@ def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refre
             'query':{'native_human_genes':human},'reason':'insufficient_native_human_genes; nonhuman_uppercase_is_not_orthology','cache_hit':False})
     for tax in taxa:
         accessions=[a for a in ordered if str(by_accession[a].get('fasta_taxonomy_id'))==tax]
+        if full:
+            from .source_acquisition import string_network
+            context_rows,mapping_rows,network_status=string_network(client,accessions,tax)
+            result['context'].extend(context_rows)
+            result.setdefault('identifier_mapping',[]).extend(mapping_rows)
+            result.setdefault('network_scopes',{})[tax]=network_status
+            continue
         sent=[]
         for start in range(0, len(accessions), STRING_IDENTIFIER_BATCH):
             if not client.within_budget('STRING'):
@@ -419,7 +435,7 @@ def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refre
         if pending:
             _defer(client,'STRING','string_batch_request_budget',{'accessions':pending,'taxon':tax,'network_scope':STRING_NETWORK_SCOPE,'cross_batch_edges':STRING_CROSS_BATCH})
     ran=set()
-    for accession in ordered[:REACTOME_ACCESSION_BUDGET]:
+    for accession in (ordered if full else ordered[:REACTOME_ACCESSION_BUDGET]):
         if not client.within_budget('Reactome'):
             break
         row=by_accession[accession]
@@ -440,20 +456,22 @@ def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refre
     unrun=[a for a in ordered if a not in ran]
     if unrun:
         head=set(ordered[:REACTOME_ACCESSION_BUDGET])
-        reason='reactome_provider_budget' if head-ran else 'three_unique_accessions_per_run_operational_budget'
+        reason='reactome_provider_budget' if full or head-ran else 'three_unique_accessions_per_run_operational_budget'
         _defer(client,'Reactome',reason,{'accessions':unrun})
     pmids=sorted({p for source in result['snapshots'] for r in source['rows'] for p in re.findall(r'\b\d{5,9}\b',r.get('references',''))})
     if pmids:
-        rec=client.query('PubMed',{'PMIDs':pmids[:200],'selection':'all_observed_edge_PMIDs_first_200_sorted_budget'},
-            'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?'+urllib.parse.urlencode({'db':'pubmed','id':','.join(pmids[:200]),'retmode':'json'}))
-        if rec['status'] in SUCCESS:
-            payload=rec['payload'].get('result') if isinstance(rec['payload'],dict) else None
-            if not isinstance(payload,dict) or 'uids' not in payload:rec.update(status='parse_failure',reason='expected_pubmed_summary_result')
-            else:
-                parsed=[{'PMID':uid,'title':payload[uid].get('title'),'authors':payload[uid].get('authors'),
-                    'publication_date':payload[uid].get('pubdate'),'identifiers':payload[uid].get('articleids'),
-                    'content_status':'metadata_only','query_id':rec['query_id']} for uid in payload['uids'] if uid in payload]
-                client.accept(rec,parsed);result['bibliography']=parsed
+        for offset in range(0,len(pmids) if full else min(200,len(pmids)),200):
+            page=pmids[offset:offset+200]
+            rec=client.query('PubMed',{'PMIDs':page,'selection':'observed_edge_PMIDs_paginated_200' if full else 'all_observed_edge_PMIDs_first_200_sorted_budget'},
+                'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?'+urllib.parse.urlencode({'db':'pubmed','id':','.join(page),'retmode':'json'}))
+            if rec['status'] in SUCCESS:
+                payload=rec['payload'].get('result') if isinstance(rec['payload'],dict) else None
+                if not isinstance(payload,dict) or 'uids' not in payload:rec.update(status='parse_failure',reason='expected_pubmed_summary_result')
+                else:
+                    parsed=[{'PMID':uid,'title':payload[uid].get('title'),'authors':payload[uid].get('authors'),
+                        'publication_date':payload[uid].get('pubdate'),'identifiers':payload[uid].get('articleids'),
+                        'content_status':'metadata_only','query_id':rec['query_id']} for uid in payload['uids'] if uid in payload]
+                    client.accept(rec,parsed);result['bibliography'].extend(parsed)
     else:
         client.records.append({'query_id':stable_id('query',['PubMed',pmids]),'provider':'PubMed','status':'not_supported',
             'query':{'PMIDs':pmids},'reason':'no_observed_relation_publication_identifiers','cache_hit':False})

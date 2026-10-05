@@ -1,0 +1,15 @@
+check,status,count,evidence,scope
+engine_regression,passed,65,release-final-tests.log,astra_package + astra_science + evidence integration
+final_accession_hardening,passed,13,final-targeted-tests.log,overlaps engine tests; do not add as independent count
+API_contracts,passed,17,api-tests.log,input capture/context/lifecycle
+official_PhosX_adapter,passed,3,official-delivery-tests.log,synthetic permitted/restricted resources and native function replay
+PhosX_upstream_subset,passed,3,phosx-upstream-tests.log,upstream test subset; not biological benchmark
+frontend_build,passed,,frontend-build.log,bundle size advisory only
+API_worker_UI,passed,,API_WORKER_VALIDATION.json,isolated localhost; not production
+real_matrix_quant_regression,passed,22,HIRCB_VALIDATION.json,all numeric/text/NA and byte equal
+real_bundle_replay,passed,68,REPLAY_VALIDATION.json,68 of 68 byte identical
+exact_requested_g2,not_run,,comparison_scope.json,missing exact g2 archive
+real_DIA_NN_localization,not_run,,NEEDS_USER_DATA_KO.md,report/version not supplied
+independent_benchmark,not_run,,BENCHMARK_REPORT_KO.md,no independent split/evaluation executed
+production,not_run,,MIGRATION_AND_OPERATIONS_KO.md,not deployed or URL-verified
+frontend_context,passed,4,frontend-context-tests.log,existing input preservation tests

@@ -745,12 +745,12 @@ export default function OrderCreate() {
 
                 <details className="rounded border p-3"><summary>측정 근거 파일</summary>
                   <p className="text-xs">기존 주문의 종 정보를 재사용합니다. 보고서는 관측 audit에 사용하며 실제 검증 상태를 패키지에 표시합니다.</p>
-                  {[['fasta_file','Analysis FASTA'],['diann_report','DIA-NN long report (TSV/Parquet)'],['diann_site_report','DIA-NN site report (raw provenance)'],['run_crosswalk','Run ↔ injection crosswalk'],['search_fasta','Search FASTA'],['transgene_manifest','Transgene manifest'],['taxonomy_mapping','Accession taxonomy/gene mapping']].map(([field,label])=><label key={field} className="block text-sm">{label}<Input type="file" onChange={e=>{const file=e.target.files?.[0];setScienceFiles(old=>{const next={...old};if(file)next[field]=file;else delete next[field];return next;});}}/></label>)}
+                  {[['fasta_file','Analysis FASTA'],['diann_report','DIA-NN long report (TSV/Parquet)'],['diann_site_report','DIA-NN site report (version-declared site evidence)'],['run_crosswalk','Run ↔ injection crosswalk'],['search_fasta','Search FASTA'],['transgene_manifest','Transgene manifest'],['taxonomy_mapping','Accession taxonomy/gene mapping']].map(([field,label])=><label key={field} className="block text-sm">{label}<Input type="file" onChange={e=>{const file=e.target.files?.[0];setScienceFiles(old=>{const next={...old};if(file)next[field]=file;else delete next[field];return next;});}}/></label>)}
                 </details>
                 <div className="rounded-lg border border-dashed border-muted-foreground/25 bg-muted/30 p-4">
                   <p className="text-sm font-medium">Reference FASTA</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {['astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))
+                    {['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))
                       ? '새 Astra 주문은 분석에 사용한 FASTA를 업로드하거나 Sample Design에 등록 Reference ID를 입력하세요. 기존 주문의 재실행은 저장된 FASTA를 사용합니다.'
                       : `Automatically resolved for ${form.species}.`}
                   </p>
@@ -976,8 +976,8 @@ export default function OrderCreate() {
                   </Button>
                 </div>
                 {/* Analysis Mode Selection */}
-                {['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))&&<p className="text-sm">Primary A uses canonical contrasts and the deterministic evidence report. Legacy network and temporal-contract selections are inactive.</p>}
-                <fieldset disabled={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))} className={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))?'hidden':'space-y-4'}>
+                {['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))&&<p className="text-sm">Primary A uses canonical contrasts and the deterministic evidence report. Legacy network and temporal-contract selections are inactive.</p>}
+                <fieldset disabled={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))} className={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))?'hidden':'space-y-4'}>
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Analysis Mode</Label>
                   <div className="grid grid-cols-3 gap-3">
@@ -1338,9 +1338,9 @@ export default function OrderCreate() {
                 initial="enter" animate="center" exit="exit"
                 transition={{ duration: 0.25, ease: "easeInOut" }} className="space-y-5"
               >
-                {['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))&&<div className="rounded border p-4 space-y-2"><p className="font-medium">Primary A evidence report and Astra export</p><p className="text-sm">The automatic plan uses your existing design, prepares reference evidence and exports questions, literature inclusion status and all calculated evidence for Astra. Legacy manuscript generation is not required.</p></div>}
-                {['astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))&&<AstraWritingIntent questions={researchQuestions} setQuestions={setResearchQuestions} collections={ragCollections} selected={selectedCollectionIds} setSelected={setSelectedCollectionIds} all={useAllCollections} setAll={setUseAllCollections}/>}
-                <fieldset disabled={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))} className={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'].includes(String(structuredContext.quantitation_export_mode))?'hidden':'space-y-5'}>
+                {['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))&&<div className="rounded border p-4 space-y-2"><p className="font-medium">Primary A evidence report and Astra export</p><p className="text-sm">The automatic plan uses your existing design, prepares reference evidence and exports questions, literature inclusion status and all calculated evidence for Astra. Legacy manuscript generation is not required.</p></div>}
+                {['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))&&<AstraWritingIntent questions={researchQuestions} setQuestions={setResearchQuestions} collections={ragCollections} selected={selectedCollectionIds} setSelected={setSelectedCollectionIds} all={useAllCollections} setAll={setUseAllCollections}/>}
+                <fieldset disabled={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))} className={['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))?'hidden':'space-y-5'}>
                 <div
                   className={cn(
                     "w-full rounded-lg border text-left transition-colors",

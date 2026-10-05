@@ -68,6 +68,7 @@ class Order(Base):
     transgene_manifest_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     taxonomy_mapping_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     specificity_manifest_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    calibration_policy_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     perturbation_manifest_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Secondary file references (Cross-Talk mode)

@@ -11,7 +11,7 @@ EXPORT_MODE = 'enrichment_free_primary.v2'
 
 
 def enabled(context):
-    return isinstance(context, dict) and context.get('quantitation_export_mode') in {EXPORT_MODE,'enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5'}
+    return isinstance(context, dict) and context.get('quantitation_export_mode') in {EXPORT_MODE,'enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'}
 
 
 def annotation_snapshot(root, sha256):
@@ -34,7 +34,7 @@ def annotation_snapshot(root, sha256):
 def validate_profile(context, condition_map, ptm_type, species_tax_id, analysis_options=None):
     if not enabled(context):
         return None
-    if context.get('quantitation_export_mode')=='astra_analysis.v5':
+    if context.get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'}:
         from .astra_science import validate_execution
         return validate_execution(context,ptm_type,species_tax_id,analysis_options)
     if context.get('quantitation_export_mode')=='astra_analysis.v4':

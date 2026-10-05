@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('service',choices=['api','worker','generic','hircb','browser','astra','science','hircb-astra','astra-browser','status','cancel'])
+    p.add_argument('service',choices=['api','worker','generic','hircb','browser','astra','science','evidence','hircb-astra','astra-browser','status','cancel'])
     p.add_argument('--environment-file',type=Path,required=True)
     p.add_argument('--fixture',type=Path);p.add_argument('--output',type=Path);p.add_argument('--inputs',type=Path)
     p.add_argument('--email',default=None);p.add_argument('--port',type=int,default=8000)
@@ -46,7 +46,7 @@ def main():
         if not env.get('PTM_TEST_EMAIL'):p.error('Set PTM_TEST_EMAIL or --email for the isolated test account')
         env['PTM_TEST_PASSWORD']=env.get('PTM_TEST_PASSWORD') or env.get('ADMIN_DEFAULT_PASSWORD','')
         if not env['PTM_TEST_PASSWORD']:p.error('Set PTM_TEST_PASSWORD for the isolated test account')
-        script='inspect_validation_order.py' if args.service in {'status','cancel'} else 'validate_astra_browser.py' if args.service=='astra-browser' else 'validate_astra_platform.py' if args.service in {'astra','science'} else 'validate_generic_browser.py' if args.service=='browser' else 'validate_generic_platform.py' if args.service=='generic' else 'validate_hircb_platform.py'
+        script='inspect_validation_order.py' if args.service in {'status','cancel'} else 'validate_astra_browser.py' if args.service=='astra-browser' else 'validate_astra_platform.py' if args.service in {'astra','science','evidence'} else 'validate_generic_browser.py' if args.service=='browser' else 'validate_generic_platform.py' if args.service=='generic' else 'validate_hircb_platform.py'
         if args.service in {'browser','astra-browser'}:
             if not args.order_id:p.error('--order-id is required')
             return subprocess.call([sys.executable,str(root/'scripts'/script),'--order-id',str(args.order_id),'--output',str(args.output),'--url',args.ui_url],env=env,cwd=root)
@@ -54,10 +54,11 @@ def main():
         if args.service in {'status','cancel'}:
             cmd+=['--order-id',str(args.order_id)]
             if args.service=='cancel':cmd+=['--cancel']
-        elif args.service in {'generic','astra','science'}:
+        elif args.service in {'generic','astra','science','evidence'}:
             if not args.fixture:p.error('--fixture is required')
             cmd+=['--fixture',str(args.fixture)]
             if args.service=='science':cmd+=['--science']
+            if args.service=='evidence':cmd+=['--evidence-v6']
         else:
             if not args.inputs:p.error('--inputs is required')
             cmd+=['--inputs',str(args.inputs),'--astra' if args.service=='hircb-astra' else '--reference-preset']

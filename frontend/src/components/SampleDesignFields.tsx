@@ -17,7 +17,7 @@ export default function SampleDesignFields({ context, onChange, samples, seconda
   const put = (key: string, value: unknown) => onChange({ ...context, [key]: value });
   const errors = designErrors(context, samples, secondarySamples);
   const mode = typeof context.quantitation_export_mode === "string" ? context.quantitation_export_mode : "";
-  const astra=['astra_analysis.v4','astra_analysis.v5'].includes(mode);
+  const astra=['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(mode);
   const science=(context.science??{}) as Record<string,unknown>;
   const generic=astra||mode==='enrichment_free_timecourse.v3';
   return <div className="space-y-4 rounded-lg border p-4">
@@ -29,7 +29,7 @@ export default function SampleDesignFields({ context, onChange, samples, seconda
         {mode === "" && <option value="">분석 목적을 선택하세요</option>}
         <option value="astra_analysis.v5">Astra 분석 패키지 생성</option>
         <option value="legacy_only.v1">Legacy platform reports</option>
-        {mode !== "" && !['astra_analysis.v4','astra_analysis.v5','legacy_only.v1'].includes(mode)&&<option value={mode}>Recorded legacy analysis — preserved</option>}
+        {mode !== "" && !['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6','legacy_only.v1'].includes(mode)&&<option value={mode}>Recorded legacy analysis — preserved</option>}
       </select>
       {astra && <div className="space-y-2">
         <p className="text-xs text-muted-foreground">종: {species}. 측정·서열 근거와 분석 가능한 범위를 패키지에 함께 기록합니다.</p>

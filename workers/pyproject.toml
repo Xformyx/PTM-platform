@@ -37,6 +37,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+astra-official = [
+    "phosx @ git+https://github.com/alussana/phosx.git@b556f59c39f099b5f3fcb574a8a70856c3fdc82c",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",

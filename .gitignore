@@ -116,3 +116,4 @@ docs/implementation/*
 
 # Versioned Astra science contracts and validation evidence
 !docs/astra_science_upgrade/
+!docs/astra_evidence_integration/

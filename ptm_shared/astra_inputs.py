@@ -10,7 +10,7 @@ RESEARCH_FIELDS = ('project_name', 'order_code', 'species', 'organism_code', 'pt
                   'rag_collections', 'secondary_ptm_type', 'secondary_sample_config')
 FILE_FIELDS = ('pr_matrix_path', 'pg_matrix_path', 'fasta_path', 'config_xlsx_path',
                'secondary_pr_matrix_path', 'secondary_pg_matrix_path',
-               'diann_report_path', 'diann_site_report_path', 'run_crosswalk_path', 'search_fasta_path', 'transgene_manifest_path', 'taxonomy_mapping_path', 'specificity_manifest_path', 'perturbation_manifest_path')
+               'diann_report_path', 'diann_site_report_path', 'run_crosswalk_path', 'search_fasta_path', 'transgene_manifest_path', 'taxonomy_mapping_path', 'specificity_manifest_path', 'perturbation_manifest_path', 'calibration_policy_path')
 SECRET = re.compile(r'(^|_)(password|passwd|token|secret|credential|api_key|authorization|cookie)(_|$)', re.I)
 
 

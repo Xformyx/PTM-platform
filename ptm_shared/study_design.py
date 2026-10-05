@@ -136,7 +136,7 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
     explicit=deepcopy(context.get('study_design') or {})
     if explicit and explicit.get('schema_version') not in {VERSION,SCIENCE_VERSION}:raise DesignError([issue('schema_version','study_design.schema_version','Unsupported study design schema; explicit migration is required')])
     previous=explicit if explicit.get('schema_version') in {VERSION,SCIENCE_VERSION} else {}
-    science=context.get('quantitation_export_mode')=='astra_analysis.v5' or previous.get('schema_version')==SCIENCE_VERSION
+    science=context.get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'} or previous.get('schema_version')==SCIENCE_VERSION
     axis=context.get('design_axis',previous.get('study',{}).get('design_axis','time_course')) if science else 'time_course'
     structural=validate_structure(previous) if previous else []
     if structural:

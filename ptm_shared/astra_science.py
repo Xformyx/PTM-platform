@@ -95,8 +95,12 @@ def discover(tables,design,fasta_path,context,sources):
     # Original reference inventory was checked before source queries by the orchestrator.
     ctx={**context,'_science_reference':context['_runtime_reference']}
     mapped,edges,motif=base_discover(tables,design,fasta_path,ctx,sources)
-    ids=site_identity(tables['summary'],context['_runtime_reference'])
-    scores,resource=score_sites(ids,context['_runtime_reference']['entries'],context.get('_runtime_inputs',{}).get('SPECIFICITY'))
+    canonical=context.get('_canonical_evidence')
+    if canonical is None:
+        ids=site_identity(tables['summary'],context['_runtime_reference'])
+        scores,resource=score_sites(ids,context['_runtime_reference']['entries'],context.get('_runtime_inputs',{}).get('SPECIFICITY'))
+    else:
+        ids=canonical['site_identity_audit'];scores=canonical['specificity_scores'];resource=canonical['resource']
     extra=[];forms=tables['summary'].set_index('form_id');identity=ids.set_index(['form_id','site_id'])
     for score in scores.loc[scores.status.eq('scored')].to_dict('records'):
         site=identity.loc[(score['form_id'],score['site_id'])];form=forms.loc[score['form_id']]
