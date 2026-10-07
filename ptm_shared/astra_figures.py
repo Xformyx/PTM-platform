@@ -1,9 +1,104 @@
 """Deterministic evidence plots with complete source rows and public selection rules."""
+import json
 import numpy as np
 import pandas as pd
 from .generic_workflow import json_write
 from .contrast_quantification import ContrastEstimator
 from .study_design import same_time
+from .feature_identity import project_reader_display_identity
+
+
+CURVE_SELECTION_POLICY='finite_observation_count_desc_stable_series_id_12.v1'
+
+
+def curve_series(frame,entity,value,design,track=None,candidate_edges=None):
+    """Select display series only; keep every original row of selected series.
+
+    Finite values at finite times qualify, regardless of coverage thresholds.
+    Missing points stay in the plotting arrays so lines cannot bridge gaps.
+    The selection ledger covers every series in the requested track, including
+    exclusions. Plot keys are presentation crosswalks, not new scientific IDs.
+    """
+    f=frame.loc[frame.track.eq(track)].copy() if track is not None else frame.copy()
+    keys=[entity,'arm_id','reference_condition_id','pairing']
+    columns=keys+['plot_series_key','display_label','candidate_taxa','candidate_accessions','candidate_resolution',
+                  'finite_observation_count','finite_timepoint_count','source_row_count','missing_value_count',
+                  'coverage_adequate_observations','selected','selection_rank','selection_reason','selection_policy']
+    if f.empty:return pd.DataFrame(columns=columns),f.assign(plot_series_key=pd.Series(dtype=str),display_label=pd.Series(dtype=str),plotted_point=pd.Series(dtype=bool))
+    if f[[entity,'arm_id','reference_condition_id','contrast_id']].isna().any().any():
+        raise ValueError('Curve entity/series/contrast IDs must be present')
+    if f.duplicated([entity,'contrast_id']).any():raise ValueError('Duplicate curve entity/contrast observations')
+    estimator=ContrastEstimator(design)
+    metadata={c['contrast_id']:estimator.metadata(c) for c in design['contrasts']}
+    for r in f[['contrast_id','arm_id','reference_condition_id','time_min']+(['pairing'] if 'pairing' in f else [])].drop_duplicates().to_dict('records'):
+        if r['contrast_id'] not in metadata:raise ValueError(f'Unknown curve contrast: {r["contrast_id"]}')
+        expected=metadata[r['contrast_id']]
+        for field in ['arm_id','reference_condition_id','pairing','time_min']:
+            if field not in r or pd.isna(r[field]):continue
+            agrees=same_time(r[field],expected[field]) if field=='time_min' else r[field]==expected[field]
+            if not agrees:raise ValueError(f'Conflicting curve {field}: {r["contrast_id"]}')
+    if 'pairing' not in f:f['pairing']=f.contrast_id.map(lambda cid:metadata[cid]['pairing'])
+    if f.pairing.isna().any():raise ValueError('Curve pairing metadata must be explicit')
+    def text_values(series):
+        return ';'.join(sorted({f'{v:g}' if isinstance(v,(int,float)) else str(v) for v in series.dropna() if str(v).strip()}))
+    identities={}
+    if candidate_edges is not None and not candidate_edges.empty:
+        fields=[c for c in ['candidate_gene','candidate_accession','candidate_resolution','kinase_taxon'] if c in candidate_edges]
+        identities={cid:{c:text_values(g[c]) for c in fields}
+                    for cid,g in candidate_edges[['candidate_id']+fields].drop_duplicates().groupby('candidate_id',sort=True)}
+    groups=list(f.groupby(keys,sort=True,dropna=False));rows=[];points={}
+    for key,g in groups:
+        g=g.sort_values(['time_min','contrast_id'],na_position='last').copy()
+        valid=np.isfinite(g[value].to_numpy(float)) & np.isfinite(g.time_min.to_numpy(float))
+        identity=dict(identities.get(key[0],{}))
+        label_field='candidate_gene' if entity=='candidate_id' else 'gene'
+        if label_field in g:identity[label_field]=text_values(g[label_field]) or identity.get(label_field,'')
+        identity['protein_group']=key[0] if entity=='protein_group' else ''
+        unit='kinase_candidate' if entity=='candidate_id' else 'protein_group_abundance'
+        plot_key=json.dumps([entity,*key,track],separators=(',',':'))
+        row={**dict(zip(keys,key)),'plot_series_key':plot_key,
+             'display_label':project_reader_display_identity(identity,reader_measurement_unit=unit),
+             'candidate_taxa':identity.get('kinase_taxon',''),'candidate_accessions':identity.get('candidate_accession',''),
+             'candidate_resolution':identity.get('candidate_resolution',''),
+             'finite_observation_count':int(valid.sum()),'finite_timepoint_count':int(g.loc[valid,'time_min'].nunique()),
+             'source_row_count':len(g),'missing_value_count':int(g[value].isna().sum()),
+             'coverage_adequate_observations':int((g.coverage_adequate.eq(True) & valid).sum()) if 'coverage_adequate' in g else None}
+        rows.append(row);points[plot_key]=g
+    selection=pd.DataFrame(rows).sort_values(['finite_observation_count']+keys,ascending=[False]+[True]*len(keys)).reset_index(drop=True)
+    selection['selected']=selection.finite_observation_count.gt(0) & (selection.index<12)
+    selection['selection_rank']=pd.Series(range(1,len(selection)+1),dtype='Int64').where(selection.finite_observation_count.gt(0))
+    selection['selection_reason']=np.where(selection.selected,'selected_finite_observation_rank',
+                                         np.where(selection.finite_observation_count.gt(0),'display_limit_12','no_finite_value_at_finite_time'))
+    selection['selection_policy']=CURVE_SELECTION_POLICY
+    # Taxonomy comes only from recorded enzyme metadata, never substrate/host.
+    # Same-name entities remain separate even when taxonomy is missing or equal.
+    for _,indices in selection.groupby('display_label',sort=True).groups.items():
+        group=selection.loc[indices]
+        if group[entity].nunique()>1:
+            for i in indices:
+                taxon=selection.at[i,'candidate_taxa']
+                if taxon:selection.at[i,'display_label']+=f' [taxon {taxon}]'
+    for _,indices in selection.groupby('display_label',sort=True).groups.items():
+        ids=sorted(selection.loc[indices,entity].unique())
+        if len(ids)>1:
+            for i in indices:selection.at[i,'display_label']+=f' (entity {ids.index(selection.at[i,entity])+1})'
+    arms={a['arm_id']:a['name'] for a in design['arms']}
+    if len(selection[['arm_id','reference_condition_id','pairing']].drop_duplicates())>1:
+        for i,r in selection.iterrows():
+            ref=estimator.conditions[r.reference_condition_id]
+            selection.at[i,'display_label']+=f' / {arms[r.arm_id]} vs {ref["label"]} / {r.pairing}'
+        # Identical human labels must not hide distinct arm/reference IDs.
+        for _,indices in selection.groupby('display_label',sort=True).groups.items():
+            if len(indices)>1:
+                for n,i in enumerate(sorted(indices,key=lambda i:selection.at[i,'plot_series_key']),1):
+                    selection.at[i,'display_label']+=f' (series {n})'
+    selected=[]
+    for r in selection.loc[selection.selected].itertuples():
+        g=points[r.plot_series_key].assign(plot_series_key=r.plot_series_key,display_label=r.display_label)
+        g['plotted_point']=np.isfinite(g[value].to_numpy(float)) & np.isfinite(g.time_min.to_numpy(float))
+        selected.append(g)
+    return selection,pd.concat(selected,ignore_index=True) if selected else f.iloc[:0].assign(
+        plot_series_key=pd.Series(dtype=str),display_label=pd.Series(dtype=str),plotted_point=pd.Series(dtype=bool))
 
 
 def heatmap_grid(frame,index,column,value,design):
@@ -82,7 +177,7 @@ def figure_packet(tables,directory,design):
     def save(name,key,draw,selection):
         frame=tables[key];frame.to_csv(output/(name+'_source.csv'),index=False)
         fig,ax=plt.subplots(figsize=(10,5));details=draw(ax,frame) or {}
-        ax.set_title(name.replace('_',' '));fig.tight_layout()
+        ax.set_title(details.get('display_title',name.replace('_',' ')));fig.tight_layout()
         fig.savefig(output/(name+'.svg'),metadata={'Date':None});plt.close(fig)
         legends.append({'figure_id':name,'source_table':key,'source_data':name+'_source.csv','selection':selection,
                         'missing':'omitted points or gray cells, never numeric zero','error_bars':'none; technical variation is not a biological CI','full_source_rows':len(frame),**details})
@@ -115,16 +210,32 @@ def figure_packet(tables,directory,design):
         else:empty(ax)
         ax.set_ylabel('Log2 contrast, identical joint masks')
     save('U_P_A_examples','evidence/parent_adjustment_impact',upa,'12 largest absolute P_joint, ties form/contrast ID; all opposing rows retained in source')
-    def curves(ax,f,entity,value,track=None):
-        if track is not None:f=f.loc[f.track.eq(track)]
-        keys=[entity,'arm_id','reference_condition_id']
-        for key,g in list(f.groupby(keys,sort=True))[:12]:
-            g=g.sort_values(['time_min','contrast_id']);ax.plot(g.time_min,g[value],marker='o',markersize=3,label='/'.join(map(str,key)))
-        ax.set_xlabel('Actual target time (minutes)');ax.set_ylabel('Log2 contrast, recorded reference')
-        if len(f):ax.legend(fontsize=5)
-        else:empty(ax)
-    save('kinase_footprints','kinase/kinase_temporal_profiles',lambda ax,f:curves(ax,f,'candidate_id','activity_magnitude','curated_A'),'first 12 stable candidate/arm/reference series; curated track; gaps remain gaps')
-    save('protein_trajectories','quant/protein_contrasts',lambda ax,f:curves(ax,f,'protein_group','log2_change'),'first 12 stable protein/arm/reference series; all proteins in source')
+    def curves(ax,f,entity,value,name,track=None):
+        selection,points=curve_series(f,entity,value,design,track,tables.get('kinase/kinase_candidate_edges'))
+        selection.to_csv(output/(name+'_selection.csv'),index=False)
+        points.to_csv(output/(name+'_points.csv'),index=False)
+        ax.figure.set_size_inches(12,5)
+        for n,r in enumerate(selection.loc[selection.selected].itertuples(),1):
+            g=points.loc[points.plot_series_key.eq(r.plot_series_key)]
+            # Pass all timepoints, including NA, to matplotlib. A singleton is
+            # a marker; nonfinite entries break the path instead of bridging it.
+            line,=ax.plot(g.time_min.to_numpy(float),g[value].to_numpy(float),marker='o',markersize=4,
+                         label=f'{r.display_label} (n={r.finite_observation_count})')
+            line.set_gid(f'curve-series-{n}')
+        ax.set_xlabel('Actual target time (minutes), recorded reference')
+        ax.set_ylabel('Substrate footprint (log2, parent-adjusted)' if track else 'Protein abundance contrast (log2)')
+        if selection.selected.any():ax.legend(fontsize=8,loc='upper left',bbox_to_anchor=(1.01,1),title='Finite observations (n)',title_fontsize=8)
+        else:ax.text(.5,.5,'Not evaluable: no finite observations\nat recorded times'+(f' in {track}' if track else ''),
+                     ha='center',va='center',transform=ax.transAxes)
+        return {'selection_metadata':name+'_selection.csv','plotted_data':name+'_points.csv','selection_policy':CURVE_SELECTION_POLICY,
+                'series_grain':[entity,'arm_id','reference_condition_id','pairing','track'] if track else [entity,'arm_id','reference_condition_id','pairing'],
+                'selected_series':int(selection.selected.sum()),'plotted_points':int(selection.loc[selection.selected,'finite_observation_count'].sum()),
+                'coverage_policy':'no_coverage_threshold_for_display; recorded coverage retained in points',
+                'display_title':f'Kinase substrate footprints ({track}; exploratory)' if track else 'Protein abundance trajectories'}
+    save('kinase_footprints','kinase/kinase_temporal_profiles',lambda ax,f:curves(ax,f,'candidate_id','activity_magnitude','kinase_footprints','curated_A'),
+         'up to 12 series with finite observations, count descending then stable entity/arm/reference/pairing IDs; curated_A descriptive footprint, not a kinase activity test')
+    save('protein_trajectories','quant/protein_contrasts',lambda ax,f:curves(ax,f,'protein_group','log2_change','protein_trajectories'),
+         'up to 12 series with finite observations, count descending then stable entity/arm/reference/pairing IDs; all proteins in source')
     def heat(ax,f,index,column,value,name):
         if f.empty:return empty(ax)
         grid,metadata=heatmap_grid(f,index,column,value,design)

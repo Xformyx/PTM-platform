@@ -32,7 +32,7 @@ from .generic_kinase import fasta_taxonomy
 
 VERSION='astra_analysis_package.v4'
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
-    'astra_evidence.py','astra_figures.py','astra_package.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
+    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py']))
 EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['candidate_id','contrast_id','track'],
     'substrate_contributions':['contribution_id'],'candidate_sensitivity':['candidate_id','contrast_id','track','omission_kind','omitted_id'],

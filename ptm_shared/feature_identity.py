@@ -60,13 +60,31 @@ def project_reader_display_identity(
     disambiguator=None,
     gene_ambiguous=False,
 ):
-    """Build the public reader label for one precursor without exposing PF/FEATURE IDs.
+    """Project a reader label without changing the underlying identity.
+
+    Explicit entity units support figure legends; they are not precursor forms.
+    The default precursor projection and its historical casing are unchanged.
 
     구현 대상: docs/개발_업무지시서_연구자용_PTM_Report의_Identity_Projection·서사·생성.md §4.A-1
     사전등록: 2026-09-14 표시 계약. 측정 공식 변경 아님.
     해석 한계: gene/residue는 reader projection이며 서로 다른 precursor를 한 측정치로 합치지 않는다.
     주장 금지: 이 라벨로 localization 확실성, occupancy, 또는 kinase 귀속을 주장하지 않는다.
     """
+    unit = str(reader_measurement_unit or "").strip()
+    if unit in {"kinase_candidate", "protein_group_abundance"}:
+        if unit == "kinase_candidate":
+            label = _text(row, ("candidate_gene", "candidate_name", "candidate_accession")) or "Unnamed candidate"
+            resolution = _text(row, ("candidate_resolution",))
+            if resolution in {"family", "kinase_family"}:
+                if label.endswith("_family"):
+                    label = label[:-7] + " family"
+                elif not label.lower().endswith(" family"):
+                    label += " family"
+            elif resolution == "motif_class":
+                label += " motif class"
+        else:
+            label = _text(row, ("gene", "protein_group")) or "Unnamed protein group"
+        return f"{label} {disambiguator}" if disambiguator else label
     if isinstance(row, dict):
         key = feature_key(row)
         gene, position = key[0], key[1]
@@ -77,7 +95,6 @@ def project_reader_display_identity(
     else:
         gene = str((row or ("",))[0] if row else "").strip().upper()
         position = str((row or ("", ""))[1] if row and len(row) > 1 else "").strip().upper()
-    unit = str(reader_measurement_unit or "").strip()
     if gene_ambiguous or not gene or gene in {"?", "UNKNOWN", "UNMAPPED"}:
         label = "protein-group modified-precursor feature"
     elif unit == "localized_ptm_site_feature" and position:
