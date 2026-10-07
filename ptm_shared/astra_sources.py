@@ -25,6 +25,52 @@ from .kea3_evidence import parse_kea3, mapped_human_genes
 VERSION = 'astra_sources.v1.4'
 PARSER_VERSION = 'typed_provider_parsers.v1'
 SUCCESS = {'hit', 'no_hit'}
+
+
+def requested_acquisition_policy(context):
+    """Existing refresh intent controls collection; engine changes never refresh pins."""
+    refresh=context.get('refresh_references',False)
+    if not isinstance(refresh,bool):raise ValueError('refresh_references must be boolean')
+    policy=context.get('acquisition_policy') or {'mode':'research_full' if refresh or context.get('quantitation_export_mode')=='astra_analysis.v6' else 'legacy_bounded'}
+    if not isinstance(policy,dict) or policy.get('mode') not in {'legacy_bounded','research_full'}:
+        raise ValueError('Unsupported source acquisition policy')
+    return dict(policy)
+
+
+def read_source_pin(root,pin_sha):
+    if not re.fullmatch(r'[0-9a-f]{64}',str(pin_sha)):raise ValueError('Invalid source pin SHA-256')
+    path=Path(root)/'source_pins'/(pin_sha+'.json')
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=pin_sha:
+        raise ValueError('Pinned source bytes missing/corrupt; do not silently refresh an immutable source pin')
+    return {**json.loads(path.read_text()),'pin_sha256':pin_sha}
+
+
+def source_execution_record(context,previous_pin=None,sources=None,*,preview=False,replay=False):
+    """Run/preview provenance lives outside immutable source pin bytes."""
+    requested=requested_acquisition_policy(context);refresh=context.get('refresh_references',False)
+    reused=bool(sources is not None and (replay or (previous_pin and not refresh)))
+    effective=(sources or {}).get('acquisition_policy') or {}
+    failures=[{'query_id':q.get('query_id'),'provider':q.get('provider'),'status':q.get('status'),'reason':q.get('reason')}
+              for q in (sources or {}).get('queries',[]) if q.get('status') not in SUCCESS|{'not_supported'}]
+    status='pending' if sources is None else 'reused' if reused else 'partial' if failures else 'completed'
+    if reused and requested['mode']=='research_full' and effective.get('mode')=='legacy_bounded':
+        message='기존 제한된 근거 재사용, 이번 전체 수집 미실행'
+    elif reused and not effective.get('mode'):message='기존 근거 재사용, 과거 수집 정책 unknown · 이번 수집 미실행'
+    elif reused:message='기록된 pin 재사용 · 이번 수집 미실행'
+    elif sources is None:message=f'{requested["mode"]} 수집 예정 · 실제 범위는 실행 후 기록'
+    elif failures:message='참조 자료 수집 부분 완료 · 실패/미실행 내역 확인 필요'
+    else:message=f'{effective.get("mode","unknown")} 수집 완료 · 근거 증가는 별도 평가'
+    return {'schema_version':'source_execution.v1','execution_mode':'archive_replay' if replay else 'refresh' if refresh else 'reuse_pin' if previous_pin else 'initial_acquisition',
+            'requested_policy':requested['mode'],'requested_policy_config':requested,'effective_pin_policy':effective.get('mode','unknown'),
+            'pin_reused':reused,'reuse_reason':'archive_replay_network_disabled' if replay else 'explicit_pin_without_refresh' if reused else 'refresh_requested' if refresh else 'no_prior_pin',
+            'refresh_requested':refresh,'previous_pin_sha256':previous_pin,'used_pin_sha256':(sources or {}).get('pin_sha256'),
+            'acquisition_executed':sources is not None and not reused and not preview,'status':status,'preview':preview,
+            'incomplete_queries':failures,'message':message}
+
+
+class SourceRefreshIncomplete(ValueError):
+    """A partial refresh is inspectable but cannot replace a completed package."""
+
 STRING_IDENTIFIER_BATCH = 100
 """STRING network POST에 넣는 identifier 수.
 
@@ -290,10 +336,7 @@ def retain_unreplaced_prior_successes(priors, result):
 def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refresh=False, fixtures=None, checkpoint=lambda: None, budget_seconds=None, max_requests=None, prior_pins=None, query_policy=None, acquisition_policy=None):
     root = Path(root)
     if pin_sha and not refresh:
-        path = root/'source_pins'/(pin_sha+'.json')
-        if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == pin_sha:
-            return {**json.loads(path.read_text()), 'pin_sha256': pin_sha}
-        raise ValueError('Pinned source bytes missing/corrupt; do not silently refresh an immutable source pin')
+        return read_source_pin(root,pin_sha)
     full=(acquisition_policy or {}).get('mode')=='research_full'
     client = SourceClient(root, fixtures, budget_seconds=budget_seconds, max_requests=max_requests, checkpoint=checkpoint, refresh=refresh,research_full=full)
     result = {'schema_version': VERSION, 'queries': client.records, 'snapshots': [], 'relations': [], 'kea': [], 'context': [], 'bibliography': []}
@@ -445,7 +488,7 @@ def resolve_sources(root, mapping, fasta_genes, ptm_type, *, pin_sha=None, refre
         if rec['status']=='not_run_budget':
             break
         ran.add(accession)
-        if rec['status']=='no_hit' or rec['status'] not in SUCCESS: continue
+        if rec['status'] not in SUCCESS: continue
         if not isinstance(rec['payload'],list):rec.update(status='parse_failure',reason='expected_pathway_rows')
         else:
             expected={'9606':'Homo sapiens','10116':'Rattus norvegicus','10090':'Mus musculus'}.get(str(row.get('fasta_taxonomy_id')))

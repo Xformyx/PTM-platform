@@ -1,0 +1,527 @@
+{
+  "baseline_commit": "d5733778bf47398a21e9d5fd7db47fff7e6def69",
+  "branch": "feature/round04-reference-provenance",
+  "scope": "round04_only_local",
+  "production": "not_verified_not_deployed",
+  "g1_inputs_exact": {
+    "PR": true,
+    "PG": true,
+    "FASTA": true
+  },
+  "g1_archive_sha256": "5bd457114a356a32b50b2ac259d7ea77579f4b16369f70312fff1d2dc8a219fd",
+  "g1_bounded_reuse": {
+    "schema_version": "source_execution.v1",
+    "execution_mode": "reuse_pin",
+    "requested_policy": "research_full",
+    "requested_policy_config": {
+      "mode": "research_full"
+    },
+    "effective_pin_policy": "legacy_bounded",
+    "pin_reused": true,
+    "reuse_reason": "explicit_pin_without_refresh",
+    "refresh_requested": false,
+    "previous_pin_sha256": "268a149eb1636c587a1ef85499ef2038cc8379759e055728713bf032f4640584",
+    "used_pin_sha256": "268a149eb1636c587a1ef85499ef2038cc8379759e055728713bf032f4640584",
+    "acquisition_executed": false,
+    "status": "reused",
+    "preview": false,
+    "incomplete_queries": [
+      {
+        "query_id": "query_447c7960985bd1edce84",
+        "provider": "iPTMnet",
+        "status": "not_run_budget",
+        "reason": "iptmnet_provider_budget"
+      },
+      {
+        "query_id": "query_bbc3db66558c708450dd",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_37bca1545990206748ac",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_179243d59e3f1b08a9b0",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_3f072ce00215bab7196c",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_de36a4bdc142069a02b1",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_ad0720d8b7482afc55f8",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_67f49040564e515b0dac",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_4bba056f01c2dcc80666",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_4b62b1874f4ab18de5ca",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_4bcd1ebe3d9b76187211",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_4924ebdc02e7bf691f29",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_8cc980476645b4f664a4",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_3268bf70c9631c2ab85d",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_f2f0d7c3f90d0de3f69b",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_87983bf318ef05bb814d",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_893dd60beed2f649bc42",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_e27ff7fcc1357fb5edc8",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_ddb1a9d579827a8778e8",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_f63872c505c82e6319b7",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_2ffc473ff31c6f8c2cb3",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_16f24f2ad908413619b8",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_644de87385e375071d7b",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_0b2ff7571f5ec7bab840",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_a82828dd0737be23346c",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_bf2c43a9badb2d7a3809",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_1ed43e9b04198e134926",
+        "provider": "STRING",
+        "status": "access_unavailable",
+        "reason": "HTTP_404"
+      },
+      {
+        "query_id": "query_0461ff4941faea19d88b",
+        "provider": "Reactome",
+        "status": "not_run_budget",
+        "reason": "three_unique_accessions_per_run_operational_budget"
+      }
+    ],
+    "message": "기존 제한된 근거 재사용, 이번 전체 수집 미실행"
+  },
+  "reuse": {
+    "run_id": "g0-8584adc408d24b81b2f5162735d066bf",
+    "source_execution": {
+      "acquisition_executed": false,
+      "effective_pin_policy": "unknown",
+      "execution_mode": "reuse_pin",
+      "message": "기존 근거 재사용, 과거 수집 정책 unknown · 이번 수집 미실행",
+      "pin_reused": true,
+      "preview": false,
+      "previous_pin_sha256": "7560c13a6b430363744157d74ad160a83e0939ec0754cedce20d7c0fe9dcbd8e",
+      "refresh_requested": false,
+      "requested_policy": "research_full",
+      "requested_policy_config": {
+        "mode": "research_full"
+      },
+      "reuse_reason": "explicit_pin_without_refresh",
+      "schema_version": "source_execution.v1",
+      "status": "reused",
+      "used_pin_sha256": "7560c13a6b430363744157d74ad160a83e0939ec0754cedce20d7c0fe9dcbd8e",
+      "incomplete_query_count": 18
+    },
+    "network_attempts": 0,
+    "quant_cache": {
+      "normalization_sensitivity": {
+        "fingerprint": "quant_v6_66ce0aceb9d95ad1f53c",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      },
+      "quant": {
+        "fingerprint": "quant_v6_59024921d6b79f54630d",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      }
+    },
+    "published": true
+  },
+  "refresh": {
+    "run_id": "g0-30cd41fd89ec4726b687d7ac536380db",
+    "quant_cache": {
+      "normalization_sensitivity": {
+        "fingerprint": "quant_v6_66ce0aceb9d95ad1f53c",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      },
+      "quant": {
+        "fingerprint": "quant_v6_59024921d6b79f54630d",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      }
+    },
+    "reactome_target_accessions": 15977,
+    "reactome_accessions_by_status": {
+      "hit": 7,
+      "no_hit": 13,
+      "not_run_budget": 15957
+    },
+    "reactome_cache_reused_accessions": 0,
+    "network_attempts": 20,
+    "network_scope": "Reactome only in refresh; other providers explicitly not requested",
+    "new_reactome_pair_count": 41,
+    "previous_pin_bytes_preserved": true,
+    "successful_pointer_preserved": true,
+    "published": false,
+    "run_directory": "/Users/josephk/Projects/PTM-platform/codex-inputs/round04-20261007/output/enrichment_free_runs/g0-30cd41fd89ec4726b687d7ac536380db",
+    "source_execution": {
+      "acquisition_executed": true,
+      "effective_pin_policy": "research_full",
+      "execution_mode": "refresh",
+      "message": "참조 자료 수집 부분 완료 · 실패/미실행 내역 확인 필요",
+      "pin_reused": false,
+      "preview": false,
+      "previous_pin_sha256": "7560c13a6b430363744157d74ad160a83e0939ec0754cedce20d7c0fe9dcbd8e",
+      "refresh_requested": true,
+      "requested_policy": "research_full",
+      "requested_policy_config": {
+        "mode": "research_full"
+      },
+      "reuse_reason": "refresh_requested",
+      "schema_version": "source_execution.v1",
+      "status": "partial",
+      "used_pin_sha256": "28c4c1d1f9d90d2b299aa2574f11dd8e5f2da3f17bd67e07f32c78a1b49c4b49",
+      "incomplete_query_count": 166
+    },
+    "validation_budget": {
+      "new_requests": 20,
+      "seconds": 180
+    }
+  },
+  "quant_preservation": {
+    "baseline_run": "g3-0d38baee90a74fab8516a9b2fe5738af",
+    "new_run": "g0-8584adc408d24b81b2f5162735d066bf",
+    "quant_tables": [
+      {
+        "table": "annotation_edges.csv",
+        "rows": 0,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "comparisons.csv",
+        "rows": 16944,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "detection.csv",
+        "rows": 16944,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "emergent_kinase_evidence.csv",
+        "rows": 0,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "form_evidence_status.csv",
+        "rows": 16944,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "kinase_injection_omissions.csv",
+        "rows": 0,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "kinase_membership.csv",
+        "rows": 0,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "kinase_profiles.csv",
+        "rows": 0,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "kinase_sensitivity.csv",
+        "rows": 0,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "primary_A_input.csv",
+        "rows": 13704,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "protein_contrasts.csv",
+        "rows": 57150,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "runlevel.csv",
+        "rows": 59304,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "site_mapping.csv",
+        "rows": 11614,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "strict_parent_complete.csv",
+        "rows": 13704,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "strict_parent_paired.csv",
+        "rows": 13704,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "strict_parent_peptide_masks.csv",
+        "rows": 445712,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "strict_selected_sequences.csv",
+        "rows": 111311,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "strict_unmodified_proteins.csv",
+        "rows": 54456,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "strict_unmodified_sequences.csv",
+        "rows": 667866,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "summary.csv",
+        "rows": 2824,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "temporal_protein_summary.csv",
+        "rows": 18601,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      },
+      {
+        "table": "validation_panel.csv",
+        "rows": 0,
+        "ids_text_na_exact": true,
+        "numeric_atol_rtol_1e_10": true,
+        "byte_identical": true
+      }
+    ],
+    "stage_reuse": {
+      "quant": {
+        "status": "reused",
+        "fingerprint": "quant_v6_59024921d6b79f54630d",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63"
+      },
+      "normalization_sensitivity": {
+        "status": "reused",
+        "fingerprint": "quant_v6_66ce0aceb9d95ad1f53c",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63"
+      },
+      "identity_localization": {
+        "status": "reused",
+        "fingerprint": "1e839511537bbc5202bded61154c955ad735751a8ce7f8c6b5311383962bf04c",
+        "stage": "identity_localization"
+      },
+      "discover_regulators": {
+        "status": "reused",
+        "fingerprint": "1e839511537bbc5202bded61154c955ad735751a8ce7f8c6b5311383962bf04c",
+        "stage": "discover_regulators"
+      },
+      "score_regulator_footprints": {
+        "status": "reused",
+        "fingerprint": "1e839511537bbc5202bded61154c955ad735751a8ce7f8c6b5311383962bf04c",
+        "stage": "score_regulator_footprints"
+      },
+      "integrate_temporal_layers": {
+        "status": "reused",
+        "fingerprint": "16d5a9d44e9291937068d549741ea3576da7dd707171d914a3934a0351b628e3",
+        "stage": "integrate_temporal_layers"
+      }
+    }
+  },
+  "cache_readback": {
+    "network_calls": 0,
+    "cache_reused": 20,
+    "hit": 7,
+    "no_hit": 13
+  },
+  "tests": {
+    "passed": 57,
+    "warnings": 1,
+    "seconds": 38.93,
+    "log": "codex-inputs/round04-20261007/tests.log"
+  },
+  "frontend_build": "passed_existing_browserslist_and_chunk_size_warnings",
+  "round02_03_files_byte_unchanged": [
+    "ptm_shared/astra_figures.py",
+    "ptm_shared/feature_identity.py"
+  ],
+  "limitations": [
+    "research_full_live_partial_not_published",
+    "Reactome_only_live_validation",
+    "other_provider_new_network_not_requested",
+    "no_scientific_improvement_claim",
+    "production_not_verified"
+  ],
+  "artifact_sha256": {
+    "refresh_validation.json": "c6e0efe720edeeeb165c0e136f892d861a0b64c0667230d41c215b08aebcd551",
+    "REACTOME_QUERY_COVERAGE.csv": "4637af7aeb4bbcf2fc145718f8ced6f7b35202d34f6a8a611c9b3d176272d340",
+    "refresh.log": "68f6857cef8b831123b3b26fe00a31a0deacb88a0f41d61238c3b64d5003638c",
+    "quant_preservation.json": "864143cac4e742526eadb436ed8b73795d358fb5d1c924d0f2c0345bea336b8d",
+    "config.json": "d5968256c109a0774d56bc7acebcaf277b0616cc708641f026f52f15374128b8",
+    "reuse.log": "cec81bf94efcb939ee3eca7b8f5be41b0af6ddf55bcb30206b1350dddfcbe88d",
+    "g1_bounded_reuse.json": "ebed3cda2f7f1686d037be6477bb5204454e0c20ccf5a6337f97cbf0ff73ef0c",
+    "reactome_cache_readback.json": "8f4e12a47220810807f14cc79554789aba741901fa32e1cd00233f9f43dafc1a",
+    "NEW_REACTOME_CONTEXT.csv": "f3f0d971510180f4c27caed6252178926fba5795f94f9466cd8651c7968533d7",
+    "baseline.json": "cae339e5311c5a5c1793a0738b35d173ea388216f53a51f6a56311558291c3b2",
+    "reuse_result.json": "9c3295dfe964f39ba4cf21f8590823cf6b44bfc439eaa9612d13da57591040fb",
+    "tests.log": "fb22aab18f753077cfdd355fe913d3fe4f401e6ba5999e7c204eef04bd668251",
+    "reuse_validation.json": "1ea92bce6a9c2f3c49a7533d214127d70d93a732a89e29734b82fba0a7539079",
+    "frontend-build.log": "42b23ab98a3f64ae551041a744ee846d9b008a1f17c8c2dd7de13a383c064e2d"
+  },
+  "code_sha256": {
+    "ptm_shared/astra_sources.py": "52badc6c9947ec5fc4af7d72505c26616023e3a2ee981e37aabd81a52012c22b",
+    "ptm_shared/astra_package.py": "b10a53236a3c7a0561d5cdbc1dc938814f4c59fa86e6af597f5da5acd43aac5f",
+    "api-server/app/api/orders.py": "5f0f4435b5ec1e7e0afc5ce757c963e4fa6bda6d936f01214152cd69c6447096",
+    "frontend/src/components/CanonicalStudyFields.tsx": "9d1e7830ecbf38f6b1e74a9b1508d2fe68c9d07809308a7e0b739f9b5496d5b0",
+    "frontend/src/components/PrimaryAEvidence.tsx": "a605938057fd691a748a611c396503963d9b23b7ffd0b4db6ac44f2dfdadde7e"
+  }
+}

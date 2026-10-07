@@ -22,7 +22,7 @@ import pandas as pd
 
 from .astra_plan import PROFILE, resolve_plan, effective_context, validate_execution
 from .astra_inputs import capture_order, transfer_contract, stable_id, sanitize_research
-from .astra_sources import resolve_sources
+from .astra_sources import resolve_sources, requested_acquisition_policy, source_execution_record, SourceRefreshIncomplete
 from .astra_discovery import discover, mapped_sites, score_candidates, VERSION as KINASE_VERSION
 from .astra_temporal import integrate_temporal
 from .astra_evidence import quantitative_evidence, censoring_bounds, candidate_context_and_omissions
@@ -337,9 +337,17 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         sources=resolve_sources(config['reference_root'],query_mapping,fasta,design['study']['ptm_type'],
             pin_sha=config.get('source_pin_sha256'),refresh=context.get('refresh_references',False),fixtures=fixtures,checkpoint=checkpoint,prior_pins=prior_pins,
             **({'query_policy':'taxon_round_robin.v1'} if engine else {}),
-            **({'acquisition_policy':context.get('acquisition_policy',{'mode':'research_full'})} if engine and engine.PROFILE=='astra_analysis.v6' else {}))
+            acquisition_policy=requested_acquisition_policy(context))
+        source_execution=source_execution_record(context,config.get('source_pin_sha256'),sources)
         plan=plan_resolver(context,hashes,sources['pin_sha256'],fasta_taxonomy(inputs['FASTA']).values())
+        plan['source_execution']=source_execution
+        plan['source_policy']=source_execution['message']
         metrics.plan=plan
+        json_write(directory/'references/source_execution.json',source_execution)
+        json_write(directory/'references/source_pin.json',sources)
+        json_write(directory/'reproducibility/stage_reuse.json',{'quant':quant_reuse,'normalization_sensitivity':alt_reuse})
+        if context.get('refresh_references') and source_execution['status']=='partial':
+            raise SourceRefreshIncomplete('Reference refresh partial; previous completed package preserved. See references/source_execution.json')
     evidence_reuse={}
     def execute(name,fn):
         with stage(name,metrics,checkpoint,progress):
@@ -356,6 +364,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                     return result
             return fn()
     scientific,norm,altnorm,readiness,motif,counts=compute_science(inputs,design,context,sources,quant=quant,alternative=alternative,checkpoint=checkpoint,execute=execute,engine=engine)
+    readiness['source_execution']=source_execution
     with stage('assemble_evidence_package',metrics,checkpoint,progress):
         if engine and code_capture!={name:digest(Path(__file__).parent/name) for name in code_files}:
             raise ValueError('Scientific source changed during execution; retry on a frozen release')
@@ -364,7 +373,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         validation=validate_science(scientific,design);dictionary=write_tables(scientific,directory)
         provenance={'schema_version':package_version,'order_id':order_id,'order_code':config['order_code'],'run_id':run_id,'analysis_profile':profile,
             'input_hashes':hashes,'design_hash':object_hash(design),'input_context_hash':object_hash(snapshot),'literature_pin_hash':object_hash(literature),
-            'source_pin_sha256':sources['pin_sha256'],'stage_fingerprints':plan['fingerprints'],'normalization':norm,
+            'source_pin_sha256':sources['pin_sha256'],'source_execution':source_execution,'stage_fingerprints':plan['fingerprints'],'normalization':norm,
             'stage_reuse':{'quant':quant_reuse,'normalization_sensitivity':alt_reuse,**evidence_reuse},'context_revision_id':object_hash(snapshot),
             'estimator_versions':{'quantification':plan['estimator'],'kinase':KINASE_VERSION,'temporal':'observed_grid_temporal.v1','strict_parent_default':'unit_balanced_same_injection_peptide_ratios.v3','export':package_version},
             'code_sha256':{name:digest(Path(__file__).parent/name) for name in code_files}}
@@ -398,6 +407,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                 target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(original,target)
         if engine and hasattr(engine,'write_artifacts'):engine.write_artifacts(directory,scientific,context,inputs,sources,readiness)
         report=start_here(snapshot,counts,readiness);
+        report+='\nReference acquisition: '+source_execution['message']+'\nSee references/source_execution.json for requested/effective policy, hashes and reuse reason.\n'
         if engine and hasattr(engine,'report_addendum'):report+=engine.report_addendum(scientific,readiness)
         if engine and engine.PROFILE!='astra_analysis.v6':report+='\n## Experimental scientific evidence\nRead science/measurement_observations.csv and site_identity_audit.csv for exact observation and sequence provenance. Read science/kinase_calls.csv for each uncalibrated abstention; proposals are not validated calls. Specificity parity and independent benchmark improvement are not established. See evidence/readiness.json for resource/assay status. The taxon is inherited from the recorded Order, never inferred from a pathway.\n'
         (directory/'START_HERE_ASTRA.md').write_text(report,encoding='utf-8')
@@ -476,7 +486,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         preview['reference_label']=preview.reference_condition_id.map(lambda cid:conditions[cid]['label'])
         preview=preview.rename(columns={'candidate_gene':'entity','activity_magnitude':'gene_balanced_mean','n_sites':'n_sites_or_units','n_genes':'n_substrate_genes','activity_status':'descriptive_pattern'})
         result={'schema_version':package_version,'run_id':run_id,'provenance':provenance,'artifacts':artifacts,'counts':counts,'analysis_readiness':readiness,
-            'primary_profiles':json.loads(preview.to_json(orient='records')),'source_pin_sha256':sources['pin_sha256'],'literature_pin':literature,
+            'primary_profiles':json.loads(preview.to_json(orient='records')),'source_pin_sha256':sources['pin_sha256'],'source_execution':source_execution,'literature_pin':literature,
             'publication_metrics':{'elapsed_seconds':time.monotonic()-publication_started,'archive_bytes':archive.stat().st_size,'manifest_files':len(files),'source_requests':len(sources['queries']),'cache_hits':sum(bool(q.get('cache_hit')) for q in sources['queries'])},
             'study_preview':{'snapshot':snapshot,'brief':brief,'transfer_validation':transfer},'analysis_plan':plan}
         json_write(directory/'platform_run.json',result)
@@ -527,5 +537,7 @@ def replay_package(directory,output,*,specificity_manifest=None):
         pd.testing.assert_frame_equal(a,b,check_dtype=False,check_exact=False,atol=1e-10,rtol=1e-10)
         if not a.isna().equals(b.isna()):raise ValueError('Replay NA mask differs: '+name)
         results.append({'table':name,'rows':len(a),'values_text_keys_masks_equal':True,'byte_equal':digest(directory/(name+'.csv'))==digest(output/(name+'.csv'))})
-    json_write(output/'replay_result.json',{'passed':True,'atol':1e-10,'rtol':1e-10,'tables':results,'network_requests':0})
+    json_write(output/'replay_result.json',{'passed':True,'atol':1e-10,'rtol':1e-10,'tables':results,'network_requests':0,
+        'source_execution':source_execution_record(config['context'],sources.get('pin_sha256'),sources,replay=True),
+        'archived_source_file_sha256':digest(directory/'references/source_pin.json')})
     print(json.dumps({'replayed_tables':len(results),'byte_identical':sum(r['byte_equal'] for r in results)}))

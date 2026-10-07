@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 type Evidence = {
   run_id:string;
   schema_version?:string;
+  source_execution?:{message:string;requested_policy:string;effective_pin_policy:string;pin_reused:boolean;refresh_requested:boolean;previous_pin_sha256:string|null;used_pin_sha256:string|null};
   study_preview?:{brief:string;transfer_validation:{unexpected_missing:number}};
   counts:Record<string,number>;
   provenance:{provenance_id:string; normalization:{normalization_policy:string}; estimator_versions:Record<string,string>};
@@ -43,6 +44,7 @@ export default function PrimaryAEvidence({orderId,status}:{orderId:number;status
       {data.schema_version==='astra_analysis_package.v6.experimental'&&<p className="rounded border p-3 text-sm">입력 자료는 DIA-NN 정량 행렬입니다. Run confidence와 site 확률, 서술적 footprint와 보정된 판단은 구분해 전달됩니다. 필요한 입력 부재와 no-call은 kinase 비활성을 뜻하지 않습니다.</p>}
       <div className="grid gap-3 sm:grid-cols-3">{Object.entries(data.counts).map(([key,n]) => <div key={key} className="rounded border p-3"><div className="text-2xl font-semibold">{n.toLocaleString()}</div><div className="text-sm">{countLabels[key] ?? key}</div></div>)}</div>
       <p className="break-all text-xs">Recorded run: {data.run_id}<br/>Provenance: {data.provenance.provenance_id}<br/>Normalization: {data.provenance.normalization.normalization_policy}</p>
+      {data.source_execution&&<details><summary aria-label="Recorded reference policy">{data.source_execution.message}</summary><pre className="whitespace-pre-wrap break-all text-xs">{JSON.stringify(data.source_execution,null,2)}</pre></details>}
       <p className="text-sm">Strict attribution: {typeof data.analysis_readiness?.strict_attribution==='object'?data.analysis_readiness.strict_attribution.status:data.analysis_readiness?.strict_attribution??'See recorded readiness'}. {data.analysis_readiness?.kinase&&`Kinase analysis: ${data.analysis_readiness.kinase.status}.`} Low confidence does not establish absence of a biological response. Technical injections do not establish biological replication; no biological p/q is generated.</p>
       <div className="flex flex-wrap gap-2">
         <Button onClick={()=>download('astra',`astra_analysis_package_${data.run_id}.zip`)}>패키지 다운로드</Button>

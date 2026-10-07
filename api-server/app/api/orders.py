@@ -334,6 +334,19 @@ def _reject_astra_downstream_stage(order, stage: str) -> None:
         )
 
 
+def _context_with_recorded_source_pin(order,context):
+    """Expose the existing pin to review/copy/rerun without editing old results."""
+    context=dict(context or {})
+    if context.get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'} and getattr(order,'order_code',None):
+        current=Path(get_settings().OUTPUT_DIR)/order.order_code/'enrichment_free_current.json'
+        if current.is_file():
+            recorded=json.loads(current.read_text());execution=recorded.get('source_execution') or {}
+            previous=context.get('astra_source_pin_sha256')
+            if not previous or (execution.get('execution_mode')=='refresh' and previous==execution.get('previous_pin_sha256')):
+                context['astra_source_pin_sha256']=recorded.get('source_pin_sha256')
+    return context
+
+
 def _updated_analysis_context(order, patch, existing=None, *, for_execution=False):
     from ptm_shared.analysis_context import merge_analysis_context, current_astra_context
     try:
@@ -370,7 +383,7 @@ def _updated_analysis_context(order, patch, existing=None, *, for_execution=Fals
                         **{field:getattr(order,field,None) for field in INPUT_FIELDS.values()}},context)
         except (ValueError,OSError,StopIteration,TypeError) as error:
             raise HTTPException(status_code=422,detail={'code':getattr(error,'code','study_design_execution_invalid'),'field':getattr(error,'field',None),'issues':getattr(error,'issues',[]),'message':str(error)}) from error
-        return context
+        return _context_with_recorded_source_pin(order,context)
     _validated_order_sample_manifest(order, context)
     if context.get("secondary_sample_manifest") is not None:
         _validated_order_sample_manifest(order, context, secondary=True)
@@ -418,11 +431,11 @@ def _attach_enrichment_free_profile(order, config):
             config['source_fixtures_path']=os.getenv('PTM_ASTRA_PROVIDER_FIXTURES')
             from ptm_shared.astra_inputs import capture_order
             config.setdefault('user_input_snapshot',capture_order(order))
-            current=Path(get_settings().OUTPUT_DIR)/order.order_code/'enrichment_free_current.json'
-            if current.is_file() and not context.get('refresh_references',False):
-                recorded=json.loads(current.read_text())
-                config['source_pin_sha256']=context.get('astra_source_pin_sha256') or recorded.get('source_pin_sha256')
-            else:config['source_pin_sha256']=context.get('astra_source_pin_sha256')
+            # Preserve the previous hash even on refresh; the worker decides
+            # whether to reuse or acquire from the existing refresh flag.
+            config['source_pin_sha256']=context.get('astra_source_pin_sha256')
+            from ptm_shared.astra_sources import requested_acquisition_policy
+            requested_acquisition_policy(context)
         elif context.get('quantitation_export_mode')=='enrichment_free_timecourse.v3':
             from ptm_shared.study_execution import validate_execution
             species=_require_species_context(order.species)
@@ -459,7 +472,14 @@ async def resolve_order_design(body:dict=Body(...),user=Depends(get_current_user
             from ptm_shared.astra_science import resolve_plan
         if context.get('quantitation_export_mode')=='astra_analysis.v6':
             from ptm_shared.astra_evidence_v6 import resolve_plan
-        return {'study_design':context['study_design'],'analysis_plan':resolve_plan(context) if context.get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'} else None}
+        plan=resolve_plan(context) if context.get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'} else None
+        if plan is not None:
+            from ptm_shared.astra_sources import source_execution_record,read_source_pin
+            pin=context.get('astra_source_pin_sha256')
+            sources=read_source_pin(get_settings().REFERENCE_DIR,pin) if pin and not context.get('refresh_references',False) else None
+            plan['source_execution']=source_execution_record(context,pin,sources,preview=True)
+            plan['source_policy']=plan['source_execution']['message']
+        return {'study_design':context['study_design'],'analysis_plan':plan}
     except (ValueError,TypeError,KeyError) as error:
         raise HTTPException(status_code=422,detail={'code':'design_input_invalid','message':str(error)}) from error
 
@@ -1051,7 +1071,7 @@ async def get_order(
         "organism_code": order.organism_code,
         "scientific_inputs": {field:{"filename":Path(getattr(order,field)).name,"status":"provided"} if getattr(order,field,None) else {"status":"not_provided"} for field in ('diann_report_path','diann_site_report_path','run_crosswalk_path','search_fasta_path','transgene_manifest_path','taxonomy_mapping_path','specificity_manifest_path','perturbation_manifest_path','calibration_policy_path')},
         "sample_config": order.sample_config,
-        "analysis_context": order.analysis_context,
+        "analysis_context": _context_with_recorded_source_pin(order,order.analysis_context),
         "analysis_options": order.analysis_options,
         "report_options": order.report_options,
         "rag_collections": order.rag_collections,
@@ -1475,7 +1495,7 @@ async def duplicate_order(
             recorded_path=Path(settings.OUTPUT_DIR)/source.order_code/'enrichment_free_current.json'
             if recorded_path.is_file():
                 recorded=json.loads(recorded_path.read_text())
-                analysis_ctx['astra_source_pin_sha256']=recorded.get('source_pin_sha256')
+                if not analysis_ctx.get('astra_source_pin_sha256'):analysis_ctx['astra_source_pin_sha256']=recorded.get('source_pin_sha256')
                 if rag_cols==source.rag_collections:analysis_ctx['astra_literature_pin']=recorded.get('literature_pin')
 
         if analysis_ctx.get('research_attachment_records'):

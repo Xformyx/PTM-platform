@@ -20,7 +20,7 @@ export default function CanonicalStudyFields({context,onChange,samples,species,p
   const input=JSON.stringify({analysis_context:context,sample_config:samples,species,ptm_type:ptmType});
   useEffect(()=>{
     let active=true;
-    const timer=setTimeout(()=>{setPending(true);api.post<{study_design:Design;analysis_plan?:Record<string,unknown>}>('/orders/resolve-design',JSON.parse(input))
+    const timer=setTimeout(()=>{setPending(true);setPlan(null);api.post<{study_design:Design;analysis_plan?:Record<string,unknown>}>('/orders/resolve-design',JSON.parse(input))
       .then(response=>{if(!active)return;setError('');setPlan(response.analysis_plan??null);const state=current.current;
         if(JSON.stringify(state.context.study_design)!==JSON.stringify(response.study_design))state.onChange({...state.context,study_design:response.study_design});})
       .catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setPending(false);});},350);
@@ -28,6 +28,8 @@ export default function CanonicalStudyFields({context,onChange,samples,species,p
   },[input,revision]);
   const design=context.study_design as Design|undefined;
   const put=(key:string,value:unknown)=>onChange({...context,[key]:value});
+  const refreshReferences=(checked:boolean)=>onChange({...context,refresh_references:checked,
+    ...(checked?{acquisition_policy:{...((context.acquisition_policy??{}) as Record<string,unknown>),mode:'research_full'}}:{})});
   const change=(patch:Partial<Design>)=>put('study_design',{...design,...patch});
   const selectClass='block w-full rounded border bg-background p-2 text-sm';
   const condition=(id:string)=>design?.conditions.find(c=>c.condition_id===id)?.label??id;
@@ -42,8 +44,8 @@ export default function CanonicalStudyFields({context,onChange,samples,species,p
       <p>정량: {ptmType==='proteomics'?'단백질 abundance 비교 · 공급 intensity · 정규화 민감도':'공급 intensity · 동일 주입 parent 보정 · 대체 parent/정규화 민감도'}</p>
       <p>탐색: {ptmType==='phosphorylation'?'kinase DB + 관측 잔기 중심 motif + 기질 footprint':ptmType==='proteomics'?'단백질 비교; PTM/kinase 단계 해당 없음':'지원 PTM 정량·등장·단백질 통합; kinase 해당 없음'}</p>
       <p>통합: {context.design_axis==='cross_sectional'?'선언한 조건 대비 비교. 시간 사건·AUC·선후관계 해당 없음':'실제 관측 시간에 따른 전체 단백질 및 지원 PTM/kinase 변화'}</p>
-      <p>참조 자료는 자동 준비 후 이번 실행에 고정됩니다. 일부 DB 실패는 제한 사항과 함께 전달됩니다.</p>
-      <details><summary>참조 자료 갱신</summary><label className="flex gap-2"><input type="checkbox" checked={context.refresh_references===true} onChange={e=>put('refresh_references',e.target.checked)}/>다음 새 실행에서 참조 자료 갱신 요청 (완료된 패키지는 보존)</label></details>
+      <p aria-label="Reference acquisition policy">{String((plan?.source_execution as {message?:string}|undefined)?.message??'참조 자료 수집 정책 확인 중')}</p>
+      <details><summary>참조 자료 갱신</summary><label className="flex gap-2"><input type="checkbox" checked={context.refresh_references===true} onChange={e=>refreshReferences(e.target.checked)}/>다음 새 실행에서 research_full 참조 자료 갱신 요청 (완료된 패키지는 보존)</label><p className="text-xs">부분 실패·예산 미완료 시 기존 성공 패키지를 유지하며, 갱신 내역은 해당 실행에 기록됩니다.</p></details>
       {plan&&<details><summary>Recorded plan details</summary><pre className="whitespace-pre-wrap text-xs">{JSON.stringify(plan,null,2)}</pre></details>}
     </div>:<p className="text-xs">Recorded legacy estimator and annotation settings are preserved. Use a new Astra package run to adopt the automatic plan.</p>}
     {!context.sample_manifest&&(!design?.materials.length||design.replication_declaration==='unknown')&&<label className="block text-sm">Confirm replication once<select aria-label="Replication declaration" className={selectClass} value={String(context.replication_declaration??design?.replication_declaration??'unknown')}
