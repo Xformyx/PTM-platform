@@ -427,7 +427,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                 'supporting_rows':[r['impact_id']],'opposing_or_sensitivity_rows':[r['impact_id']],
                 'table':'evidence/parent_adjustment_impact.csv','statement':r['classification'],'limits':['relative_ratio_not_occupancy','technical_not_biological_replication','not_kinase_causality']})
         (directory/'evidence/evidence_claims.jsonl').write_bytes(b'\n'.join(json_bytes(c).replace(b'\n',b' ') for c in claims)+b'\n')
-        figure_packet(scientific,directory) if design['study'].get('design_axis')!='cross_sectional' else None
+        figure_packet(scientific,directory,design) if design['study'].get('design_axis')!='cross_sectional' else None
         code=directory/'reproducibility/code/ptm_shared';code.mkdir(parents=True)
         for name in code_files:shutil.copyfile(Path(__file__).parent/name,code/name)
         (code/'__init__.py').write_text('')

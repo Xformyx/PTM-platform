@@ -1,0 +1,181 @@
+{
+  "passed": true,
+  "run_id": "g1-da89accad9bd4319868ecc868dedf685",
+  "archive": "/Users/josephk/Downloads/astra_analysis_package_g1-da89accad9bd4319868ecc868dedf685.zip",
+  "archive_sha256": "5bd457114a356a32b50b2ac259d7ea77579f4b16369f70312fff1d2dc8a219fd",
+  "original_zip_unchanged": true,
+  "baseline_commit": "c3ea822e8447a157e5ecb32bfa0cc8e09f5b9146",
+  "validation_scope": "figure_regeneration_only_no_quantification_or_source_acquisition",
+  "heatmaps": [
+    {
+      "figure": "substrate_contrast_heatmap",
+      "before_ids": [
+        "contrast_4147ebd64e7ecf80",
+        "contrast_aea4869f398c5584",
+        "contrast_c15817d77868a59a",
+        "contrast_d6757f4b8563521f",
+        "contrast_eb2f813f825c4ccb",
+        "contrast_fd5240cdb335e779"
+      ],
+      "before_minutes": [
+        5.0,
+        1.0,
+        30.0,
+        180.0,
+        15.0,
+        60.0
+      ],
+      "after_ids": [
+        "contrast_aea4869f398c5584",
+        "contrast_4147ebd64e7ecf80",
+        "contrast_eb2f813f825c4ccb",
+        "contrast_c15817d77868a59a",
+        "contrast_fd5240cdb335e779",
+        "contrast_d6757f4b8563521f"
+      ],
+      "after_minutes": [
+        1.0,
+        5.0,
+        15.0,
+        30.0,
+        60.0,
+        180.0
+      ],
+      "labels": [
+        "1 min",
+        "5 min",
+        "15 min",
+        "30 min",
+        "60 min",
+        "180 min"
+      ],
+      "source_rows": 16944,
+      "full_grid_cells": 16944,
+      "full_grid_na": 2234,
+      "displayed_grid_cells": 300,
+      "displayed_grid_na": 25,
+      "values_na_exact": true,
+      "selected_rows_unchanged": true,
+      "no_added_columns": true,
+      "saved_svg_labels_match_metadata": true
+    },
+    {
+      "figure": "emerging_detection",
+      "before_ids": [
+        "condition_32d7e82082479b8c",
+        "condition_824bfd9a5e97c3aa",
+        "condition_a9adc1cf0158f4a6",
+        "condition_bd68c45f543c5a83",
+        "condition_c96e6ecd71344ff2",
+        "condition_d9c5c91ebf3d5bfc",
+        "condition_f541e2f63f702f17"
+      ],
+      "before_minutes": [
+        0.0,
+        60.0,
+        180.0,
+        5.0,
+        30.0,
+        15.0,
+        1.0
+      ],
+      "after_ids": [
+        "condition_32d7e82082479b8c",
+        "condition_f541e2f63f702f17",
+        "condition_bd68c45f543c5a83",
+        "condition_d9c5c91ebf3d5bfc",
+        "condition_c96e6ecd71344ff2",
+        "condition_824bfd9a5e97c3aa",
+        "condition_a9adc1cf0158f4a6"
+      ],
+      "after_minutes": [
+        0.0,
+        1.0,
+        5.0,
+        15.0,
+        30.0,
+        60.0,
+        180.0
+      ],
+      "labels": [
+        "Control (0 min)",
+        "1 min",
+        "5 min",
+        "15 min",
+        "30 min",
+        "60 min",
+        "180 min"
+      ],
+      "source_rows": 19768,
+      "full_grid_cells": 19768,
+      "full_grid_na": 0,
+      "displayed_grid_cells": 350,
+      "displayed_grid_na": 0,
+      "values_na_exact": true,
+      "selected_rows_unchanged": true,
+      "no_added_columns": true,
+      "saved_svg_labels_match_metadata": true
+    }
+  ],
+  "other_outputs_byte_identical": [
+    "coverage_source.csv",
+    "coverage.svg",
+    "technical_dispersion_source.csv",
+    "technical_dispersion.svg",
+    "parent_correction_source.csv",
+    "parent_correction.svg",
+    "U_P_A_examples_source.csv",
+    "U_P_A_examples.svg",
+    "kinase_footprints_source.csv",
+    "kinase_footprints.svg",
+    "protein_trajectories_source.csv",
+    "protein_trajectories.svg",
+    "substrate_contrast_heatmap_source.csv",
+    "emerging_detection_source.csv",
+    "cross_layer_timing_source.csv",
+    "cross_layer_timing.svg"
+  ],
+  "tests": {
+    "command": "PYTHONPATH=. /tmp/ptm-science-v5-venv/bin/python -m pytest -q ptm_shared/tests/test_astra_figures.py",
+    "passed": 5,
+    "elapsed_seconds": 6.29
+  },
+  "visual_review": [
+    {
+      "set": "before",
+      "saved_svg_opened": true,
+      "rendered_figures": 2,
+      "browser_errors": [],
+      "manual_review": {
+        "clipped_labels": false,
+        "overlapping_labels": false,
+        "expected_order_verified": true
+      },
+      "expected_order": "original_hash_order_bug_preserved"
+    },
+    {
+      "set": "after",
+      "saved_svg_opened": true,
+      "rendered_figures": 2,
+      "browser_errors": [],
+      "manual_review": {
+        "clipped_labels": false,
+        "overlapping_labels": false,
+        "expected_order_verified": true
+      },
+      "expected_order": "canonical_time_order_with_distinct_columns"
+    },
+    {
+      "set": "fixture",
+      "saved_svg_opened": true,
+      "rendered_figures": 2,
+      "browser_errors": [],
+      "manual_review": {
+        "clipped_labels": false,
+        "overlapping_labels": false,
+        "expected_order_verified": true
+      },
+      "expected_order": "canonical_time_order_with_distinct_columns"
+    }
+  ]
+}
