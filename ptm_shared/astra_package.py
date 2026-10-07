@@ -107,7 +107,7 @@ def stage(name,metrics,checkpoint,progress):
     checkpoint()
 
 
-def compute_science(inputs,design,context,sources,*,quant=None,alternative=None,checkpoint=lambda:None,execute=lambda name,fn:fn(),engine=None):
+def compute_science(inputs,design,context,sources,*,quant=None,alternative=None,checkpoint=lambda:None,execute=lambda name,fn:fn(),engine=None,snapshot=None):
     context=effective_context(context)
     calculate_stage=engine.calculate if engine else calculate
     discover_stage=engine.discover if engine else discover
@@ -172,7 +172,7 @@ def compute_science(inputs,design,context,sources,*,quant=None,alternative=None,
         provider_limitations=failed,normalization_sensitivity={'status':'computed','primary':context['normalization_policy'],'alternative':alt_norm['normalization_policy']},
         LOD_bounds={'status':'conditional_supplied_model' if evidence['censoring_bounds'].status.eq('conditional_lower_bound').any() else 'unavailable','reason':'supplied_limits_only; no_limit_inferred_from_data'},
         needed_for_stronger_attribution=['identity_matched_localization','more_independent_substrate_genes','independent_biological_design_or_validation'])
-    if engine:scientific=engine.augment(scientific,inputs,design,context,readiness)
+    if engine:scientific=engine.augment(scientific,inputs,design,{**context,'_reader_input_snapshot':snapshot},readiness)
     return scientific,norm,alt_norm,readiness,motif,counts
 
 
@@ -208,7 +208,9 @@ def validate_science(tables,design):
         checks.append({'check_id':name,'schema_keys_FK':'passed','rows':len(df),'unique_key':keys})
     if design.get('schema_version')=='study_design.v4':
         missing_science={'science/'+key for key in science_engine.KEYS}-set(tables)
-        missing_science|=set(getattr(science_engine,'ADDITIONAL_KEYS',{}))-set(tables)
+        # Adapter tables are additive to v6; old immutable v6 packages predate
+        # this export. Once any adapter table exists its complete contract is checked.
+        missing_science|={k for k in getattr(science_engine,'ADDITIONAL_KEYS',{}) if not k.startswith('reader_adapter/')}-set(tables)
         if missing_science:raise ValueError('Required science table missing: '+','.join(sorted(missing_science)))
     if any(name.startswith('science/') for name in tables):
         science_engine.validate_tables(tables,design)
@@ -363,7 +365,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                     evidence_reuse[name]=reuse
                     return result
             return fn()
-    scientific,norm,altnorm,readiness,motif,counts=compute_science(inputs,design,context,sources,quant=quant,alternative=alternative,checkpoint=checkpoint,execute=execute,engine=engine)
+    scientific,norm,altnorm,readiness,motif,counts=compute_science(inputs,design,context,sources,quant=quant,alternative=alternative,checkpoint=checkpoint,execute=execute,engine=engine,snapshot=snapshot)
     readiness['source_execution']=source_execution
     with stage('assemble_evidence_package',metrics,checkpoint,progress):
         if engine and code_capture!={name:digest(Path(__file__).parent/name) for name in code_files}:
@@ -527,7 +529,7 @@ def replay_package(directory,output,*,specificity_manifest=None):
         from . import astra_science as engine
     if config.get('engine_profile')=='astra_analysis.v6':
         from . import astra_evidence_v6 as engine
-    tables,*_=compute_science(inputs,config['design'],config['context'],sources,engine=engine)
+    tables,*_=compute_science(inputs,config['design'],config['context'],sources,engine=engine,snapshot=config['snapshot'])
     fields,_,_=transfer_contract(config['snapshot'],config['design'],config['context'],config['literature'])
     tables['study/input_field_manifest']=pd.DataFrame(fields)
     validate_science(tables,config['design']);output.mkdir(parents=True,exist_ok=False);write_tables(tables,output)

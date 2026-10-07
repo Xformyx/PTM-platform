@@ -11,18 +11,20 @@ from .diann_evidence import observations, COLUMNS
 from .localization_evidence import read_site_report, observation_sites, by_contrast, VERSION as LOCAL_VERSION
 from .kinase_specificity import score_sites, select_membership
 from .inference_policy import evaluate
+from .astra_card_inputs import project_card_inputs, validate_card_inputs, TABLE_KEYS as CARD_INPUT_KEYS
 
 PROFILE='astra_analysis.v6'
 VERSION='astra_analysis_package.v6.experimental'
-CODE_FILES=legacy.CODE_FILES+['astra_evidence_v6.py','localization_evidence.py','inference_policy.py','source_acquisition.py','evidence_temporal.py','evidence_methods.py','official_specificity.py','official_method_tracks.py','phosx_activity_adapter.py','evidence_stage_cache.py']
+CODE_FILES=legacy.CODE_FILES+['astra_evidence_v6.py','localization_evidence.py','inference_policy.py','source_acquisition.py','evidence_temporal.py','evidence_methods.py','official_specificity.py','official_method_tracks.py','phosx_activity_adapter.py','evidence_stage_cache.py','astra_card_inputs.py','study_metadata.py']
 INPUT_FIELDS={**legacy.INPUT_FIELDS,'CALIBRATION':'calibration_policy_path'}
+CODE_FILES += ['evidence_contracts.py','annotation_species.py']
 KEYS={**legacy.KEYS,'site_report_observations':['site_report_row_id'],
       'localization_by_contrast':['localization_id'],'inference_results':['call_id'],
       'calibrated_calls':['call_id'],'evidence_dependency_groups':['dependency_id'],'calibration_provenance':['policy_id']}
 normalized_reference=legacy.normalized_reference
 validate_execution=legacy.validate_execution
 ADDITIONAL_KEYS={'temporal/interval_contrasts':['interval_id'],'temporal/group_excluded_cowave':['cowave_id'],'kinase/method_scores':['method_result_id'],
-                'kinase/method_membership':['method_membership_id'],'kinase/method_executions':['execution_id']}
+                'kinase/method_membership':['method_membership_id'],'kinase/method_executions':['execution_id'],**CARD_INPUT_KEYS}
 
 
 def integrate_temporal(tables,discovery,design,context,source_context=None,impacts=None):
@@ -185,10 +187,17 @@ def augment(scientific,inputs,design,context,readiness):
     if design['study'].get('design_axis')=='cross_sectional':readiness['temporal']={'status':'not_applicable','reason':'cross_sectional_design'}
     if design['study'].get('analysis_target')=='proteomics':
         for key in ('parent_adjustment','kinase','strict_attribution','measurement_evidence'):readiness[key]={'status':'not_applicable','reason':'protein_only_analysis'}
+    scientific.update(project_card_inputs(scientific,inputs,design,context,context.get('_reader_input_snapshot')))
+    projected=scientific['reader_adapter/form_contrasts']
+    readiness['card_input_adapter']={'schema_version':'astra_card_input.v1','status':'projected',
+        'rows':len(projected),'eligible_rows':int(projected.card_input_eligible.sum()),
+        'consumer_execution':'not_run; inputs_only; no_findings_selected'}
     return scientific
 
 
 def validate_tables(tables,design):
+    # Archived v6 bundles without this additive adapter remain valid.
+    if any(name.startswith('reader_adapter/') for name in tables):validate_card_inputs(tables,design)
     forms=set(tables['quant/summary'].form_id);contrasts={c['contrast_id'] for c in design['contrasts']}
     universes={'form_id':forms,'contrast_id':contrasts,'contrast_or_window_id':contrasts,
         'observation_id':set(tables['science/measurement_observations'].observation_id),

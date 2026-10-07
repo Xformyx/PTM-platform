@@ -1,0 +1,482 @@
+{
+  "schema_version": "round06_validation.v1",
+  "main_sha": "3a0e83a9bc3046f875a972e71cc2d6e84e1b096a",
+  "main_push": "verified_remote_equal",
+  "branch": "feature/round06-card-input-adapter",
+  "production_deployment": "not_performed",
+  "tests": {
+    "integration_round05": {
+      "passed": 3,
+      "seconds": 12.39
+    },
+    "round06_regression": {
+      "passed": 46,
+      "seconds": 35.3
+    },
+    "additional_comparison_card_assertions": {
+      "passed": 1,
+      "seconds": 0.39
+    }
+  },
+  "execution": {
+    "run_id": "g0-ae3bd0a0ea5f4a5080617fe5553ccfd1",
+    "adapter_calls": 1,
+    "quant_comparison": [
+      {
+        "table": "quant/annotation_edges.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/comparisons.csv",
+        "rows": 16944,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/detection.csv",
+        "rows": 16944,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/emergent_kinase_evidence.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/form_evidence_status.csv",
+        "rows": 16944,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_injection_omissions.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_membership.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_profiles.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_sensitivity.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/primary_A_input.csv",
+        "rows": 13704,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/protein_contrasts.csv",
+        "rows": 57150,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/runlevel.csv",
+        "rows": 59304,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/site_mapping.csv",
+        "rows": 11614,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_complete.csv",
+        "rows": 13704,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_paired.csv",
+        "rows": 13704,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_peptide_masks.csv",
+        "rows": 445712,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_selected_sequences.csv",
+        "rows": 111311,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_unmodified_proteins.csv",
+        "rows": 54456,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_unmodified_sequences.csv",
+        "rows": 667866,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/summary.csv",
+        "rows": 2824,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/temporal_protein_summary.csv",
+        "rows": 18601,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/validation_panel.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      }
+    ],
+    "source_pin_sha256": "7560c13a6b430363744157d74ad160a83e0939ec0754cedce20d7c0fe9dcbd8e",
+    "source_pin_preserved": true,
+    "baseline_archive_preserved": true,
+    "archive": "/Users/josephk/Projects/PTM-platform/codex-inputs/round06-20261007/execution/output/astra_analysis_package_g0-ae3bd0a0ea5f4a5080617fe5553ccfd1.zip",
+    "archive_sha256": "bb15c1ef3e4c31fd5031ae5ff863d34cb0f72cccc8606dafecbc31eda23c222d",
+    "network_requests": 0,
+    "quant_cache": {
+      "normalization_sensitivity": {
+        "fingerprint": "quant_v6_66ce0aceb9d95ad1f53c",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      },
+      "quant": {
+        "fingerprint": "quant_v6_59024921d6b79f54630d",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      }
+    },
+    "evidence_cache": {
+      "discover_regulators": {
+        "fingerprint": "bb5fd0c0ccd52dbff8ec968e37df4b5b2e748426143b9d1e5335f10ad56b434e",
+        "stage": "discover_regulators",
+        "status": "computed"
+      },
+      "identity_localization": {
+        "fingerprint": "bb5fd0c0ccd52dbff8ec968e37df4b5b2e748426143b9d1e5335f10ad56b434e",
+        "stage": "identity_localization",
+        "status": "computed"
+      },
+      "integrate_temporal_layers": {
+        "fingerprint": "7d221674dc90378e6d3ed2ccf40bb484ff3752bcfa5361f52088803a80cd9ce8",
+        "stage": "integrate_temporal_layers",
+        "status": "computed"
+      },
+      "normalization_sensitivity": {
+        "fingerprint": "quant_v6_66ce0aceb9d95ad1f53c",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      },
+      "quant": {
+        "fingerprint": "quant_v6_59024921d6b79f54630d",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      },
+      "score_regulator_footprints": {
+        "fingerprint": "bb5fd0c0ccd52dbff8ec968e37df4b5b2e748426143b9d1e5335f10ad56b434e",
+        "stage": "score_regulator_footprints",
+        "status": "computed"
+      }
+    }
+  },
+  "adapter": {
+    "run_id": "g0-ae3bd0a0ea5f4a5080617fe5553ccfd1",
+    "adapter_rows": 16944,
+    "forms": 2824,
+    "eligible_rows": 12499,
+    "supported_consumer_states": 2159,
+    "restriction_counts": {
+      "": 12499,
+      "quant_comparison_excluded": 3240,
+      "multiple_precursors_not_representable": 1266,
+      "precursor_identity_unavailable": 1266,
+      "gene_display_ambiguous_or_unavailable": 60,
+      "mixed_or_unknown_taxon_not_representable": 12
+    },
+    "all_row_values_ids_NA_masks": "passed",
+    "representative_existing_consumer_states": 3,
+    "production_findings_selected": false,
+    "validation_scope": "existing_tables_and_consumer_input_parity"
+  },
+  "archive_only_adapter_reprojection": {
+    "status": "passed",
+    "scope": "archive_only_adapter_reprojection_and_full_package_validation",
+    "full_scientific_recalculation": false,
+    "quantification_executed": false,
+    "network_requests": 0,
+    "loaded_adapter_module": "/private/tmp/ptm-round06-archive-reprojection/reproducibility/code/ptm_shared/astra_card_inputs.py",
+    "atol": 1e-10,
+    "rtol": 1e-10,
+    "tables": [
+      {
+        "table": "reader_adapter/form_identity",
+        "rows": 2824,
+        "IDs_text_NA_and_JSON_values_equal": true
+      },
+      {
+        "table": "reader_adapter/form_contrasts",
+        "rows": 16944,
+        "IDs_text_NA_and_JSON_values_equal": true
+      },
+      {
+        "table": "reader_adapter/precursor_membership",
+        "rows": 3035,
+        "IDs_text_NA_and_JSON_values_equal": true
+      },
+      {
+        "table": "reader_adapter/study_metadata",
+        "rows": 1,
+        "IDs_text_NA_and_JSON_values_equal": true
+      }
+    ]
+  },
+  "synthetic_full_replay": {
+    "tables": 72,
+    "byte_identical": 72,
+    "network_requests": 0
+  },
+  "actual_full_scientific_replay": "not_repeated; adapter-only reprojection, package validation, 22-table invariance executed",
+  "stage_times": [
+    {
+      "checkpoint": {
+        "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+        "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+        "inference": "inference_v6_ba77afa761c3681deb1f",
+        "quant": "quant_v6_59024921d6b79f54630d",
+        "temporal": "temporal_v6_be45a42414c47bfc137f"
+      },
+      "code_hash": "f94f188453a350578f427a4280282a1c2fde0114ecbd059df024835c487cd0e3",
+      "config_hash": "082ce3e3d44265b842c71fa4de1a5bf5fb3fedc709a52df960fe29ae96f35140",
+      "dependencies": [],
+      "elapsed_seconds": 0.8806364169577137,
+      "finished_utc": "2026-10-07T13:59:38.452700+00:00",
+      "process_peak_memory_bytes": 412483584,
+      "stage": "resolve_inputs_and_plan",
+      "started_utc": "2026-10-07T13:59:37.572080+00:00",
+      "status": "completed"
+    },
+    {
+      "checkpoint": {
+        "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+        "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+        "inference": "inference_v6_ba77afa761c3681deb1f",
+        "quant": "quant_v6_59024921d6b79f54630d",
+        "temporal": "temporal_v6_be45a42414c47bfc137f"
+      },
+      "code_hash": "f94f188453a350578f427a4280282a1c2fde0114ecbd059df024835c487cd0e3",
+      "config_hash": "082ce3e3d44265b842c71fa4de1a5bf5fb3fedc709a52df960fe29ae96f35140",
+      "dependencies": [
+        "resolve_inputs_and_plan"
+      ],
+      "elapsed_seconds": 32.502545291907154,
+      "finished_utc": "2026-10-07T14:00:10.956032+00:00",
+      "process_peak_memory_bytes": 2582708224,
+      "stage": "quantify_evidence",
+      "started_utc": "2026-10-07T13:59:38.454089+00:00",
+      "status": "completed"
+    },
+    {
+      "checkpoint": {
+        "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+        "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+        "inference": "inference_v6_ba77afa761c3681deb1f",
+        "quant": "quant_v6_59024921d6b79f54630d",
+        "temporal": "temporal_v6_be45a42414c47bfc137f"
+      },
+      "code_hash": "f94f188453a350578f427a4280282a1c2fde0114ecbd059df024835c487cd0e3",
+      "config_hash": "082ce3e3d44265b842c71fa4de1a5bf5fb3fedc709a52df960fe29ae96f35140",
+      "dependencies": [
+        "resolve_inputs_and_plan"
+      ],
+      "elapsed_seconds": 2.1349674590164796,
+      "finished_utc": "2026-10-07T14:00:13.092727+00:00",
+      "process_peak_memory_bytes": 2692235264,
+      "stage": "resolve_annotation",
+      "started_utc": "2026-10-07T14:00:10.957798+00:00",
+      "status": "completed"
+    },
+    {
+      "checkpoint": {
+        "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+        "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+        "inference": "inference_v6_ba77afa761c3681deb1f",
+        "quant": "quant_v6_59024921d6b79f54630d",
+        "temporal": "temporal_v6_be45a42414c47bfc137f"
+      },
+      "code_hash": "f94f188453a350578f427a4280282a1c2fde0114ecbd059df024835c487cd0e3",
+      "config_hash": "082ce3e3d44265b842c71fa4de1a5bf5fb3fedc709a52df960fe29ae96f35140",
+      "dependencies": [
+        "identity_localization",
+        "resolve_annotation"
+      ],
+      "elapsed_seconds": 8.913200916955248,
+      "finished_utc": "2026-10-07T14:00:27.502204+00:00",
+      "process_peak_memory_bytes": 3105308672,
+      "stage": "discover_regulators",
+      "started_utc": "2026-10-07T14:00:18.589167+00:00",
+      "status": "completed"
+    },
+    {
+      "checkpoint": {
+        "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+        "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+        "inference": "inference_v6_ba77afa761c3681deb1f",
+        "quant": "quant_v6_59024921d6b79f54630d",
+        "temporal": "temporal_v6_be45a42414c47bfc137f"
+      },
+      "code_hash": "f94f188453a350578f427a4280282a1c2fde0114ecbd059df024835c487cd0e3",
+      "config_hash": "082ce3e3d44265b842c71fa4de1a5bf5fb3fedc709a52df960fe29ae96f35140",
+      "dependencies": [
+        "discover_regulators"
+      ],
+      "elapsed_seconds": 123.98386775003746,
+      "finished_utc": "2026-10-07T14:02:31.485808+00:00",
+      "process_peak_memory_bytes": 3105308672,
+      "stage": "score_regulator_footprints",
+      "started_utc": "2026-10-07T14:00:27.504241+00:00",
+      "status": "completed"
+    },
+    {
+      "checkpoint": {
+        "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+        "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+        "inference": "inference_v6_ba77afa761c3681deb1f",
+        "quant": "quant_v6_59024921d6b79f54630d",
+        "temporal": "temporal_v6_be45a42414c47bfc137f"
+      },
+      "code_hash": "f94f188453a350578f427a4280282a1c2fde0114ecbd059df024835c487cd0e3",
+      "config_hash": "082ce3e3d44265b842c71fa4de1a5bf5fb3fedc709a52df960fe29ae96f35140",
+      "dependencies": [
+        "score_regulator_footprints"
+      ],
+      "elapsed_seconds": 1272.2266642079921,
+      "finished_utc": "2026-10-07T14:24:29.925535+00:00",
+      "process_peak_memory_bytes": 3105308672,
+      "stage": "integrate_temporal_layers",
+      "started_utc": "2026-10-07T14:03:17.722492+00:00",
+      "status": "completed"
+    },
+    {
+      "checkpoint": {
+        "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+        "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+        "inference": "inference_v6_ba77afa761c3681deb1f",
+        "quant": "quant_v6_59024921d6b79f54630d",
+        "temporal": "temporal_v6_be45a42414c47bfc137f"
+      },
+      "code_hash": "f94f188453a350578f427a4280282a1c2fde0114ecbd059df024835c487cd0e3",
+      "config_hash": "082ce3e3d44265b842c71fa4de1a5bf5fb3fedc709a52df960fe29ae96f35140",
+      "dependencies": [
+        "integrate_temporal_layers"
+      ],
+      "elapsed_seconds": 44.540923333959654,
+      "finished_utc": "2026-10-07T14:26:21.977340+00:00",
+      "process_peak_memory_bytes": 3992420352,
+      "stage": "assemble_evidence_package",
+      "started_utc": "2026-10-07T14:25:37.437245+00:00",
+      "status": "completed"
+    },
+    {
+      "checkpoint": {
+        "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+        "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+        "inference": "inference_v6_ba77afa761c3681deb1f",
+        "quant": "quant_v6_59024921d6b79f54630d",
+        "temporal": "temporal_v6_be45a42414c47bfc137f"
+      },
+      "code_hash": "f94f188453a350578f427a4280282a1c2fde0114ecbd059df024835c487cd0e3",
+      "config_hash": "082ce3e3d44265b842c71fa4de1a5bf5fb3fedc709a52df960fe29ae96f35140",
+      "dependencies": [
+        "assemble_evidence_package"
+      ],
+      "elapsed_seconds": 33.59059216699097,
+      "finished_utc": "2026-10-07T14:26:55.569404+00:00",
+      "process_peak_memory_bytes": 5486706688,
+      "stage": "validate_and_publish",
+      "started_utc": "2026-10-07T14:26:21.979435+00:00",
+      "status": "completed"
+    },
+    {
+      "checkpoint": {
+        "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+        "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+        "inference": "inference_v6_ba77afa761c3681deb1f",
+        "quant": "quant_v6_59024921d6b79f54630d",
+        "temporal": "temporal_v6_be45a42414c47bfc137f"
+      },
+      "code_hash": "f94f188453a350578f427a4280282a1c2fde0114ecbd059df024835c487cd0e3",
+      "config_hash": "082ce3e3d44265b842c71fa4de1a5bf5fb3fedc709a52df960fe29ae96f35140",
+      "dependencies": [
+        "quantify_evidence"
+      ],
+      "elapsed_seconds": 4.906701792031527,
+      "finished_utc": "2026-10-07T14:00:18.587224+00:00",
+      "process_peak_memory_bytes": 2945679360,
+      "stage": "identity_localization",
+      "started_utc": "2026-10-07T14:00:13.680613+00:00",
+      "status": "completed"
+    }
+  ],
+  "limitations": [
+    "legacy_cards_require_single_precursor",
+    "mixed_or_unknown_taxon_raw_only",
+    "excluded_finite_contrast_state_withheld_without_value_change",
+    "actual_DIANN_report_not_provided",
+    "no_findings_selection_or_LLM_execution",
+    "scientific_performance_not_evaluated"
+  ],
+  "prior_untracked_files_preserved": 7776,
+  "unchanged_figure_files": [
+    "ptm_shared/astra_figures.py",
+    "ptm_shared/feature_identity.py"
+  ]
+}
