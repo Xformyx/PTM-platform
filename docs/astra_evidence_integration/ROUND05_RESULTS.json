@@ -1,0 +1,642 @@
+{
+  "baseline_commit": "ece7c5f7e0735cb898519d74a084d79509cc862b",
+  "branch": "feature/round05-diann-input-lineage",
+  "scope": "round05_only; local real input and synthetic software validation",
+  "production_Order88_DB": "not_inspected",
+  "production_deployment": "not_performed",
+  "actual": {
+    "scope": "actual_HIRcB_inputs_local_Order70_and_g1_Order88_archive; production_DB_not_inspected",
+    "run_id": "g0-bdc745269695409786357d6dba6e0fec",
+    "archive": "codex-inputs/round05-20261007/execution/output/astra_analysis_package_g0-bdc745269695409786357d6dba6e0fec.zip",
+    "archive_sha256": "48a1d1a820af8eda71f04ec2af50cfaf7b2e5160ba097eca8f692e6bcc64cff0",
+    "g1_archive_sha256": "5bd457114a356a32b50b2ac259d7ea77579f4b16369f70312fff1d2dc8a219fd",
+    "g1_source_record_id": "88",
+    "local_order_id": 70,
+    "source_pin_sha256": "7560c13a6b430363744157d74ad160a83e0939ec0754cedce20d7c0fe9dcbd8e",
+    "observation_policy": "audit_only",
+    "input_hashes": {
+      "PR": "7160e863ddaf5236d22c5dc95fd3b066355341e8b2b130f11ef12e5a46a52ba4",
+      "PG": "57c874a46f57608a64a779c4ef8ddecd07273cc0603aa228b8fbd662cbfca745",
+      "FASTA": "61b5d367511111d46377c78cfcfc1a09bacb0c1632c9960282520de732823c83"
+    },
+    "capabilities": {
+      "input_scope": "DIA-NN_quantification_matrices_not_instrument_spectra",
+      "instrument_raw_search_performed": false,
+      "matrix_quantification_available": true,
+      "measured_localization_available": false,
+      "missing_input_does_not_disable_matrix_quantification": true,
+      "run_confidence_available": false,
+      "schema_version": "input_capabilities.v2",
+      "search_analysis_reference_status": "not_provided",
+      "site_report_status": {
+        "status": "missing_input"
+      }
+    },
+    "measurement_readiness": {
+      "status": "missing_input",
+      "reason": "main_report_not_provided",
+      "matrix_quantification_available": true
+    },
+    "report_match_counts": {},
+    "report_rows": 0,
+    "site_report_rows": 0,
+    "mapping_rows": 11614,
+    "mapping_status_counts": {
+      "multiple_mappings": 11055,
+      "unique": 559
+    },
+    "localization_by_contrast_rows": 69684,
+    "localized_eligible": 0,
+    "quant_preservation": [
+      {
+        "table": "quant/annotation_edges.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/comparisons.csv",
+        "rows": 16944,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/detection.csv",
+        "rows": 16944,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/emergent_kinase_evidence.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/form_evidence_status.csv",
+        "rows": 16944,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_injection_omissions.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_membership.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_profiles.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_sensitivity.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/primary_A_input.csv",
+        "rows": 13704,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/protein_contrasts.csv",
+        "rows": 57150,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/runlevel.csv",
+        "rows": 59304,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/site_mapping.csv",
+        "rows": 11614,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_complete.csv",
+        "rows": 13704,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_paired.csv",
+        "rows": 13704,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_peptide_masks.csv",
+        "rows": 445712,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_selected_sequences.csv",
+        "rows": 111311,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_unmodified_proteins.csv",
+        "rows": 54456,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_unmodified_sequences.csv",
+        "rows": 667866,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/summary.csv",
+        "rows": 2824,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/temporal_protein_summary.csv",
+        "rows": 18601,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/validation_panel.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      }
+    ],
+    "stage_reuse": {
+      "quant": {
+        "status": "reused",
+        "fingerprint": "quant_v6_59024921d6b79f54630d",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63"
+      },
+      "normalization_sensitivity": {
+        "status": "reused",
+        "fingerprint": "quant_v6_66ce0aceb9d95ad1f53c",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63"
+      },
+      "identity_localization": {
+        "status": "computed",
+        "fingerprint": "c6c2a4cc39e333d22db3ebae5259d42df449a22684583cffa462fe2d9649d028",
+        "stage": "identity_localization"
+      },
+      "discover_regulators": {
+        "status": "computed",
+        "fingerprint": "c6c2a4cc39e333d22db3ebae5259d42df449a22684583cffa462fe2d9649d028",
+        "stage": "discover_regulators"
+      },
+      "score_regulator_footprints": {
+        "status": "computed",
+        "fingerprint": "c6c2a4cc39e333d22db3ebae5259d42df449a22684583cffa462fe2d9649d028",
+        "stage": "score_regulator_footprints"
+      },
+      "integrate_temporal_layers": {
+        "status": "computed",
+        "fingerprint": "d3bdbde47d70dc0ea6ae348eb12caeb523e2e0a454b35e0ad76f2a975b526085",
+        "stage": "integrate_temporal_layers"
+      }
+    },
+    "real_report_validation": "not_run_missing_main_report_site_report_crosswalk_declared_version",
+    "raw_MS_search": "not_performed",
+    "source_network_requests": 0
+  },
+  "input_lineage": [
+    {
+      "input_role": "PR",
+      "order_field": "pr_matrix_path",
+      "actual_file": "PR.tsv",
+      "sha256": "7160e863ddaf5236d22c5dc95fd3b066355341e8b2b130f11ef12e5a46a52ba4",
+      "stored": "verified_local_Order70",
+      "dispatch": "local_config_to_engine_hash_verified; worker_boundary_separately_fixture_tested",
+      "parser": "contrast_quantification.prepare_forms",
+      "matched_unmatched_conflict": "not_applicable_matrix_or_sequence_input",
+      "export_location": "quant/runlevel.csv",
+      "disposition": "consumed",
+      "restriction": "production_Order88_current_DB_not_inspected;no_run_confidence_site_probability_or_q_columns",
+      "input_rows": "177116"
+    },
+    {
+      "input_role": "PG",
+      "order_field": "pg_matrix_path",
+      "actual_file": "PG.tsv",
+      "sha256": "57c874a46f57608a64a779c4ef8ddecd07273cc0603aa228b8fbd662cbfca745",
+      "stored": "verified_local_Order70",
+      "dispatch": "local_config_to_engine_hash_verified; worker_boundary_separately_fixture_tested",
+      "parser": "contrast_quantification.protein_contrasts",
+      "matched_unmatched_conflict": "not_applicable_matrix_or_sequence_input",
+      "export_location": "quant/protein_contrasts.csv",
+      "disposition": "consumed",
+      "restriction": "production_Order88_current_DB_not_inspected;no_run_confidence_site_probability_or_q_columns",
+      "input_rows": "9525"
+    },
+    {
+      "input_role": "FASTA",
+      "order_field": "fasta_path",
+      "actual_file": "reference.fasta",
+      "sha256": "61b5d367511111d46377c78cfcfc1a09bacb0c1632c9960282520de732823c83",
+      "stored": "verified_local_Order70",
+      "dispatch": "local_config_to_engine_hash_verified; worker_boundary_separately_fixture_tested",
+      "parser": "science_reference.preflight",
+      "matched_unmatched_conflict": "not_applicable_matrix_or_sequence_input",
+      "export_location": "science/site_identity_audit.csv",
+      "disposition": "consumed",
+      "restriction": "production_Order88_current_DB_not_inspected;analysis_reference.fasta_is_derivative_not_another_uploaded_input;search_FASTA_identity_unverified",
+      "input_rows": ""
+    },
+    {
+      "input_role": "DIANN",
+      "order_field": "diann_report_path",
+      "actual_file": "",
+      "sha256": "",
+      "stored": "missing_input",
+      "dispatch": "not_dispatched_missing_input",
+      "parser": "not_run_missing_input",
+      "matched_unmatched_conflict": "not_evaluable_missing_input",
+      "export_location": "science/measurement_observations.csv",
+      "disposition": "not_provided",
+      "restriction": "production_Order88_current_DB_not_inspected",
+      "input_rows": ""
+    },
+    {
+      "input_role": "DIANN_SITE",
+      "order_field": "diann_site_report_path",
+      "actual_file": "",
+      "sha256": "",
+      "stored": "missing_input",
+      "dispatch": "not_dispatched_missing_input",
+      "parser": "not_run_missing_input",
+      "matched_unmatched_conflict": "not_evaluable_missing_input",
+      "export_location": "science/site_report_observations.csv",
+      "disposition": "not_provided",
+      "restriction": "production_Order88_current_DB_not_inspected",
+      "input_rows": ""
+    },
+    {
+      "input_role": "CROSSWALK",
+      "order_field": "run_crosswalk_path",
+      "actual_file": "",
+      "sha256": "",
+      "stored": "missing_input",
+      "dispatch": "not_dispatched_missing_input",
+      "parser": "not_run_missing_input",
+      "matched_unmatched_conflict": "not_evaluable_missing_input",
+      "export_location": "science/measurement_observations.csv",
+      "disposition": "not_provided",
+      "restriction": "production_Order88_current_DB_not_inspected",
+      "input_rows": ""
+    },
+    {
+      "input_role": "SEARCH_FASTA",
+      "order_field": "search_fasta_path",
+      "actual_file": "",
+      "sha256": "",
+      "stored": "missing_input",
+      "dispatch": "not_dispatched_missing_input",
+      "parser": "not_run_missing_input",
+      "matched_unmatched_conflict": "not_evaluable_missing_input",
+      "export_location": "science/reference_inventory.csv",
+      "disposition": "not_provided",
+      "restriction": "production_Order88_current_DB_not_inspected",
+      "input_rows": ""
+    },
+    {
+      "input_role": "DIA-NN version",
+      "order_field": "analysis_context.science.diann_version",
+      "actual_file": "",
+      "sha256": "",
+      "stored": "not_recorded",
+      "dispatch": "not_recorded",
+      "parser": "not_run_missing_input",
+      "matched_unmatched_conflict": "not_applicable",
+      "export_location": "study/user_input_snapshot.json",
+      "disposition": "",
+      "restriction": "no_version_inferred_from_filename_or_matrix",
+      "input_rows": ""
+    }
+  ],
+  "synthetic": {
+    "scope": "synthetic_SQLite_API_real_worker_branch_infrastructure_mocked",
+    "run_id": "g0-167dee5cb566498b8bcef3fe464d62ba",
+    "source_pin_sha256": "27e562e148828d90aa948aeffd4c6076b26797bdc929fe4543e54a3ac1fbfc08",
+    "consumer_calls": {
+      "prepare_evidence": 1,
+      "observations": 1,
+      "read_site_report": 1,
+      "observation_sites": 1,
+      "by_contrast": 1,
+      "score_candidates": 1
+    },
+    "observations": 124,
+    "match_status": {
+      "matched": 106,
+      "restricted": 16,
+      "conflict": 2
+    },
+    "quant_tables": [
+      {
+        "table": "quant/annotation_edges.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/comparisons.csv",
+        "rows": 32,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/detection.csv",
+        "rows": 32,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/emergent_kinase_evidence.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/form_evidence_status.csv",
+        "rows": 32,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_injection_omissions.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_membership.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_profiles.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_sensitivity.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/primary_A_input.csv",
+        "rows": 24,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/protein_contrasts.csv",
+        "rows": 20,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/runlevel.csv",
+        "rows": 120,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/site_mapping.csv",
+        "rows": 8,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_complete.csv",
+        "rows": 24,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_paired.csv",
+        "rows": 24,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_peptide_masks.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_selected_sequences.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_unmodified_proteins.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_unmodified_sequences.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/summary.csv",
+        "rows": 8,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/temporal_protein_summary.csv",
+        "rows": 10,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/validation_panel.csv",
+        "rows": 4,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      }
+    ],
+    "real_user_report_parity": "not_run_missing_input"
+  },
+  "synthetic_replay": {
+    "passed": true,
+    "tables": 68,
+    "byte_identical": 68,
+    "network_requests": 0
+  },
+  "validation": {
+    "tests_passed": 24,
+    "seconds": 14.62,
+    "command_record": "ROUND05_KO.md",
+    "figures_round02_round03": "tests_passed_source_unchanged",
+    "actual_manifest_files": 186,
+    "actual_scientific_tables": 68
+  },
+  "actual_stage_metrics": [
+    {
+      "stage": "resolve_inputs_and_plan",
+      "status": "completed",
+      "elapsed_seconds": 0.8830397080164403,
+      "process_peak_memory_bytes": 454295552
+    },
+    {
+      "stage": "quantify_evidence",
+      "status": "completed",
+      "elapsed_seconds": 32.354253542027436,
+      "process_peak_memory_bytes": 2649964544
+    },
+    {
+      "stage": "resolve_annotation",
+      "status": "completed",
+      "elapsed_seconds": 2.1702661250019446,
+      "process_peak_memory_bytes": 2816081920
+    },
+    {
+      "stage": "discover_regulators",
+      "status": "completed",
+      "elapsed_seconds": 8.831212915945798,
+      "process_peak_memory_bytes": 3219259392
+    },
+    {
+      "stage": "score_regulator_footprints",
+      "status": "completed",
+      "elapsed_seconds": 124.24215450009797,
+      "process_peak_memory_bytes": 3387817984
+    },
+    {
+      "stage": "integrate_temporal_layers",
+      "status": "completed",
+      "elapsed_seconds": 1286.3969584170263,
+      "process_peak_memory_bytes": 3910008832
+    },
+    {
+      "stage": "assemble_evidence_package",
+      "status": "completed",
+      "elapsed_seconds": 40.05463074997533,
+      "process_peak_memory_bytes": 4579835904
+    },
+    {
+      "stage": "validate_and_publish",
+      "status": "completed",
+      "elapsed_seconds": 29.261053916998208,
+      "process_peak_memory_bytes": 5053153280
+    },
+    {
+      "stage": "identity_localization",
+      "status": "completed",
+      "elapsed_seconds": 4.891542957979254,
+      "process_peak_memory_bytes": 3057319936
+    }
+  ],
+  "preservation": {
+    "prior_untracked_files_size_mtime_equal": 7444,
+    "old_Round04_current_run_id": "g0-8584adc408d24b81b2f5162735d066bf",
+    "local_Order70_current_run_id": "g3-0d38baee90a74fab8516a9b2fe5738af",
+    "unchanged_parser_and_figure_files": true
+  },
+  "processes": {
+    "existing_long_lived_validation_services": "inspected_and_left_untouched",
+    "new_daemons_started": 0,
+    "this_round_validation_processes": "all_exited"
+  },
+  "production_change": {
+    "file": "ptm_shared/astra_evidence_v6.py",
+    "function": "write_artifacts",
+    "before": "orphan crosswalk copied and incorrectly labelled consumed",
+    "after": "accepted_but_unused; reason=main_report_not_provided",
+    "parser_or_quantification_change": false
+  },
+  "code_sha256": {
+    "ptm_shared/astra_evidence_v6.py": "9df0b202c8c3a7ff29fcd75846f54cab7e8ee9c2a267996b10219574d160c7fd",
+    "api-server/tests/test_astra_measurement_dispatch.py": "2546102606687c90a696611cd9855f5be8926fc0d8edcc6037fe66a09fd1f6ac",
+    "scripts/validate_astra_measurement_lineage.py": "ccf7dba0136300ef774abca9a69235cec3498dbd228519a3cf72a481d3c78d0e"
+  },
+  "local_artifact_sha256": {
+    "SYNTHETIC_site_report_observations.csv": "1da05464943b8fbc69a86ddbfb9fedf692154898f01cd2fc4754c13736039046",
+    "SYNTHETIC_localization_by_contrast.csv": "1f44b357d21a948611d5af69e4a0a7e5b40e5f768e0c29b075edd9bead233b16",
+    "current_validation_process.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "SYNTHETIC_REPLAY_VALIDATION.json": "85be133057e5406c85b0e87e736c6152cd6c334e2bb6e0df53c2d787b805c682",
+    "g1_input_snapshot.json": "b68ccb03cbadddd5811413604504c3b7c1a18ac57c66f44c39830f6fb79d8f39",
+    "actual_run.log": "b1a43a5d7b3a172e5b656281489dbd7de495fa5c6ac4bb1bc9610671f3b0be1a",
+    "ACTUAL_VALIDATION.json": "10afa92482b7b06ac55464ecb54208ec0e30be26ea41953b9f4a65b33e362af4",
+    "INPUT_LINEAGE.csv": "e9c538604399be347302780a58ac67c73db6c03ba70078c34c5f31d10a5d0d28",
+    "local_order70.json": "f6abb74709c3940cdcb81accb435841e75be39f956cd99fc5cfbaa3ae77ef622",
+    "SYNTHETIC_LINEAGE_EXAMPLES.csv": "c24b829f609176abd3be9f012452b5303f6866d5ed2084698043d256f643aad0",
+    "actual_input_inventory.json": "67b83af5379a8d50f34142c52b74035d358ee104b373af8ed27d898e6d84bf88",
+    "actual_validation.log": "46cd47ec1d10b6ccbff200f0f22aa2d29ee5811a4689b8d63c9b5cd08d27557c",
+    "tests.log": "a673bca4c7993011303ccbe0db6f49e6369ad1e198edc2efa3aebb6f6dd8d20e",
+    "SYNTHETIC_observation_sites.csv": "4209c581cf874c4853cca8405aee5be1872ae40dd6f9c9b3979d727df9223268",
+    "SYNTHETIC_VALIDATION.json": "333fc774f2121fa56b76944247cde953908611fd64194ee0a8d8c38e3f384465"
+  }
+}

@@ -273,11 +273,14 @@ def write_artifacts(directory,scientific,context,inputs,sources,readiness):
     for key,(function,table) in consumers.items():
         path=inputs.get(key,inputs.get('SPECIFICITY_RESTRICTED') if key=='SPECIFICITY' else None)
         status='not_provided' if path is None else 'accepted_but_unused' if key=='TRANSGENE' else 'consumed'
+        reason=None
+        if key=='CROSSWALK' and path and not inputs.get('DIANN'):
+            status='accepted_but_unused';reason='main_report_not_provided; observations_returns_before_reading_crosswalk'
         if key=='DIANN' and path and readiness['measurement_evidence']['status']=='unsupported_schema':status='accepted_unsupported_schema'
         if key=='DIANN_SITE' and path and readiness['supporting_inputs']['diann_site_report']['status'] in {'unsupported_schema','ambiguous_semantics'}:status='accepted_unsupported_schema'
         if key=='SPECIFICITY' and path and readiness['specificity']['status'] in {'resource_unavailable','license_unresolved','not_run_resource_not_packaged'}:status='accepted_but_unavailable'
         rows.append({'input_id':key,'source_filename':Path(path).name if path else None,'sha256':digest(path) if path else None,
-            'order_field':field_map[key],'runtime_input_key':key,'consumer':function,'export_location':table,'disposition':status,
+            'order_field':field_map[key],'runtime_input_key':key,'consumer':function,'export_location':table,'disposition':status,'reason':reason,
             'parser_version':LOCAL_VERSION if key in {'DIANN','DIANN_SITE','CROSSWALK'} else VERSION,
             'schema':'detected_and_declared_version_required','lineage_scope':'source_bytes_to_same_run_scientific_tables'})
     pd.DataFrame(rows).to_csv(directory/'study/input_lineage.csv',index=False)
