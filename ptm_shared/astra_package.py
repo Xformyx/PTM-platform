@@ -210,7 +210,7 @@ def validate_science(tables,design):
         missing_science={'science/'+key for key in science_engine.KEYS}-set(tables)
         # Adapter tables are additive to v6; old immutable v6 packages predate
         # this export. Once any adapter table exists its complete contract is checked.
-        missing_science|={k for k in getattr(science_engine,'ADDITIONAL_KEYS',{}) if not k.startswith('reader_adapter/')}-set(tables)
+        missing_science|={k for k in getattr(science_engine,'ADDITIONAL_KEYS',{}) if not k.startswith(('reader_adapter/','reader/'))}-set(tables)
         if missing_science:raise ValueError('Required science table missing: '+','.join(sorted(missing_science)))
     if any(name.startswith('science/') for name in tables):
         science_engine.validate_tables(tables,design)
@@ -253,7 +253,8 @@ from .astra_figures import figure_packet
 def start_here(snapshot,counts,readiness):
     original=snapshot['original']
     return '\n\n'.join(['# START HERE — Astra analysis package',f"Project: {original.get('project_name')} | Order: {original.get('order_code')}",
-        'Read study/STUDY_BRIEF.md, user_input_snapshot.json, study_design.json, analysis_plan.json, references/source_pin.json and methods/statistics_inventory.json first.',
+        ('First read [reader/READ_ME.md](reader/READ_ME.md) for selected observations, exact row links, question coverage and withheld evidence. Then read [study/STUDY_BRIEF.md](study/STUDY_BRIEF.md) and the recorded design/source/statistics.' if readiness.get('reader') else
+         'Read study/STUDY_BRIEF.md, user_input_snapshot.json, study_design.json, analysis_plan.json, references/source_pin.json and methods/statistics_inventory.json first.'),
         'Use the complete biological question, report_options.research_questions, special conditions and selected literature. Do not ask again for information already supplied. Expectations are not measurements.',
         'Primary quantitative evidence: quant/primary_A_input.csv. Check actual masks and rows when a summary conflicts; record the conflict.',
         json.dumps(counts,ensure_ascii=False),'Profile rows are candidate × contrast × track, not discovered or activated kinase counts.',
@@ -533,13 +534,20 @@ def replay_package(directory,output,*,specificity_manifest=None):
     fields,_,_=transfer_contract(config['snapshot'],config['design'],config['context'],config['literature'])
     tables['study/input_field_manifest']=pd.DataFrame(fields)
     validate_science(tables,config['design']);output.mkdir(parents=True,exist_ok=False);write_tables(tables,output)
+    reader_results=[]
+    if 'reader/packet' in tables:
+        from .astra_reader import write_reader
+        for relative in write_reader(output,tables):
+            same=digest(directory/relative)==digest(output/relative)
+            if not same:raise ValueError('Reader replay differs: '+relative)
+            reader_results.append({'file':relative,'byte_equal':same})
     results=[]
     for name in tables:
         a,b=[pd.read_csv(p/(name+'.csv'),low_memory=False) for p in [directory,output]]
         pd.testing.assert_frame_equal(a,b,check_dtype=False,check_exact=False,atol=1e-10,rtol=1e-10)
         if not a.isna().equals(b.isna()):raise ValueError('Replay NA mask differs: '+name)
         results.append({'table':name,'rows':len(a),'values_text_keys_masks_equal':True,'byte_equal':digest(directory/(name+'.csv'))==digest(output/(name+'.csv'))})
-    json_write(output/'replay_result.json',{'passed':True,'atol':1e-10,'rtol':1e-10,'tables':results,'network_requests':0,
+    json_write(output/'replay_result.json',{'passed':True,'atol':1e-10,'rtol':1e-10,'tables':results,'reader_artifacts':reader_results,'network_requests':0,
         'source_execution':source_execution_record(config['context'],sources.get('pin_sha256'),sources,replay=True),
         'archived_source_file_sha256':digest(directory/'references/source_pin.json')})
     print(json.dumps({'replayed_tables':len(results),'byte_identical':sum(r['byte_equal'] for r in results)}))

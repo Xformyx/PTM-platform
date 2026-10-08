@@ -8,102 +8,14 @@ Discussion, Abstract, and Conclusion.
 from __future__ import annotations
 
 import math
+from ptm_shared.reader_observations import (_finite, build_trajectory_shape_fact,
+    TRAJECTORY_FACT_VERSION, DEFAULT_BASELINE_BAND_LOG2)
 import re
 from typing import Any, Iterable, Mapping
 from common.section_budgets import closing_section_maxima, word_count, conclusion_roles, REQUIRED_CONCLUSION_ROLES
 
 
-TRAJECTORY_FACT_VERSION = "trajectory_shape_fact.v1"
 SEMANTIC_GUARD_VERSION = "reader_semantic_guard.v2"
-DEFAULT_BASELINE_BAND_LOG2 = 0.15
-
-
-def _finite(value: Any) -> float | None:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if math.isfinite(number) else None
-
-
-def build_trajectory_shape_fact(
-    points: Iterable[Mapping[str, Any]],
-    *,
-    axis: str = "ptm_protein_adjusted_log2fc",
-    baseline_band_log2: float = DEFAULT_BASELINE_BAND_LOG2,
-) -> dict[str, Any]:
-    ordered: list[dict[str, Any]] = []
-    for point in points:
-        value = _finite(point.get(axis))
-        if value is None or bool(point.get("detection_context_only")):
-            continue
-        ordered.append({"condition": str(point.get("condition") or "recorded condition"), "value": value})
-
-    if len(ordered) < 2:
-        return {
-            "contract_version": TRAJECTORY_FACT_VERSION,
-            "axis": axis,
-            "classification": "insufficient_numeric_points",
-            "baseline_band_log2": baseline_band_log2,
-            "reader_summary": "The recorded trajectory did not contain enough conventional numeric points for a shape classification.",
-            "monotonic_claim_allowed": False,
-            "baseline_return_claim_allowed": False,
-            "points": ordered,
-        }
-
-    values = [item["value"] for item in ordered]
-    deltas = [right - left for left, right in zip(values, values[1:])]
-    direction_steps = [
-        1 if delta > baseline_band_log2 else -1 if delta < -baseline_band_log2 else 0
-        for delta in deltas
-    ]
-    has_up = any(step > 0 for step in direction_steps)
-    has_down = any(step < 0 for step in direction_steps)
-    if has_up and has_down:
-        classification = "non_monotonic"
-    elif has_up:
-        classification = "monotonic_increase"
-    elif has_down:
-        classification = "monotonic_decrease"
-    else:
-        classification = "approximately_stable_within_descriptive_band"
-
-    excursions = [abs(value) > baseline_band_log2 for value in values]
-    baseline_return_indices = [
-        index for index, value in enumerate(values)
-        if index > 0 and abs(value) <= baseline_band_log2 and any(excursions[:index])
-    ]
-    baseline_return_claim_allowed = bool(baseline_return_indices)
-    extrema = {
-        "maximum": {"condition": ordered[max(range(len(values)), key=values.__getitem__)]["condition"], "value": max(values)},
-        "minimum": {"condition": ordered[min(range(len(values)), key=values.__getitem__)]["condition"], "value": min(values)},
-    }
-    axis_label = {
-        "ptm_protein_adjusted_log2fc": "protein-adjusted PTM contrast",
-        "ptm_unadjusted_log2fc": "unadjusted PTM contrast",
-        "protein_log2fc": "linked protein contrast",
-    }.get(axis, axis.replace("_", " "))
-    point_text = "; ".join(f"{item['condition']} {item['value']:+.3f}" for item in ordered)
-    if classification == "non_monotonic":
-        interpretation = "showed a non-monotonic trajectory across the sampled conditions"
-    elif classification == "monotonic_increase":
-        interpretation = "increased monotonically within the pre-specified descriptive tolerance"
-    elif classification == "monotonic_decrease":
-        interpretation = "decreased monotonically within the pre-specified descriptive tolerance"
-    else:
-        interpretation = "remained within the pre-specified descriptive tolerance"
-    return {
-        "contract_version": TRAJECTORY_FACT_VERSION,
-        "axis": axis,
-        "classification": classification,
-        "baseline_band_log2": baseline_band_log2,
-        "reader_summary": f"The {axis_label} {interpretation}: {point_text}.",
-        "monotonic_claim_allowed": classification in {"monotonic_increase", "monotonic_decrease"},
-        "baseline_return_claim_allowed": baseline_return_claim_allowed,
-        "baseline_return_conditions": [ordered[index]["condition"] for index in baseline_return_indices],
-        "extrema": extrema,
-        "points": ordered,
-    }
 
 
 def _matching_feature_fact(sentence: str, cards: Iterable[Mapping[str, Any]]) -> Mapping[str, Any] | None:

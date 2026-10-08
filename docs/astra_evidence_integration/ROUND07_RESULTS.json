@@ -1,0 +1,2282 @@
+{
+  "actual_execution": {
+    "run_id": "g0-8e634f6ca5c847a08726cb69bf91f9a2",
+    "adapter_calls": 1,
+    "reader_calls": 1,
+    "quant_comparison": [
+      {
+        "table": "quant/annotation_edges.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/comparisons.csv",
+        "rows": 16944,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/detection.csv",
+        "rows": 16944,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/emergent_kinase_evidence.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/form_evidence_status.csv",
+        "rows": 16944,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_injection_omissions.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_membership.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_profiles.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_sensitivity.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/primary_A_input.csv",
+        "rows": 13704,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/protein_contrasts.csv",
+        "rows": 57150,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/runlevel.csv",
+        "rows": 59304,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/site_mapping.csv",
+        "rows": 11614,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_complete.csv",
+        "rows": 13704,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_paired.csv",
+        "rows": 13704,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_peptide_masks.csv",
+        "rows": 445712,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_selected_sequences.csv",
+        "rows": 111311,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_unmodified_proteins.csv",
+        "rows": 54456,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_unmodified_sequences.csv",
+        "rows": 667866,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/summary.csv",
+        "rows": 2824,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/temporal_protein_summary.csv",
+        "rows": 18601,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      },
+      {
+        "table": "quant/validation_panel.csv",
+        "rows": 0,
+        "ids_text_na_equal": true,
+        "numeric_equal_atol_rtol_1e_10": true,
+        "byte_equal": true
+      }
+    ],
+    "source_pin_sha256": "7560c13a6b430363744157d74ad160a83e0939ec0754cedce20d7c0fe9dcbd8e",
+    "source_pin_preserved": true,
+    "baseline_archive_preserved": true,
+    "archive": "/Users/josephk/Projects/PTM-platform/codex-inputs/round07-20261008/execution/output/astra_analysis_package_g0-8e634f6ca5c847a08726cb69bf91f9a2.zip",
+    "archive_sha256": "03d7a67a53326595d56c01cc1ef4c28f01f1ee183a7f744681f5eed6d054df2b",
+    "network_requests": 0,
+    "quant_cache": {
+      "normalization_sensitivity": {
+        "fingerprint": "quant_v6_66ce0aceb9d95ad1f53c",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      },
+      "quant": {
+        "fingerprint": "quant_v6_59024921d6b79f54630d",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      }
+    },
+    "evidence_cache": null
+  },
+  "reader_validation": {
+    "source_rows_checked": 16944,
+    "cards_checked": 14658,
+    "findings_checked": 15,
+    "values_times_NA_masks_ids": "passed"
+  },
+  "coverage": {
+    "adapter_eligible_forms": 2159,
+    "adapter_eligible_rows": 12499,
+    "all_source_rows_retained": true,
+    "card_forms": 2159,
+    "card_grid_rows": 12954,
+    "card_missing_timepoints": 455,
+    "card_numeric_rows": 12499,
+    "card_possible_denominator": "existing_precursor_card_contract; per form/arm/reference/pairing",
+    "comparison_cards": 12499,
+    "forms_with_withheld_rows": 665,
+    "fully_withheld_forms": 665,
+    "independent_validation": "not_performed",
+    "literature_comparison": "not_performed",
+    "observation_cards": 2159,
+    "reason_counts_can_overlap": true,
+    "schema_version": "astra_reader.v1",
+    "selected_findings": 15,
+    "selected_forms": 15,
+    "selected_grid_rows": 90,
+    "selection_before_question_routing": true,
+    "total_form_contrasts": 16944,
+    "total_forms": 2824,
+    "unselected_source_rows_retained": 16854,
+    "withheld_reason_counts": {
+      "gene_display_ambiguous_or_unavailable": 60,
+      "mixed_or_unknown_taxon_not_representable": 12,
+      "multiple_precursors_not_representable": 1266,
+      "precursor_identity_unavailable": 1266,
+      "quant_comparison_excluded": 2785,
+      "raw_only_excluded_finite_contrast": 1032
+    },
+    "withheld_rows": 3990
+  },
+  "existing_scientific_tables": [
+    {
+      "table": "evidence/censoring_bounds.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "evidence/coverage_funnel.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "evidence/emergence_evidence.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "evidence/feature_evidence_ledger.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "evidence/normalization_offsets.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "evidence/parent_adjustment_impact.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "evidence/technical_dispersion.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "evidence/technical_injection_omissions.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/candidate_sensitivity.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/kea3_results.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/kinase_candidate_edges.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/kinase_candidate_summary.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/kinase_protein_context.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/kinase_self_site_context.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/kinase_technical_omissions.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/kinase_temporal_profiles.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/method_executions.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/method_membership.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/method_scores.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "kinase/substrate_contributions.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/annotation_edges.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/comparisons.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/detection.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/emergent_kinase_evidence.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/form_evidence_status.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_injection_omissions.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_membership.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_profiles.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_sensitivity.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/primary_A_input.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/protein_contrasts.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/runlevel.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/site_mapping.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_parent_complete.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_parent_paired.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_parent_peptide_masks.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_selected_sequences.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_unmodified_proteins.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_unmodified_sequences.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/summary.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/temporal_protein_summary.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "quant/validation_panel.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "reader_adapter/form_contrasts.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "reader_adapter/form_identity.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "reader_adapter/precursor_membership.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "reader_adapter/study_metadata.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "references/source_query_ledger.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/calibrated_calls.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/calibration_provenance.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/evidence_dependency_groups.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/group_excluded_anchors.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/inference_results.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/kinase_calls.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/localization_by_contrast.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/measurement_observations.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/observation_sites.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/perturbation_validation.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/reference_inventory.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/replicate_uncertainty.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/site_identity_audit.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/site_report_observations.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "science/specificity_scores.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "study/input_field_manifest.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "temporal/cross_layer_links.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "temporal/group_excluded_cowave.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "temporal/interval_contrasts.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "temporal/kinase_fixed_membership.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "temporal/kinase_temporal_features.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "temporal/protein_temporal_features.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "temporal/ptm_temporal_features.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "temporal/target_excluded_anchors.csv",
+      "byte_equal": true
+    },
+    {
+      "table": "temporal/temporal_series.csv",
+      "byte_equal": true
+    }
+  ],
+  "figure_source_data": [
+    {
+      "file": "figures/U_P_A_examples_source.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/coverage_source.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/cross_layer_timing_source.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/emerging_detection_columns.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/emerging_detection_source.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/kinase_footprints_points.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/kinase_footprints_selection.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/kinase_footprints_source.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/parent_correction_source.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/protein_trajectories_points.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/protein_trajectories_selection.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/protein_trajectories_source.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/substrate_contrast_heatmap_columns.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/substrate_contrast_heatmap_source.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    },
+    {
+      "file": "figures/technical_dispersion_source.csv",
+      "values_ids_NA_equal": true,
+      "byte_equal": true
+    }
+  ],
+  "figure_svg_semantics": [
+    {
+      "file": "figures/U_P_A_examples.svg",
+      "elements_labels_paths_equal_ignoring_metadata_and_generated_ids": true
+    },
+    {
+      "file": "figures/coverage.svg",
+      "elements_labels_paths_equal_ignoring_metadata_and_generated_ids": true
+    },
+    {
+      "file": "figures/cross_layer_timing.svg",
+      "elements_labels_paths_equal_ignoring_metadata_and_generated_ids": true
+    },
+    {
+      "file": "figures/emerging_detection.svg",
+      "elements_labels_paths_equal_ignoring_metadata_and_generated_ids": true
+    },
+    {
+      "file": "figures/kinase_footprints.svg",
+      "elements_labels_paths_equal_ignoring_metadata_and_generated_ids": true
+    },
+    {
+      "file": "figures/parent_correction.svg",
+      "elements_labels_paths_equal_ignoring_metadata_and_generated_ids": true
+    },
+    {
+      "file": "figures/protein_trajectories.svg",
+      "elements_labels_paths_equal_ignoring_metadata_and_generated_ids": true
+    },
+    {
+      "file": "figures/substrate_contrast_heatmap.svg",
+      "elements_labels_paths_equal_ignoring_metadata_and_generated_ids": true
+    },
+    {
+      "file": "figures/technical_dispersion.svg",
+      "elements_labels_paths_equal_ignoring_metadata_and_generated_ids": true
+    }
+  ],
+  "reader_links": [
+    {
+      "source": "START_HERE_ASTRA.md",
+      "target": "reader/READ_ME.md",
+      "exists": true
+    },
+    {
+      "source": "START_HERE_ASTRA.md",
+      "target": "study/STUDY_BRIEF.md",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../study/STUDY_BRIEF.md",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../study/user_input_snapshot.json",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "coverage.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "authoring_packet.json",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../evidence/emergence_evidence.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/protein_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../science/inference_results.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../quant/comparisons.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "cards.csv",
+      "exists": true
+    },
+    {
+      "source": "reader/READ_ME.md",
+      "target": "../reader_adapter/form_contrasts.csv",
+      "exists": true
+    }
+  ],
+  "examples": [
+    {
+      "gene_display": "DOCK7",
+      "finding_id": "finding_cf8f4249c4fa5bd2be47",
+      "card_id": "reader_card_2f469da4ab74a9f69279",
+      "form_id": "form_5f6b1591279b085d",
+      "taxa": [
+        "10116"
+      ],
+      "representative_binding": {
+        "A": 0.5447439697010603,
+        "P_all": -0.04959100753146828,
+        "P_joint": -0.04959100753146828,
+        "U_all": 0.49515296216959115,
+        "U_joint": 0.49515296216959115,
+        "adapter_row_id": "card_row_ed0f41ab620a9adbdb6e",
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_eb2f813f825c4ccb",
+        "estimator_version": "material_then_unit_balanced_mean_log.v3",
+        "exclusion_reasons": null,
+        "form_id": "form_5f6b1591279b085d",
+        "included": true,
+        "inference_status": "descriptive_only_no_biological_test_implemented",
+        "localization_ids": [
+          "loc_contrast_7357772569c2a8ef24d9",
+          "loc_contrast_92318af8349c067a752a",
+          "loc_contrast_dd727873eda101c5e7d4",
+          "loc_contrast_d67812a78d3177a18e03"
+        ],
+        "localization_status": [
+          "missing_input"
+        ],
+        "mapping_ids": [
+          "mapping_269a7570a2ea9d7582e6",
+          "mapping_d665c7769f668b2ccb1b",
+          "mapping_f8881f39768ede810aea",
+          "mapping_13425c4b7bf006309d99"
+        ],
+        "mapping_status": "single_gene_isoform_coordinates",
+        "membership_ids": [
+          "card_member_a04e5006ff386be511f4"
+        ],
+        "pairing": "unpaired",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_joint_n": 3,
+        "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+        "reference_label": "Control",
+        "reference_time_min": 0.0,
+        "source_refs": {
+          "comparison": {
+            "contrast_id": "contrast_eb2f813f825c4ccb",
+            "form_id": "form_5f6b1591279b085d",
+            "table": "quant/comparisons.csv"
+          },
+          "runlevel": {
+            "form_id": "form_5f6b1591279b085d",
+            "injection_ids": [
+              "injection_53b8a398cbb308dd",
+              "injection_85d8e428878a76e9",
+              "injection_bc15bd17ed414f94",
+              "injection_4d76518dc0aa4f6a",
+              "injection_6f129e1f7b3e91b7",
+              "injection_c7b4cd92fb947404"
+            ],
+            "table": "quant/runlevel.csv"
+          },
+          "summary": {
+            "form_id": "form_5f6b1591279b085d",
+            "table": "quant/summary.csv"
+          }
+        },
+        "statistical_unit": "biological_unit",
+        "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+        "target_joint_n": 3,
+        "target_joint_run_ids": "injection_4d76518dc0aa4f6a;injection_6f129e1f7b3e91b7;injection_c7b4cd92fb947404",
+        "target_label": "15min",
+        "time_min": 15.0
+      },
+      "opposite_signed_observations": {
+        "meaning": "Signed measured levels across this series, not independent validation or a significance test.",
+        "negative_A_rows": [
+          "card_row_685dc80d3ecf3536e4bc"
+        ],
+        "positive_A_rows": [
+          "card_row_ed10c75e7f7a5d05708d",
+          "card_row_ed0f41ab620a9adbdb6e",
+          "card_row_3e7da5dbd9c56eb52fba",
+          "card_row_acf5add932cdb47395c6",
+          "card_row_0d0118b250926f1272be"
+        ],
+        "status": "both_signs_observed"
+      }
+    },
+    {
+      "gene_display": "SIK3",
+      "finding_id": "finding_8d461aa65e3c36763221",
+      "card_id": "reader_card_cabf52e326b2abbfea58",
+      "form_id": "form_0307f4dc0d707fd5",
+      "taxa": [
+        "10116"
+      ],
+      "representative_binding": {
+        "A": 0.9787728140422836,
+        "P_all": -0.013119966747026979,
+        "P_joint": -0.014212329592009354,
+        "U_all": 0.9645604844502706,
+        "U_joint": 0.9645604844502706,
+        "adapter_row_id": "card_row_1078c06d1447fe7a933e",
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_eb2f813f825c4ccb",
+        "estimator_version": "material_then_unit_balanced_mean_log.v3",
+        "exclusion_reasons": null,
+        "form_id": "form_0307f4dc0d707fd5",
+        "included": true,
+        "inference_status": "descriptive_only_no_biological_test_implemented",
+        "localization_ids": [
+          "loc_contrast_447f0b10ecfff80b309e",
+          "loc_contrast_c87efe460c828f5b363b"
+        ],
+        "localization_status": [
+          "missing_input"
+        ],
+        "mapping_ids": [
+          "mapping_4f6a315141425e028274",
+          "mapping_a7365b1d787ed3e83b65"
+        ],
+        "mapping_status": "single_gene_isoform_coordinates",
+        "membership_ids": [
+          "card_member_80cc820f82a6c103a398"
+        ],
+        "pairing": "unpaired",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_joint_n": 2,
+        "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_bc15bd17ed414f94",
+        "reference_label": "Control",
+        "reference_time_min": 0.0,
+        "source_refs": {
+          "comparison": {
+            "contrast_id": "contrast_eb2f813f825c4ccb",
+            "form_id": "form_0307f4dc0d707fd5",
+            "table": "quant/comparisons.csv"
+          },
+          "runlevel": {
+            "form_id": "form_0307f4dc0d707fd5",
+            "injection_ids": [
+              "injection_53b8a398cbb308dd",
+              "injection_bc15bd17ed414f94",
+              "injection_4d76518dc0aa4f6a",
+              "injection_6f129e1f7b3e91b7",
+              "injection_c7b4cd92fb947404"
+            ],
+            "table": "quant/runlevel.csv"
+          },
+          "summary": {
+            "form_id": "form_0307f4dc0d707fd5",
+            "table": "quant/summary.csv"
+          }
+        },
+        "statistical_unit": "biological_unit",
+        "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+        "target_joint_n": 3,
+        "target_joint_run_ids": "injection_4d76518dc0aa4f6a;injection_6f129e1f7b3e91b7;injection_c7b4cd92fb947404",
+        "target_label": "15min",
+        "time_min": 15.0
+      },
+      "opposite_signed_observations": {
+        "meaning": "Signed measured levels across this series, not independent validation or a significance test.",
+        "negative_A_rows": [],
+        "positive_A_rows": [
+          "card_row_2e1811455baf1b937afa",
+          "card_row_a1d6d9d5908103f0fa49",
+          "card_row_1078c06d1447fe7a933e",
+          "card_row_862f3f967bca47c648ef",
+          "card_row_cc3d441b3dae5c573840",
+          "card_row_ef31a825f661a49ee0e5"
+        ],
+        "status": "no_opposite_signed_A_observed"
+      }
+    },
+    {
+      "gene_display": "RBM26",
+      "finding_id": "finding_ac77a2145e4e726099e4",
+      "card_id": "reader_card_865d2adef180c6114aac",
+      "form_id": "form_927c72b605b8f2bd",
+      "taxa": [
+        "10116"
+      ],
+      "representative_binding": {
+        "A": 0.34455161815701163,
+        "P_all": -0.009584073981681485,
+        "P_joint": -0.009584073981681485,
+        "U_all": 0.33496754417533126,
+        "U_joint": 0.33496754417533126,
+        "adapter_row_id": "card_row_7cfb971d7bc13129a081",
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_eb2f813f825c4ccb",
+        "estimator_version": "material_then_unit_balanced_mean_log.v3",
+        "exclusion_reasons": null,
+        "form_id": "form_927c72b605b8f2bd",
+        "included": true,
+        "inference_status": "descriptive_only_no_biological_test_implemented",
+        "localization_ids": [
+          "loc_contrast_1083a7a56407a476edea",
+          "loc_contrast_d6370db7e8d1d918ae36",
+          "loc_contrast_cbbcbb6d391434c2f133"
+        ],
+        "localization_status": [
+          "missing_input"
+        ],
+        "mapping_ids": [
+          "mapping_42bedffa741fd43698e2",
+          "mapping_139950c442688e8f8ad1",
+          "mapping_c5a2cb9f95a8272b884e"
+        ],
+        "mapping_status": "single_gene_consistent_coordinates",
+        "membership_ids": [
+          "card_member_38d1e20c693c192108fd"
+        ],
+        "pairing": "unpaired",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_joint_n": 3,
+        "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+        "reference_label": "Control",
+        "reference_time_min": 0.0,
+        "source_refs": {
+          "comparison": {
+            "contrast_id": "contrast_eb2f813f825c4ccb",
+            "form_id": "form_927c72b605b8f2bd",
+            "table": "quant/comparisons.csv"
+          },
+          "runlevel": {
+            "form_id": "form_927c72b605b8f2bd",
+            "injection_ids": [
+              "injection_53b8a398cbb308dd",
+              "injection_85d8e428878a76e9",
+              "injection_bc15bd17ed414f94",
+              "injection_4d76518dc0aa4f6a",
+              "injection_6f129e1f7b3e91b7",
+              "injection_c7b4cd92fb947404"
+            ],
+            "table": "quant/runlevel.csv"
+          },
+          "summary": {
+            "form_id": "form_927c72b605b8f2bd",
+            "table": "quant/summary.csv"
+          }
+        },
+        "statistical_unit": "biological_unit",
+        "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+        "target_joint_n": 3,
+        "target_joint_run_ids": "injection_4d76518dc0aa4f6a;injection_6f129e1f7b3e91b7;injection_c7b4cd92fb947404",
+        "target_label": "15min",
+        "time_min": 15.0
+      },
+      "opposite_signed_observations": {
+        "meaning": "Signed measured levels across this series, not independent validation or a significance test.",
+        "negative_A_rows": [
+          "card_row_3a2e4e63949261324714",
+          "card_row_25a5cf412e2ab6a7f249",
+          "card_row_114ec8b10e710fbd7322",
+          "card_row_dc469bedc1459e869526"
+        ],
+        "positive_A_rows": [
+          "card_row_71c6b4fac6c4b8832391",
+          "card_row_7cfb971d7bc13129a081"
+        ],
+        "status": "both_signs_observed"
+      }
+    },
+    {
+      "gene_display": "ITPR1",
+      "finding_id": "finding_6ff9b5317c9757cd32df",
+      "card_id": "reader_card_f784c328c01224afdf91",
+      "form_id": "form_50dd63617f0b3f64",
+      "taxa": [
+        "10116"
+      ],
+      "representative_binding": {
+        "A": -0.755381845579123,
+        "P_all": -0.01187697676980548,
+        "P_joint": -0.01187697676980548,
+        "U_all": -0.7672588223489214,
+        "U_joint": -0.7672588223489214,
+        "adapter_row_id": "card_row_054aee91a297b278ce27",
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_fd5240cdb335e779",
+        "estimator_version": "material_then_unit_balanced_mean_log.v3",
+        "exclusion_reasons": null,
+        "form_id": "form_50dd63617f0b3f64",
+        "included": true,
+        "inference_status": "descriptive_only_no_biological_test_implemented",
+        "localization_ids": [
+          "loc_contrast_bffbadccfe0ddd92c940",
+          "loc_contrast_74f60f0b05f170a3a3a9",
+          "loc_contrast_92b5c2a70bfdac6e431c",
+          "loc_contrast_10926dbdd04688f100cb",
+          "loc_contrast_f534d873f9213f99f231",
+          "loc_contrast_9b1d26fa1cd470f71eb1",
+          "loc_contrast_b316013661e007ad1188",
+          "loc_contrast_56fc066fe3561d57bd19",
+          "loc_contrast_be3c711ca9757c73f9d3",
+          "loc_contrast_232e74b26ab28ed5f946",
+          "loc_contrast_346653b2e9af6de9749c",
+          "loc_contrast_1880cba0f422437a4f93",
+          "loc_contrast_f83d61a8ffdb9939eaae",
+          "loc_contrast_dc9b4aa596c3f519900b"
+        ],
+        "localization_status": [
+          "missing_input"
+        ],
+        "mapping_ids": [
+          "mapping_e2c45f957e5b5db718bd",
+          "mapping_5f74228f4a76ea60c182",
+          "mapping_3c00e6b0f4ccc39bb61f",
+          "mapping_7f4e8676b4d121d6833d",
+          "mapping_054cf20b0581e5a0dea9",
+          "mapping_534a9ae0a2bc242fc7f7",
+          "mapping_e8b6300b57a1a1111214",
+          "mapping_f3acd320aed4f893c544",
+          "mapping_967f4cb95cf5917388d0",
+          "mapping_410344215847a51a9298",
+          "mapping_4c59efe8082d92058b00",
+          "mapping_f13f9fcda166fa69337a",
+          "mapping_17afd2e2fe746cf732fb",
+          "mapping_64adde699120a55a00ed"
+        ],
+        "mapping_status": "single_gene_isoform_coordinates",
+        "membership_ids": [
+          "card_member_bd651c35d5a57674a569"
+        ],
+        "pairing": "unpaired",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_joint_n": 3,
+        "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+        "reference_label": "Control",
+        "reference_time_min": 0.0,
+        "source_refs": {
+          "comparison": {
+            "contrast_id": "contrast_fd5240cdb335e779",
+            "form_id": "form_50dd63617f0b3f64",
+            "table": "quant/comparisons.csv"
+          },
+          "runlevel": {
+            "form_id": "form_50dd63617f0b3f64",
+            "injection_ids": [
+              "injection_53b8a398cbb308dd",
+              "injection_85d8e428878a76e9",
+              "injection_bc15bd17ed414f94",
+              "injection_1bf0682ac74d04cb",
+              "injection_b9511428064d86b5",
+              "injection_d9f4d9b18afe3676"
+            ],
+            "table": "quant/runlevel.csv"
+          },
+          "summary": {
+            "form_id": "form_50dd63617f0b3f64",
+            "table": "quant/summary.csv"
+          }
+        },
+        "statistical_unit": "biological_unit",
+        "target_condition_id": "condition_824bfd9a5e97c3aa",
+        "target_joint_n": 3,
+        "target_joint_run_ids": "injection_1bf0682ac74d04cb;injection_b9511428064d86b5;injection_d9f4d9b18afe3676",
+        "target_label": "60min",
+        "time_min": 60.0
+      },
+      "opposite_signed_observations": {
+        "meaning": "Signed measured levels across this series, not independent validation or a significance test.",
+        "negative_A_rows": [
+          "card_row_4d53647457440da4d877",
+          "card_row_64b89446b64a180b22d9",
+          "card_row_bc2c9322992228275435",
+          "card_row_054aee91a297b278ce27",
+          "card_row_d25f74d194ba77b7dfdd"
+        ],
+        "positive_A_rows": [
+          "card_row_4af8cf6aa75f7324c034"
+        ],
+        "status": "both_signs_observed"
+      }
+    },
+    {
+      "gene_display": "OSBPL3",
+      "finding_id": "finding_46014d4da0dbfc4c3eb5",
+      "card_id": "reader_card_a4ea0007af79ce811d2c",
+      "form_id": "form_6939a1c00932ed01",
+      "taxa": [
+        "10116"
+      ],
+      "representative_binding": {
+        "A": -0.5270709681239962,
+        "P_all": -0.18076276937666336,
+        "P_joint": -0.18076276937666336,
+        "U_all": -0.7078337375006569,
+        "U_joint": -0.7078337375006569,
+        "adapter_row_id": "card_row_b81e1399ca0a5fbdd3c8",
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_fd5240cdb335e779",
+        "estimator_version": "material_then_unit_balanced_mean_log.v3",
+        "exclusion_reasons": null,
+        "form_id": "form_6939a1c00932ed01",
+        "included": true,
+        "inference_status": "descriptive_only_no_biological_test_implemented",
+        "localization_ids": [
+          "loc_contrast_ad60caf3d0d61c8c1976",
+          "loc_contrast_352ad3a5e7bcdcde5fb1",
+          "loc_contrast_523f64e9ab3b8ead7d3c"
+        ],
+        "localization_status": [
+          "missing_input"
+        ],
+        "mapping_ids": [
+          "mapping_fe5e1543bd21e8e1f647",
+          "mapping_d32b233ef259c6a5118b",
+          "mapping_4ef1cc4c5cca26167712"
+        ],
+        "mapping_status": "single_gene_isoform_coordinates",
+        "membership_ids": [
+          "card_member_8fcad826b1f70b16a0c0"
+        ],
+        "pairing": "unpaired",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_joint_n": 3,
+        "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+        "reference_label": "Control",
+        "reference_time_min": 0.0,
+        "source_refs": {
+          "comparison": {
+            "contrast_id": "contrast_fd5240cdb335e779",
+            "form_id": "form_6939a1c00932ed01",
+            "table": "quant/comparisons.csv"
+          },
+          "runlevel": {
+            "form_id": "form_6939a1c00932ed01",
+            "injection_ids": [
+              "injection_53b8a398cbb308dd",
+              "injection_85d8e428878a76e9",
+              "injection_bc15bd17ed414f94",
+              "injection_1bf0682ac74d04cb",
+              "injection_b9511428064d86b5",
+              "injection_d9f4d9b18afe3676"
+            ],
+            "table": "quant/runlevel.csv"
+          },
+          "summary": {
+            "form_id": "form_6939a1c00932ed01",
+            "table": "quant/summary.csv"
+          }
+        },
+        "statistical_unit": "biological_unit",
+        "target_condition_id": "condition_824bfd9a5e97c3aa",
+        "target_joint_n": 3,
+        "target_joint_run_ids": "injection_1bf0682ac74d04cb;injection_b9511428064d86b5;injection_d9f4d9b18afe3676",
+        "target_label": "60min",
+        "time_min": 60.0
+      },
+      "opposite_signed_observations": {
+        "meaning": "Signed measured levels across this series, not independent validation or a significance test.",
+        "negative_A_rows": [
+          "card_row_4de34ca5c2396122752f",
+          "card_row_cc0f73f7f5b9d11f7abb",
+          "card_row_2ac976abb3d6e314becb",
+          "card_row_b81e1399ca0a5fbdd3c8"
+        ],
+        "positive_A_rows": [
+          "card_row_27159890ee463176a527",
+          "card_row_dc74f937a4596113330d"
+        ],
+        "status": "both_signs_observed"
+      }
+    }
+  ],
+  "original_questions": {
+    "biological_question": "Parent-adjusted PTM, kinase candidate and temporal protein evidence for insulin response",
+    "research_questions": [],
+    "research_questions_status": "persisted"
+  },
+  "question_answers": [
+    {
+      "question_id": "BQ-001",
+      "original_text": "Parent-adjusted PTM, kinase candidate and temporal protein evidence for insulin response",
+      "answer_status": "partially_answerable",
+      "answer_scope": "Recorded U_joint/P_joint/A and sampled temporal/parent context only.",
+      "missing_evidence": [
+        "Mechanistic or kinase-specific attribution is not established by these observation cards.",
+        "No literature comparison or independent perturbation validation in this stage."
+      ],
+      "finding_ids": [
+        "finding_cf8f4249c4fa5bd2be47",
+        "finding_8d461aa65e3c36763221",
+        "finding_ac77a2145e4e726099e4",
+        "finding_6ff9b5317c9757cd32df",
+        "finding_46014d4da0dbfc4c3eb5",
+        "finding_73ec03a8ce3caf8e4155",
+        "finding_2114f9540b7df28b918f",
+        "finding_8db4d4e823a204a0e06c",
+        "finding_07f274450364a1c20919",
+        "finding_fec46f1f1b3e76d0404f",
+        "finding_2facbbc04ff9a833d825",
+        "finding_5655109b0640a68315be",
+        "finding_4b06279febeea1746cdd",
+        "finding_7b649b1f8325352ca0e9",
+        "finding_21636fa7f4f9f9b08727"
+      ]
+    }
+  ],
+  "untracked_preexisting_files_preserved": 8909,
+  "inference_status_counts": {
+    "descriptive_footprint": 41,
+    "exploratory_method_signal": 303,
+    "not_evaluable": 5740
+  },
+  "main_round06_sha": "43b5bdedc1f98a78cdb567ca56b1127c4fab7e7e",
+  "deployment_performed": false,
+  "feature_flag_changed": false,
+  "reader_offline_replay": {
+    "passed": true,
+    "scope": "reader_only_from_archived_adapter_and_scientific_tables",
+    "scientific_requantification": false,
+    "network_requests": 0,
+    "repository_code_used": false,
+    "run_id": "g0-8e634f6ca5c847a08726cb69bf91f9a2",
+    "files": [
+      {
+        "file": "reader/READ_ME.md",
+        "sha256": "01ae1a0cda6d6f6f3e09a18d04468bb3bdc4b0a01498efa5ef5e3009de3d5408",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/authoring_packet.json",
+        "sha256": "c4c44249bdde1d59fa79af1ac4e5c1a5b5d5b670be3b87f266ffedf1f203e4c4",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/coverage_summary.json",
+        "sha256": "4fd9d50c4eacf1a1aacc8e729d523ba5bce8f6bb1f93e2273035d112839e0fe1",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/question_map.json",
+        "sha256": "100861000bc05a91f5cd42af94fe31056e621328ef9da4e86e8fc3946e998f67",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/selection_audit.json",
+        "sha256": "c74f12b94ab6aadb8269668fd4491ec6c1d163d3f5e2b498a0a1245ff744be25",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/cards.csv",
+        "sha256": "6c596a74f9c4e7f65e83bcfcd03c7dd05511961a058414f50d3e98ab032fd360",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/findings.csv",
+        "sha256": "1b0e7103f1130ab82717a87cc62161a8d04191e08dc974d8f17ab9d8f62ec369",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/coverage.csv",
+        "sha256": "f9fbcafc3657f2e6b5e3d9c872ef66f0b15719f5d9908de864280ee363cb9e4f",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/packet.csv",
+        "sha256": "73fd8dd55e6f0089d97c45d505c7750d0c3a578920b6e482495e912bea40c5f6",
+        "byte_equal": true
+      }
+    ],
+    "validation": {
+      "source_rows_checked": 16944,
+      "cards_checked": 14658,
+      "findings_checked": 15,
+      "values_times_NA_masks_ids": "passed"
+    }
+  },
+  "synthetic_full_replay": {
+    "archived_source_file_sha256": "5bb1228df7ef526d33da4621854c61a007ef0d7aa5026dc55037e14af246e550",
+    "atol": 1e-10,
+    "network_requests": 0,
+    "passed": true,
+    "reader_artifacts": [
+      {
+        "byte_equal": true,
+        "file": "reader/READ_ME.md"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/authoring_packet.json"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/coverage_summary.json"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/question_map.json"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/selection_audit.json"
+      }
+    ],
+    "rtol": 1e-10,
+    "source_execution": {
+      "acquisition_executed": false,
+      "effective_pin_policy": "research_full",
+      "execution_mode": "archive_replay",
+      "incomplete_queries": [
+        {
+          "provider": "iPTMnet",
+          "query_id": "query_077044cede859bc7a410",
+          "reason": "frozen_response_fixture",
+          "status": "timeout"
+        },
+        {
+          "provider": "iPTMnet",
+          "query_id": "query_fe58856042f13d518adf",
+          "reason": "frozen_response_fixture",
+          "status": "timeout"
+        },
+        {
+          "provider": "iPTMnet",
+          "query_id": "query_97515019adfce132cc99",
+          "reason": "frozen_response_fixture",
+          "status": "timeout"
+        },
+        {
+          "provider": "iPTMnet",
+          "query_id": "query_a1ab6b2e0a237c5ec76d",
+          "reason": "frozen_response_fixture",
+          "status": "timeout"
+        },
+        {
+          "provider": "iPTMnet",
+          "query_id": "query_056331dfd41a4952d32a",
+          "reason": "frozen_response_fixture",
+          "status": "timeout"
+        }
+      ],
+      "message": "기록된 pin 재사용 · 이번 수집 미실행",
+      "pin_reused": true,
+      "preview": false,
+      "previous_pin_sha256": "a5deee38afc1126decdcb6a99ca8225be2396e8e294960d362ac5f5840f5fe79",
+      "refresh_requested": false,
+      "requested_policy": "research_full",
+      "requested_policy_config": {
+        "mode": "research_full"
+      },
+      "reuse_reason": "archive_replay_network_disabled",
+      "schema_version": "source_execution.v1",
+      "status": "reused",
+      "used_pin_sha256": "a5deee38afc1126decdcb6a99ca8225be2396e8e294960d362ac5f5840f5fe79"
+    },
+    "tables": [
+      {
+        "byte_equal": true,
+        "rows": 8,
+        "table": "quant/summary",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 120,
+        "table": "quant/runlevel",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "quant/comparisons",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "quant/detection",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 20,
+        "table": "quant/protein_contrasts",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 24,
+        "table": "quant/strict_parent_paired",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 24,
+        "table": "quant/strict_parent_complete",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "quant/strict_parent_peptide_masks",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "quant/strict_unmodified_sequences",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "quant/strict_unmodified_proteins",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "quant/strict_selected_sequences",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 8,
+        "table": "quant/site_mapping",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "quant/annotation_edges",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "quant/kinase_profiles",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "quant/kinase_membership",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "quant/kinase_sensitivity",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "quant/kinase_injection_omissions",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "quant/emergent_kinase_evidence",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 24,
+        "table": "quant/primary_A_input",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 4,
+        "table": "quant/validation_panel",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 10,
+        "table": "quant/temporal_protein_summary",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "quant/form_evidence_status",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 24,
+        "table": "kinase/kinase_candidate_edges",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 224,
+        "table": "kinase/kinase_temporal_profiles",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 456,
+        "table": "kinase/substrate_contributions",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 160,
+        "table": "kinase/candidate_sensitivity",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 16,
+        "table": "kinase/kinase_protein_context",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "kinase/kinase_self_site_context",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 96,
+        "table": "kinase/kinase_technical_omissions",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 2,
+        "table": "temporal/temporal_series",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 64,
+        "table": "temporal/ptm_temporal_features",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 10,
+        "table": "temporal/protein_temporal_features",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 112,
+        "table": "temporal/kinase_temporal_features",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 224,
+        "table": "temporal/kinase_fixed_membership",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 36,
+        "table": "temporal/target_excluded_anchors",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 16,
+        "table": "temporal/cross_layer_links",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "temporal/interval_contrasts",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 72,
+        "table": "temporal/group_excluded_cowave",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "evidence/parent_adjustment_impact",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 192,
+        "table": "evidence/technical_injection_omissions",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "evidence/normalization_offsets",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 40,
+        "table": "evidence/emergence_evidence",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "evidence/feature_evidence_ledger",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 120,
+        "table": "evidence/technical_dispersion",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 8,
+        "table": "evidence/censoring_bounds",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 15,
+        "table": "references/source_query_ledger",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "kinase/kea3_results",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 8,
+        "table": "kinase/kinase_candidate_summary",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 9,
+        "table": "evidence/coverage_funnel",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 8,
+        "table": "kinase/method_scores",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "science/measurement_observations",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "science/site_report_observations",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 8,
+        "table": "science/site_identity_audit",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "science/observation_sites",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "science/localization_by_contrast",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "science/specificity_scores",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 5,
+        "table": "science/reference_inventory",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "science/replicate_uncertainty",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "science/perturbation_validation",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 48,
+        "table": "science/kinase_calls",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 72,
+        "table": "science/group_excluded_anchors",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 48,
+        "table": "science/inference_results",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "science/calibrated_calls",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 24,
+        "table": "science/evidence_dependency_groups",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 1,
+        "table": "science/calibration_provenance",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "kinase/method_membership",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 0,
+        "table": "kinase/method_executions",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 8,
+        "table": "reader_adapter/form_identity",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "reader_adapter/form_contrasts",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 8,
+        "table": "reader_adapter/precursor_membership",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 1,
+        "table": "reader_adapter/study_metadata",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 36,
+        "table": "reader/cards",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 7,
+        "table": "reader/findings",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 32,
+        "table": "reader/coverage",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 1,
+        "table": "reader/packet",
+        "values_text_keys_masks_equal": true
+      },
+      {
+        "byte_equal": true,
+        "rows": 339,
+        "table": "study/input_field_manifest",
+        "values_text_keys_masks_equal": true
+      }
+    ]
+  },
+  "extraction_parity": [
+    {
+      "function": "observed_time_minutes",
+      "from": "workers/report_generation/core/temporal_analysis.py",
+      "to": "ptm_shared/reader_observations.py",
+      "AST_identical": true
+    },
+    {
+      "function": "summarize_observed_pattern",
+      "from": "workers/report_generation/core/temporal_analysis.py",
+      "to": "ptm_shared/reader_observations.py",
+      "AST_identical": true
+    },
+    {
+      "function": "joint_axis_pattern",
+      "from": "workers/report_generation/core/temporal_analysis.py",
+      "to": "ptm_shared/reader_observations.py",
+      "AST_identical": true
+    },
+    {
+      "function": "_finite",
+      "from": "workers/report_generation/core/scientific_semantics.py",
+      "to": "ptm_shared/reader_observations.py",
+      "AST_identical": true
+    },
+    {
+      "function": "build_trajectory_shape_fact",
+      "from": "workers/report_generation/core/scientific_semantics.py",
+      "to": "ptm_shared/reader_observations.py",
+      "AST_identical": true
+    },
+    {
+      "function": "build_feature_observation_cards",
+      "from": "workers/report_generation/core/measured_feature_cards.py",
+      "to": "ptm_shared/measured_feature_cards.py",
+      "AST_identical": true
+    },
+    {
+      "function": "build_quantitation_comparison_cards",
+      "from": "workers/report_generation/core/measured_feature_cards.py",
+      "to": "ptm_shared/measured_feature_cards.py",
+      "AST_identical": true
+    }
+  ],
+  "withheld_quantifiable_A": {
+    "withheld_total": 3990,
+    "withheld_included_A": 1205,
+    "withheld_included_A_forms": 201,
+    "reason_groups": {
+      "multiple_precursors_not_representable;precursor_identity_unavailable": {
+        "quantified_A_rows": 1205,
+        "forms": 201
+      }
+    },
+    "meaning": "Quantifiable observations withheld by existing card representation contract, not absent biology; full rows remain in quant/comparisons and reader_adapter."
+  },
+  "test_runs": [
+    {
+      "passed": 73,
+      "warnings": 5,
+      "seconds": 12.56,
+      "scope": "reader_adapter_and_legacy_cards_identity_companion_joint_patterns_figures"
+    },
+    {
+      "passed": 56,
+      "warnings": 1,
+      "seconds": 21.54,
+      "scope": "reader_legacy_flow_metadata_v6_integration"
+    },
+    {
+      "passed": 32,
+      "warnings": 0,
+      "seconds": 1.7,
+      "scope": "legacy_quantitation_claims_flow_review_typed_record"
+    }
+  ],
+  "test_count_note": "Overlapping tests across runs; not a count of unique tests.",
+  "stage_ledger": {
+    "profile": "astra_analysis.v6",
+    "stages": [
+      {
+        "checkpoint": {
+          "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+          "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+          "inference": "inference_v6_ba77afa761c3681deb1f",
+          "quant": "quant_v6_59024921d6b79f54630d",
+          "temporal": "temporal_v6_be45a42414c47bfc137f"
+        },
+        "code_hash": "a17861290635bcef978c1aec406014e8447d6826462aa179f150ebda71c94110",
+        "config_hash": "17958f8c7c434e54c7ee294d25e3e34193c0ad440f7742b9e8c69af75d400dd0",
+        "dependencies": [],
+        "elapsed_seconds": 0.5825758329592645,
+        "finished_utc": "2026-10-08T08:28:52.004654+00:00",
+        "process_peak_memory_bytes": 416366592,
+        "stage": "resolve_inputs_and_plan",
+        "started_utc": "2026-10-08T08:28:51.422070+00:00",
+        "status": "completed"
+      },
+      {
+        "checkpoint": {
+          "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+          "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+          "inference": "inference_v6_ba77afa761c3681deb1f",
+          "quant": "quant_v6_59024921d6b79f54630d",
+          "temporal": "temporal_v6_be45a42414c47bfc137f"
+        },
+        "code_hash": "a17861290635bcef978c1aec406014e8447d6826462aa179f150ebda71c94110",
+        "config_hash": "17958f8c7c434e54c7ee294d25e3e34193c0ad440f7742b9e8c69af75d400dd0",
+        "dependencies": [
+          "resolve_inputs_and_plan"
+        ],
+        "elapsed_seconds": 21.33505779202096,
+        "finished_utc": "2026-10-08T08:29:13.233967+00:00",
+        "process_peak_memory_bytes": 2650603520,
+        "stage": "quantify_evidence",
+        "started_utc": "2026-10-08T08:28:52.005732+00:00",
+        "status": "completed"
+      },
+      {
+        "checkpoint": {
+          "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+          "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+          "inference": "inference_v6_ba77afa761c3681deb1f",
+          "quant": "quant_v6_59024921d6b79f54630d",
+          "temporal": "temporal_v6_be45a42414c47bfc137f"
+        },
+        "code_hash": "a17861290635bcef978c1aec406014e8447d6826462aa179f150ebda71c94110",
+        "config_hash": "17958f8c7c434e54c7ee294d25e3e34193c0ad440f7742b9e8c69af75d400dd0",
+        "dependencies": [
+          "resolve_inputs_and_plan"
+        ],
+        "elapsed_seconds": 1.4658475000178441,
+        "finished_utc": "2026-10-08T08:29:14.701692+00:00",
+        "process_peak_memory_bytes": 2738700288,
+        "stage": "resolve_annotation",
+        "started_utc": "2026-10-08T08:29:13.235867+00:00",
+        "status": "completed"
+      },
+      {
+        "checkpoint": {
+          "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+          "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+          "inference": "inference_v6_ba77afa761c3681deb1f",
+          "quant": "quant_v6_59024921d6b79f54630d",
+          "temporal": "temporal_v6_be45a42414c47bfc137f"
+        },
+        "code_hash": "a17861290635bcef978c1aec406014e8447d6826462aa179f150ebda71c94110",
+        "config_hash": "17958f8c7c434e54c7ee294d25e3e34193c0ad440f7742b9e8c69af75d400dd0",
+        "dependencies": [
+          "identity_localization",
+          "resolve_annotation"
+        ],
+        "elapsed_seconds": 5.889275124995038,
+        "finished_utc": "2026-10-08T08:29:24.247443+00:00",
+        "process_peak_memory_bytes": 3158081536,
+        "stage": "discover_regulators",
+        "started_utc": "2026-10-08T08:29:18.358261+00:00",
+        "status": "completed"
+      },
+      {
+        "checkpoint": {
+          "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+          "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+          "inference": "inference_v6_ba77afa761c3681deb1f",
+          "quant": "quant_v6_59024921d6b79f54630d",
+          "temporal": "temporal_v6_be45a42414c47bfc137f"
+        },
+        "code_hash": "a17861290635bcef978c1aec406014e8447d6826462aa179f150ebda71c94110",
+        "config_hash": "17958f8c7c434e54c7ee294d25e3e34193c0ad440f7742b9e8c69af75d400dd0",
+        "dependencies": [
+          "discover_regulators"
+        ],
+        "elapsed_seconds": 85.09850670793094,
+        "finished_utc": "2026-10-08T08:30:49.346269+00:00",
+        "process_peak_memory_bytes": 3355951104,
+        "stage": "score_regulator_footprints",
+        "started_utc": "2026-10-08T08:29:24.249111+00:00",
+        "status": "completed"
+      },
+      {
+        "checkpoint": {
+          "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+          "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+          "inference": "inference_v6_ba77afa761c3681deb1f",
+          "quant": "quant_v6_59024921d6b79f54630d",
+          "temporal": "temporal_v6_be45a42414c47bfc137f"
+        },
+        "code_hash": "a17861290635bcef978c1aec406014e8447d6826462aa179f150ebda71c94110",
+        "config_hash": "17958f8c7c434e54c7ee294d25e3e34193c0ad440f7742b9e8c69af75d400dd0",
+        "dependencies": [
+          "score_regulator_footprints"
+        ],
+        "elapsed_seconds": 900.590759041952,
+        "finished_utc": "2026-10-08T08:46:21.491257+00:00",
+        "process_peak_memory_bytes": 3884597248,
+        "stage": "integrate_temporal_layers",
+        "started_utc": "2026-10-08T08:31:20.914774+00:00",
+        "status": "completed"
+      },
+      {
+        "checkpoint": {
+          "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+          "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+          "inference": "inference_v6_ba77afa761c3681deb1f",
+          "quant": "quant_v6_59024921d6b79f54630d",
+          "temporal": "temporal_v6_be45a42414c47bfc137f"
+        },
+        "code_hash": "a17861290635bcef978c1aec406014e8447d6826462aa179f150ebda71c94110",
+        "config_hash": "17958f8c7c434e54c7ee294d25e3e34193c0ad440f7742b9e8c69af75d400dd0",
+        "dependencies": [
+          "integrate_temporal_layers"
+        ],
+        "elapsed_seconds": 36.675931666977704,
+        "finished_utc": "2026-10-08T08:47:55.929531+00:00",
+        "process_peak_memory_bytes": 4777082880,
+        "stage": "assemble_evidence_package",
+        "started_utc": "2026-10-08T08:47:19.254181+00:00",
+        "status": "completed"
+      },
+      {
+        "checkpoint": {
+          "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+          "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+          "inference": "inference_v6_ba77afa761c3681deb1f",
+          "quant": "quant_v6_59024921d6b79f54630d",
+          "temporal": "temporal_v6_be45a42414c47bfc137f"
+        },
+        "code_hash": "a17861290635bcef978c1aec406014e8447d6826462aa179f150ebda71c94110",
+        "config_hash": "17958f8c7c434e54c7ee294d25e3e34193c0ad440f7742b9e8c69af75d400dd0",
+        "dependencies": [
+          "assemble_evidence_package"
+        ],
+        "stage": "validate_and_publish",
+        "started_utc": "2026-10-08T08:47:55.930989+00:00",
+        "status": "running"
+      },
+      {
+        "checkpoint": {
+          "discovery": "discovery_v6_3e4ca1d9b7d6502b636d",
+          "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+          "inference": "inference_v6_ba77afa761c3681deb1f",
+          "quant": "quant_v6_59024921d6b79f54630d",
+          "temporal": "temporal_v6_be45a42414c47bfc137f"
+        },
+        "code_hash": "a17861290635bcef978c1aec406014e8447d6826462aa179f150ebda71c94110",
+        "config_hash": "17958f8c7c434e54c7ee294d25e3e34193c0ad440f7742b9e8c69af75d400dd0",
+        "dependencies": [
+          "quantify_evidence"
+        ],
+        "elapsed_seconds": 3.308772207936272,
+        "finished_utc": "2026-10-08T08:29:18.356869+00:00",
+        "process_peak_memory_bytes": 3002515456,
+        "stage": "identity_localization",
+        "started_utc": "2026-10-08T08:29:15.048150+00:00",
+        "status": "completed"
+      }
+    ]
+  },
+  "not_run": [
+    "Operating deployment and flag changes",
+    "Legacy graph test_measured_feature_authoring.py: langgraph unavailable",
+    "Actual DIA-NN report/atlas integration (not supplied; outside this round)",
+    "Literature comparison, independent validation, scientific improvement benchmarking",
+    "Full actual-data scientific recalculation on offline replay; changed reader outputs replayed from archived scientific tables instead"
+  ]
+}

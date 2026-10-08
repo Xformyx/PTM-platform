@@ -18,13 +18,15 @@ VERSION='astra_analysis_package.v6.experimental'
 CODE_FILES=legacy.CODE_FILES+['astra_evidence_v6.py','localization_evidence.py','inference_policy.py','source_acquisition.py','evidence_temporal.py','evidence_methods.py','official_specificity.py','official_method_tracks.py','phosx_activity_adapter.py','evidence_stage_cache.py','astra_card_inputs.py','study_metadata.py']
 INPUT_FIELDS={**legacy.INPUT_FIELDS,'CALIBRATION':'calibration_policy_path'}
 CODE_FILES += ['evidence_contracts.py','annotation_species.py']
+from .astra_reader import build_reader_tables, validate_reader, write_reader, TABLE_KEYS as READER_KEYS
+CODE_FILES += ['astra_reader.py','measured_feature_cards.py','reader_observations.py','research_questions.py','reader_authoring.py','quantitative_fields.py','de_novo_representation.py']
 KEYS={**legacy.KEYS,'site_report_observations':['site_report_row_id'],
       'localization_by_contrast':['localization_id'],'inference_results':['call_id'],
       'calibrated_calls':['call_id'],'evidence_dependency_groups':['dependency_id'],'calibration_provenance':['policy_id']}
 normalized_reference=legacy.normalized_reference
 validate_execution=legacy.validate_execution
 ADDITIONAL_KEYS={'temporal/interval_contrasts':['interval_id'],'temporal/group_excluded_cowave':['cowave_id'],'kinase/method_scores':['method_result_id'],
-                'kinase/method_membership':['method_membership_id'],'kinase/method_executions':['execution_id'],**CARD_INPUT_KEYS}
+                'kinase/method_membership':['method_membership_id'],'kinase/method_executions':['execution_id'],**CARD_INPUT_KEYS,**READER_KEYS}
 
 
 def integrate_temporal(tables,discovery,design,context,source_context=None,impacts=None):
@@ -191,13 +193,17 @@ def augment(scientific,inputs,design,context,readiness):
     projected=scientific['reader_adapter/form_contrasts']
     readiness['card_input_adapter']={'schema_version':'astra_card_input.v1','status':'projected',
         'rows':len(projected),'eligible_rows':int(projected.card_input_eligible.sum()),
-        'consumer_execution':'not_run; inputs_only; no_findings_selected'}
+        'consumer_execution':'shared_report_cards_and_selector'}
+    scientific.update(build_reader_tables(scientific,design,context.get('_reader_input_snapshot')))
+    readiness['reader']={'status':'generated','version':'astra_reader.v1',
+        'selected_findings':len(scientific['reader/findings']),'literature_comparison':'not_performed'}
     return scientific
 
 
 def validate_tables(tables,design):
     # Archived v6 bundles without this additive adapter remain valid.
     if any(name.startswith('reader_adapter/') for name in tables):validate_card_inputs(tables,design)
+    if any(name.startswith('reader/') for name in tables):validate_reader(tables)
     forms=set(tables['quant/summary'].form_id);contrasts={c['contrast_id'] for c in design['contrasts']}
     universes={'form_id':forms,'contrast_id':contrasts,'contrast_or_window_id':contrasts,
         'observation_id':set(tables['science/measurement_observations'].observation_id),
@@ -258,6 +264,7 @@ def source_universe(tables,mapped,inputs,context):
 def write_artifacts(directory,scientific,context,inputs,sources,readiness):
     from .generic_workflow import json_write
     from .evidence_methods import registry
+    if 'reader/packet' in scientific:write_reader(directory,scientific)
     capabilities={'schema_version':'input_capabilities.v2','input_scope':'DIA-NN_quantification_matrices_not_instrument_spectra',
         'matrix_quantification_available':'PR' in inputs or 'PG' in inputs,'measured_localization_available':bool(scientific['science/observation_sites'].site_probability.notna().any()),
         'run_confidence_available':bool(scientific['science/measurement_observations'].localization_metric_value.notna().any()),
