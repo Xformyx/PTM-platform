@@ -93,7 +93,7 @@ def test_real_v6_package_invocation_and_offline_reader_replay(config,tmp_path):
         _portable(config,tmp_path)
     assert spy.call_count==1
     replay=json.loads((tmp_path/'offline/replay_result.json').read_text())
-    assert len(replay['reader_artifacts'])==5 and all(r['byte_equal'] for r in replay['reader_artifacts'])
+    assert len(replay['reader_artifacts'])==8 and all(r['byte_equal'] for r in replay['reader_artifacts'])
     root=next((tmp_path/'out/enrichment_free_runs').iterdir())
     assert '[reader/READ_ME.md](reader/READ_ME.md)' in (root/'START_HERE_ASTRA.md').read_text()
     reader_text=(root/'reader/READ_ME.md').read_text()

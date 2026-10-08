@@ -36,7 +36,9 @@ async def prepare_astra_inputs(order, db, reference_root):
     permissions=context.get('literature_content_permissions',{})
     for collection in collections:
         pin['collections'].append({'id':collection.id,'name':collection.name,'version':str(collection.updated_at),
-                                   'description':collection.description})
+                                   'description':collection.description,
+                                   'chromadb_name':getattr(collection,'chromadb_name',None),
+                                   'version_scope':'catalog_updated_at'})
         docs=(await db.execute(select(RagDocument).where(RagDocument.collection_id==collection.id).order_by(RagDocument.id))).scalars().all()
         for doc in docs:
             path=Path(doc.file_path)
@@ -53,6 +55,11 @@ async def prepare_astra_inputs(order, db, reference_root):
                     if hashlib.sha256(temp.read_bytes()).hexdigest()!=sha:raise ValueError('Literature changed while pinning')
                     temp.replace(target)
                 item.update(content_status='full_text_included',reason=None,sha256=sha,package_file='references/documents/'+sha+'.'+doc.file_type)
+            if path.is_file() and item['sha256'] is None:
+                from ptm_shared.annotation_registry import digest
+                item['sha256']=digest(path)
+            item['evidence_export_permission']='permitted' if permissions.get(str(doc.id)) is True else 'unknown'
+            item['internal_search_status']='indexed_catalog_record' if doc.status=='indexed' else doc.status
             pin['documents'].append(item)
     found={c['id'] for c in pin['collections']}
     pin['unavailable_selected_ids']=[] if selection is None else sorted(set(selection)-found)

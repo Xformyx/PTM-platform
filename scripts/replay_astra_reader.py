@@ -12,6 +12,7 @@ import sys
 
 PROGRAM = r'''
 import hashlib,json,socket,sys
+sys.dont_write_bytecode=True
 from pathlib import Path
 root=Path(sys.argv[1]).resolve();output=Path(sys.argv[2]).resolve()
 if output==root or root in output.parents:raise ValueError('Never overwrite package')
@@ -33,6 +34,11 @@ tables={name:pd.read_csv(root/(name+'.csv'),float_precision='round_trip',low_mem
 design=json.loads((root/'study/study_design.json').read_text())
 snapshot=json.loads((root/'study/user_input_snapshot.json').read_text())
 reader=build_reader_tables(tables,design,snapshot)
+if (root/'references/finding_literature_pin.json').is_file():
+    from ptm_shared.astra_literature import apply
+    pin=json.loads((root/'references/finding_literature_pin.json').read_text())
+    selection=json.loads((root/'references/literature_pin.json').read_text())
+    apply(reader,pin,snapshot,selection)
 validation=validate_reader({**tables,**reader})
 output.mkdir(parents=True,exist_ok=False);write_tables(reader,output)
 files=write_reader(output,reader)+[name+'.csv' for name in reader]
@@ -41,7 +47,7 @@ for name in files:
     a,b=[hashlib.sha256((p/name).read_bytes()).hexdigest() for p in (root,output)]
     if a!=b:raise ValueError('Reader byte mismatch: '+name)
     results.append({'file':name,'sha256':a,'byte_equal':True})
-result={'passed':True,'scope':'reader_only_from_archived_adapter_and_scientific_tables',
+result={'passed':True,'scope':'reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables',
         'scientific_requantification':False,'network_requests':0,'repository_code_used':False,
         'run_id':json.loads((root/'provenance.json').read_text())['run_id'],
         'files':results,'validation':validation}

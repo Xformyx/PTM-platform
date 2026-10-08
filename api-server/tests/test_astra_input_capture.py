@@ -23,7 +23,7 @@ class FixtureDB:
 
 def test_literature_all_active_empty_and_explicit_freeze(tmp_path):
     file=tmp_path/'paper.txt';file.write_text('Provided paper fixture')
-    collection=SimpleNamespace(id=4,name='Selected collection',updated_at='frozen-version',description='한글')
+    collection=SimpleNamespace(id=4,name='Selected collection',updated_at='frozen-version',description='한글',chromadb_name='actual-search-name')
     doc=SimpleNamespace(id=8,collection_id=4,file_path=str(file),filename='paper.txt',file_type='txt',status='completed')
     order=SimpleNamespace(id=9,order_code='fixture',analysis_context={},rag_collections=None,
         report_options={'research_questions':['전체 질문\n0 false']})
@@ -32,6 +32,9 @@ def test_literature_all_active_empty_and_explicit_freeze(tmp_path):
         db=FixtureDB(collection,doc);snapshot,pin=asyncio.run(prepare_astra_inputs(order,db,tmp_path/'ref'))
         assert pin['selection']=='all_active' and pin['collections'][0]['id']==4
         assert pin['documents'][0]['content_status']=='metadata_only'
+        assert pin['collections'][0]['chromadb_name']=='actual-search-name'
+        assert pin['documents'][0]['sha256'] and pin['documents'][0]['package_file'] is None
+        assert pin['documents'][0]['evidence_export_permission']=='unknown'
         assert snapshot['original']['report_options']==order.report_options
         order.rag_collections=[]
         _,empty=asyncio.run(prepare_astra_inputs(order,FixtureDB(collection,doc),tmp_path/'ref'))

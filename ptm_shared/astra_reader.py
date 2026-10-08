@@ -265,7 +265,7 @@ def write_reader(directory, tables):
         'U는 U_joint, P는 P_joint, A는 동일 joint mask의 단백질 보정 PTM 변화이며 단위는 log2 fold change입니다. '
         'U_all/P_all과 같은 값으로 간주하지 마세요. 시료 반복 유형: '+str(packet['study_metadata_provenance']['replication_declaration']),
         '기술 반복은 biological n이 아닙니다. FASTA 좌표는 MS localization 확률이 아닙니다. '
-        'Parent protein은 같은 실험의 근거이며 독립 검증이 아닙니다. 문헌 비교: not_performed.',
+        'Parent protein은 같은 실험의 근거이며 독립 검증이 아닙니다. 문헌 비교: '+packet['literature_comparison_status']+'.',
         '전체 [emergence](../evidence/emergence_evidence.csv), [protein](../quant/protein_contrasts.csv), '
         '[kinase 판정](../science/inference_results.csv)은 별도 원본 표를 확인하세요. '
         '카드에서 보류된 복수 precursor·종 모호성·parent 결측 항목이 이 자료에서 사라진 것은 아닙니다.',
@@ -295,7 +295,12 @@ def write_reader(directory, tables):
             '반대 방향 관측: '+opposite['status']+'. 실제 양/음의 A 행은 packet의 opposite_signed_observations에서 추적합니다.',
             '제한: '+ ' '.join(c['interpretation_limits']),
             '전체 joint masks·U_all/P_all·실제 precursor membership·좌표 및 localization ID는 [카드](cards.csv)의 source_bindings와 [adapter 원본](../reader_adapter/form_contrasts.csv)에 보존됩니다.'])
+    if packet.get('literature'):
+        lines.insert(2, '[선정 관측별 문헌 검색·비교·접근 제한](LITERATURE.md) · [문헌 단계 요약](literature_summary.json)')
     rendered = ''.join(('\n' if i and line.startswith('|') and lines[i-1].startswith('|') else '\n\n') + line
                        for i,line in enumerate(lines)).lstrip()+'\n'
     (directory/'reader/READ_ME.md').write_text(rendered,encoding='utf-8')
+    if packet.get("literature"):
+        from .astra_literature import write
+        return ARTIFACTS + write(directory,tables)
     return ARTIFACTS

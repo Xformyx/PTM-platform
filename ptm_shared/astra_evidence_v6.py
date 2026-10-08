@@ -19,6 +19,8 @@ CODE_FILES=legacy.CODE_FILES+['astra_evidence_v6.py','localization_evidence.py',
 INPUT_FIELDS={**legacy.INPUT_FIELDS,'CALIBRATION':'calibration_policy_path'}
 CODE_FILES += ['evidence_contracts.py','annotation_species.py']
 from .astra_reader import build_reader_tables, validate_reader, write_reader, TABLE_KEYS as READER_KEYS
+from .astra_literature import TABLE_KEYS as LITERATURE_KEYS, validate as validate_literature
+CODE_FILES += ['astra_literature.py','finding_literature.py','literature_cards.py','astra_reader_revision.py']
 CODE_FILES += ['astra_reader.py','measured_feature_cards.py','reader_observations.py','research_questions.py','reader_authoring.py','quantitative_fields.py','de_novo_representation.py']
 KEYS={**legacy.KEYS,'site_report_observations':['site_report_row_id'],
       'localization_by_contrast':['localization_id'],'inference_results':['call_id'],
@@ -26,7 +28,7 @@ KEYS={**legacy.KEYS,'site_report_observations':['site_report_row_id'],
 normalized_reference=legacy.normalized_reference
 validate_execution=legacy.validate_execution
 ADDITIONAL_KEYS={'temporal/interval_contrasts':['interval_id'],'temporal/group_excluded_cowave':['cowave_id'],'kinase/method_scores':['method_result_id'],
-                'kinase/method_membership':['method_membership_id'],'kinase/method_executions':['execution_id'],**CARD_INPUT_KEYS,**READER_KEYS}
+                'kinase/method_membership':['method_membership_id'],'kinase/method_executions':['execution_id'],**CARD_INPUT_KEYS,**READER_KEYS,**LITERATURE_KEYS}
 
 
 def integrate_temporal(tables,discovery,design,context,source_context=None,impacts=None):
@@ -204,6 +206,7 @@ def validate_tables(tables,design):
     # Archived v6 bundles without this additive adapter remain valid.
     if any(name.startswith('reader_adapter/') for name in tables):validate_card_inputs(tables,design)
     if any(name.startswith('reader/') for name in tables):validate_reader(tables)
+    if any(name in tables for name in LITERATURE_KEYS):validate_literature(tables)
     forms=set(tables['quant/summary'].form_id);contrasts={c['contrast_id'] for c in design['contrasts']}
     universes={'form_id':forms,'contrast_id':contrasts,'contrast_or_window_id':contrasts,
         'observation_id':set(tables['science/measurement_observations'].observation_id),

@@ -84,6 +84,7 @@ class StageLedger(list):
         from .astra_plan import STAGES
         dependencies={**STAGES,'identity_localization':['quantify_evidence'],
             'discover_regulators':['identity_localization','resolve_annotation']}
+        if self.profile=='astra_analysis.v6':dependencies['finding_literature']=['integrate_temporal_layers']
         seen={r['stage']:r for r in self}
         rows=[{**{'stage':name,'status':'queued'},**seen.get(name,{}),'dependencies':deps,
             'code_hash':self.code_hash,'config_hash':object_hash(self.plan),'checkpoint':self.plan.get('fingerprints',{})} for name,deps in dependencies.items()]
@@ -268,6 +269,7 @@ def start_here(snapshot,counts,readiness):
         'If Nature full article is requested, prepare Abstract, Introduction, Results, Discussion, Methods, Data/Code availability, Figure legends, numbered references and limitations. Validate citation-order PMID/DOI/title/author/year. Incomplete bibliography requires lookup.',
         'Retain a claim-to-evidence table linking each main result to exact table/row IDs, supporting and opposing observations, and source queries. Database relationships are prior knowledge, not direct measurements in this experiment.',
         'No superiority over Astra-only or enriched experiments has been established. See evidence/readiness.json for performed, limited and unavailable stages.',
+        ('Finding literature: [reader/LITERATURE.md](reader/LITERATURE.md). Read retrieval, source-access and semantic-review status separately; frozen literature replay does not revalidate a judgment.' if readiness.get('literature') else ''),
         'Replay: install reproducibility/requirements.txt in an isolated environment, then python replay.py --output <new-directory>. Supplied measurement inputs and permitted pinned source records are included. Check reproducibility/replay_config.json for required external restricted resources before claiming self-contained replay; replay makes no network calls.'])+'\n'
 
 
@@ -368,6 +370,13 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
             return fn()
     scientific,norm,altnorm,readiness,motif,counts=compute_science(inputs,design,context,sources,quant=quant,alternative=alternative,checkpoint=checkpoint,execute=execute,engine=engine,snapshot=snapshot)
     readiness['source_execution']=source_execution
+    if engine and engine.PROFILE=='astra_analysis.v6':
+        from .astra_literature import collect, apply
+        with stage('finding_literature',metrics,checkpoint,progress):
+            finding_pin=collect(scientific,snapshot,literature,settings=config,cache_root=root/'.astra_stage_cache')
+            readiness['literature']=apply(scientific,finding_pin,snapshot,literature)
+            readiness['reader']['literature_comparison']=readiness['literature']['status']
+            plan['fingerprints']['literature']=finding_pin['request_sha256']
     with stage('assemble_evidence_package',metrics,checkpoint,progress):
         if engine and code_capture!={name:digest(Path(__file__).parent/name) for name in code_files}:
             raise ValueError('Scientific source changed during execution; retry on a frozen release')
@@ -398,7 +407,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
             ('methods/motif',motif),('reproducibility/data_dictionary',dictionary),('reproducibility/package_validation',{'checks':validation,'unexpected_input_omissions':transfer['unexpected_missing']})]:json_write(directory/(name+'.json'),value)
         json_write(directory/'references/bibliographic_records.json',sources.get('bibliography',[]))
         json_write(directory/'references/context_relations.json',sources.get('context',[]))
-        json_write(directory/'references/literature_comparison_packet.json',{'source':'recorded_input_not_measured_results','study':design['study'],'experimental_context':context,'selected_literature':literature,'comparison_status':'not_performed_by_platform'})
+        json_write(directory/'references/literature_comparison_packet.json',{'source':'recorded_input_not_measured_results','study':design['study'],'experimental_context':context,'selected_literature':literature,'comparison_status':('see_reader_literature' if readiness.get('literature') else 'not_performed_by_platform')})
         (directory/'study/STUDY_BRIEF.md').write_text(brief,encoding='utf-8')
         for doc in literature.get('documents',[]):
             if doc.get('content_status')=='full_text_included':
@@ -465,17 +474,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         publication_started=time.monotonic()
         json_write(directory/'reproducibility/stage_metrics.json',metrics+[{'stage':'validate_and_publish','status':'archive_publication_metrics_recorded_in_platform_run','note':'Archive duration/size cannot be hashed inside that same archive without changing them'}])
         shutil.copyfile(directory/'stage_checkpoint.json',directory/'reproducibility/stage_ledger.json')
-        files={str(p.relative_to(directory)):{'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(directory.rglob('*')) if p.is_file() and p.name!='stage_checkpoint.json'}
-        json_write(directory/'manifest.json',{'schema_version':package_version,'run_id':run_id,'files':files})
-        validate_package(directory)
-        archive=root/(f'astra_analysis_package_{run_id}.zip');pending=archive.with_name('.'+archive.name)
-        with zipfile.ZipFile(pending,'w',zipfile.ZIP_DEFLATED) as z:
-            for name in [*files,'manifest.json']:z.write(directory/name,name)
-        with zipfile.ZipFile(pending) as z:
-            if z.testzip():raise ValueError('Archive CRC failure')
-            for name,item in files.items():
-                if hashlib.sha256(z.read(name)).hexdigest()!=item['sha256']:raise ValueError('Archive manifest failure')
-        checkpoint();pending.replace(archive)
+        archive,files=seal_archive(directory,root,run_id,package_version,checkpoint)
         artifacts={name:{'path':str(path.relative_to(root)),'sha256':digest(path)} for name,path in {
             'astra':archive,'report':directory/'evidence_report.html','report_markdown':directory/'START_HERE_ASTRA.md',
             'start_here':directory/'START_HERE_ASTRA.md','study_brief':directory/'study/STUDY_BRIEF.md',
@@ -509,6 +508,10 @@ def validate_package(directory):
         if list(df)!=entry['columns'] or len(df)!=entry['rows']:raise ValueError('Package CSV schema failure: '+name)
         tables[name[:-4]]=df
     checks=validate_science(tables,json.loads((directory/'study/study_design.json').read_text()))
+    if 'reader/literature_search' in tables:
+        packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
+        if json.loads((directory/'references/finding_literature_pin.json').read_text())!=packet['literature']['pin']:
+            raise ValueError('Literature pin/table mismatch')
     print(json.dumps({'manifest_files':len(manifest['files']),'scientific_tables':len(tables),'validated':True}))
     return checks
 
@@ -533,6 +536,9 @@ def replay_package(directory,output,*,specificity_manifest=None):
     tables,*_=compute_science(inputs,config['design'],config['context'],sources,engine=engine,snapshot=config['snapshot'])
     fields,_,_=transfer_contract(config['snapshot'],config['design'],config['context'],config['literature'])
     tables['study/input_field_manifest']=pd.DataFrame(fields)
+    if (directory/'references/finding_literature_pin.json').is_file():
+        from .astra_literature import apply
+        apply(tables,json.loads((directory/'references/finding_literature_pin.json').read_text()),config['snapshot'],config['literature'])
     validate_science(tables,config['design']);output.mkdir(parents=True,exist_ok=False);write_tables(tables,output)
     reader_results=[]
     if 'reader/packet' in tables:
@@ -551,3 +557,19 @@ def replay_package(directory,output,*,specificity_manifest=None):
         'source_execution':source_execution_record(config['context'],sources.get('pin_sha256'),sources,replay=True),
         'archived_source_file_sha256':digest(directory/'references/source_pin.json')})
     print(json.dumps({'replayed_tables':len(results),'byte_identical':sum(r['byte_equal'] for r in results)}))
+
+
+def seal_archive(directory,root,run_id,package_version,checkpoint=lambda:None):
+    """Shared hash/schema/CRC gate and atomic archive publication."""
+    files={str(p.relative_to(directory)):{'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(directory.rglob('*')) if p.is_file() and p.name not in {'stage_checkpoint.json','manifest.json','platform_run.json'}}
+    json_write(directory/'manifest.json',{'schema_version':package_version,'run_id':run_id,'files':files})
+    validate_package(directory)
+    archive=root/(f'astra_analysis_package_{run_id}.zip');pending=archive.with_name('.'+archive.name)
+    with zipfile.ZipFile(pending,'w',zipfile.ZIP_DEFLATED) as z:
+        for name in [*files,'manifest.json']:z.write(directory/name,name)
+    with zipfile.ZipFile(pending) as z:
+        if z.testzip():raise ValueError('Archive CRC failure')
+        for name,item in files.items():
+            if hashlib.sha256(z.read(name)).hexdigest()!=item['sha256']:raise ValueError('Archive manifest failure')
+    checkpoint();pending.replace(archive)
+    return archive, files
