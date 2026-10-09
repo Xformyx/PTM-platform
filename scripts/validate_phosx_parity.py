@@ -90,6 +90,16 @@ def compare(reference_dir,actual):
     scores=pd.read_csv(actual/'science/specificity_scores.csv',float_precision='round_trip')
     assert set(scores.matrix_sha256)=={record['matrix_sha256']}
     assert set(scores.background_sha256)=={record['background_sha256']}
+    # A multi-contrast package scores the union of eligible form/site keys.
+    # Compare only this independently reconstructed contrast, including its
+    # excluded residue/priming rows; other times are not parity-validated here.
+    keys=[]
+    for name in ['reference_sites.csv','excluded_sites.csv']:
+        try: keys.append(pd.read_csv(reference_dir/name)[['form_id','site_id']])
+        except pd.errors.EmptyDataError:
+            if name!='excluded_sites.csv' or record['excluded_sites']!=0: raise
+    keys=pd.concat(keys).drop_duplicates()
+    scores=scores.merge(keys,on=['form_id','site_id'],validate='many_to_one')
     assert int(scores.status.eq('scored').sum())==record['eligible_sites']*len(expected['raw'].columns)
     assert int(scores.status.eq('not_evaluable').sum())==record['excluded_sites']*len(expected['raw'].columns)
     deltas={'raw_score':0.,'percentile':0.,'native_score_p_q':0.}
@@ -106,7 +116,8 @@ def compare(reference_dir,actual):
     edges=pd.read_csv(actual/'kinase/kinase_candidate_edges.csv',low_memory=False)
     label=edges.loc[edges.edge_type.eq('experimental_specificity_prediction')].drop_duplicates('candidate_id').set_index('candidate_id').candidate_accession.to_dict()
     method=pd.read_csv(actual/'kinase/method_scores.csv',float_precision='round_trip')
-    method=method.loc[method.method_id.eq('PhosX_native_functions')];assert set(method.contrast_id)=={cid}
+    method=method.loc[method.method_id.eq('PhosX_native_functions') & method.contrast_id.eq(cid)]
+    assert set(method.contrast_id)=={cid}
     native=read('native_results.csv');assert len(method)==len(native)
     for row in method.itertuples():
         r=native.loc[label[row.candidate_id]]
@@ -114,6 +125,7 @@ def compare(reference_dir,actual):
             np.testing.assert_allclose(getattr(row,col),r[source],rtol=RTOL,atol=ATOL,equal_nan=True)
             if pd.notna(r[source]):deltas['native_score_p_q']=max(deltas['native_score_p_q'],abs(getattr(row,col)-r[source]))
     memberships=pd.read_csv(actual/'kinase/method_membership.csv',float_precision='round_trip');expected_members=read('native_membership.csv')
+    memberships=memberships.loc[memberships.method_id.eq('PhosX_native_functions') & memberships.contrast_id.eq(cid)]
     bindings=pd.read_csv(reference_dir/'input_bindings.csv',float_precision='round_trip')
     order=pd.read_csv(reference_dir/'input_order.csv');ordered=bindings.iloc[order.input_row_index.to_numpy(int)].reset_index(drop=True)
     indexes={v:i for i,v in enumerate(ordered.measurement_group_id)}
@@ -122,7 +134,8 @@ def compare(reference_dir,actual):
         idx=indexes[row.measurement_group_id];assert row.selected==bool(expected_members.loc[idx,label[row.candidate_id]])
         assert row.sequence==ordered.iloc[idx].sequence
         np.testing.assert_allclose(row.ranking_statistic,ordered.iloc[idx].A,atol=ATOL,rtol=RTOL)
-    execution=pd.read_csv(actual/'kinase/method_executions.csv');executed=execution.loc[execution.status.eq('executed')]
+    execution=pd.read_csv(actual/'kinase/method_executions.csv')
+    executed=execution.loc[execution.status.eq('executed') & execution.contrast_id.eq(cid) & execution.method_id.eq('PhosX_native_functions')]
     assert executed.input_hash.tolist()==[record['input_hash']]
     result={**record,'passed':True,'scored_rows_compared':int(scores.status.eq('scored').sum()),'native_results_compared':len(method),
         'native_membership_rows_compared':len(memberships),'maximum_absolute_differences':deltas,

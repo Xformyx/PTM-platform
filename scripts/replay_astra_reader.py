@@ -29,6 +29,9 @@ dictionary=json.loads((root/'reproducibility/data_dictionary.json').read_text())
 names=['quant/summary','quant/comparisons','science/inference_results',
        'reader_adapter/form_identity','reader_adapter/form_contrasts',
        'reader_adapter/precursor_membership','reader_adapter/study_metadata']
+if hasattr(sys.modules['ptm_shared.astra_reader'],'phosx_time_views'):
+    names += ['science/site_identity_audit','science/specificity_scores',
+              'kinase/method_executions','kinase/method_scores','kinase/method_membership','kinase/kinase_candidate_edges']
 tables={name:pd.read_csv(root/(name+'.csv'),float_precision='round_trip',low_memory=False,
     dtype={k:'str' for k,v in dictionary[name+'.csv']['dtypes'].items() if v=='str'}) for name in names}
 design=json.loads((root/'study/study_design.json').read_text())
@@ -41,7 +44,7 @@ if (root/'references/finding_literature_pin.json').is_file():
     apply(reader,pin,snapshot,selection)
 validation=validate_reader({**tables,**reader})
 output.mkdir(parents=True,exist_ok=False);write_tables(reader,output)
-files=write_reader(output,reader)+[name+'.csv' for name in reader]
+files=write_reader(output,{**tables,**reader})+[name+'.csv' for name in reader]
 results=[]
 for name in files:
     a,b=[hashlib.sha256((p/name).read_bytes()).hexdigest() for p in (root,output)]

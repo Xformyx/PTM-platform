@@ -246,6 +246,115 @@ def validate_reader(tables):
     return {'source_rows_checked':len(projected),'cards_checked':len(cards),'findings_checked':len(findings),'values_times_NA_masks_ids':'passed'}
 
 
+def phosx_time_views(tables):
+    """Projection of saved evidence, not a temporal inference or a new ranking.
+
+    Comparison metadata already comes from ContrastEstimator.metadata(). Keep
+    arm/reference/pairing scopes distinct and order by canonical numeric time.
+    """
+    from .contrast_quantification import KEY_COLUMNS
+    executions = tables.get('kinase/method_executions', pd.DataFrame())
+    if executions.empty: return None
+    executions = executions.loc[executions.method_id.eq('PhosX_native_functions')]
+    if executions.empty: return None
+    comp = tables['quant/comparisons']
+    metadata = comp[KEY_COLUMNS].drop_duplicates()
+    if metadata.contrast_id.duplicated().any() or executions.contrast_id.duplicated().any():
+        raise ValueError('Conflicting PhosX contrast metadata or execution records')
+    meta = metadata.merge(executions, on='contrast_id', validate='one_to_one')
+    if len(meta) != len(executions): raise ValueError('PhosX execution without canonical contrast')
+    meta = meta.sort_values(['arm_id','reference_condition_id','pairing','time_min','contrast_id'], na_position='last')
+    ids = tables['science/site_identity_audit']
+    scores = tables['science/specificity_scores']
+    membership = tables['kinase/method_membership']
+    methods = tables['kinase/method_scores'].loc[lambda f: f.method_id.eq('PhosX_native_functions')]
+    edges = tables['kinase/kinase_candidate_edges']
+    labels = edges.loc[edges.edge_type.eq('experimental_specificity_prediction'),
+                       ['candidate_id','candidate_accession']].drop_duplicates()
+    if labels.candidate_id.duplicated().any(): raise ValueError('Conflicting PhosX assay label')
+    summary = []
+    for row in meta.to_dict('records'):
+        cid = row['contrast_id']
+        joint = comp.loc[comp.contrast_id.eq(cid) & comp.included & comp.A.notna()]
+        attributable = ids.loc[ids.site_attribution_eligible & ids.form_id.isin(joint.form_id)]
+        keys = attributable[['form_id','site_id']].drop_duplicates()
+        scoped = scores.merge(keys, on=['form_id','site_id'], validate='many_to_one')
+        scored = scoped.loc[scoped.status.eq('scored')]
+        native = membership.loc[membership.contrast_id.eq(cid)]
+        results = methods.loc[methods.contrast_id.eq(cid)]
+        selected = native.loc[native.selected]
+        summary.append({**row, 'included_joint_A_forms':joint.form_id.nunique(),
+            'site_attributable_forms':attributable.form_id.nunique(),
+            'site_attributable_sites':attributable.site_id.nunique(),
+            'site_attributable_form_sites':len(keys),
+            'scored_forms':scored.form_id.nunique(), 'scored_sites':scored.site_id.nunique(),
+            'scored_form_sites':len(scored[['form_id','site_id']].drop_duplicates()),
+            'scored_measurement_groups':scored.measurement_group_id.nunique(),
+            'score_rows':len(scored), 'not_evaluable_score_rows':int(scoped.status.eq('not_evaluable').sum()),
+            'selected_specificity_rows':int(scored.membership_selected.sum()),
+            'native_ranked_measurement_groups':native.measurement_group_id.nunique(),
+            'native_selected_memberships':len(selected),
+            'native_selected_measurement_groups':selected.measurement_group_id.nunique(),
+            'evaluable_assays':int(results.status.eq('computed_method_enrichment').sum()),
+            'insufficient_coverage_assays':int(results.status.eq('insufficient_coverage').sum()),
+            'assay_results':len(results),
+            'comparison_source':'quant/comparisons.csv', 'identity_source':'science/site_identity_audit.csv',
+            'score_source':'science/specificity_scores.csv', 'membership_source':'kinase/method_membership.csv',
+            'execution_source':'kinase/method_executions.csv'})
+    timeline = pd.DataFrame(summary)
+    # Preserve every assay result including official zero placeholders, typed
+    # unavailable scores/p/q, membership IDs and per-contrast testing family.
+    assays = methods.merge(labels, on='candidate_id', how='left', validate='many_to_one')
+    assays = assays.merge(meta[KEY_COLUMNS], on='contrast_id', validate='many_to_one')
+    if len(assays) != len(methods): raise ValueError('PhosX result without contrast metadata')
+    assays = assays.sort_values(['candidate_accession','candidate_id','arm_id','reference_condition_id',
+                                'pairing','time_min','contrast_id'], na_position='last').reset_index(drop=True)
+    assays['result_source'] = 'kinase/method_scores.csv'
+    assays['membership_source'] = 'kinase/method_membership.csv'
+    return timeline, assays
+
+
+def write_phosx_time_views(directory, tables):
+    views = phosx_time_views(tables)
+    if views is None: return []
+    timeline, assays = views
+    directory = Path(directory)/'reader'
+    timeline.to_csv(directory/'phosx_time_summary.csv', index=False)
+    assays.to_csv(directory/'phosx_assay_time_results.csv', index=False)
+    fmt = lambda v: 'NA' if pd.isna(v) else str(v)
+    lines = ['# PhosX — 시간별 방법 결과',
+        '[시간별 분모·실행 ID](phosx_time_summary.csv) · [모든 assay×시점 결과·membership IDs](phosx_assay_time_results.csv) · '
+        '[원본 결과](../kinase/method_scores.csv) · [원본 membership](../kinase/method_membership.csv) · '
+        '[실행 설정](../kinase/method_executions.csv) · [자원](../science/resource_registry.json)',
+        '아래 표는 저장된 결과의 투영입니다. Native Activity Score는 log2 단위의 descriptive specificity_A와 다릅니다. '
+        '시점마다 입력 universe와 기질 구성이 달라질 수 있어 최대 score 시점을 kinase 활성 peak로 확정할 수 없습니다. '
+        'Method p/q는 해당 contrast의 공식 rank permutation 및 다중 검정 결과이며 biological p/q나 전체 시간축의 통합 FDR가 아닙니다.',
+        'Assay label은 검증된 enzyme accession/rat orthology를 대신하지 않습니다. Human assay와 substrate taxon은 구분됩니다. '
+        '자원의 지원 범위 밖 residue는 비활성이 아닙니다. 미측정 localization, 기술 반복, calibration 및 no-call 제한은 유지됩니다. '
+        'NA는 미평가/결측입니다. 공식 native_score가 coverage 부족에서 0을 반환한 경우 CSV 원문은 보존하되 아래 점수는 NA로 표시합니다. '
+        'Control 점수를 추가하거나 시점 사이를 보간하지 않습니다.',
+        '## 시점별 입력·실행',
+        '| 시간 (min) | 조건 / reference | joint A forms | 귀속 적격 form/site | 점수화 form/site | ranked groups | selected memberships | 평가 가능 / coverage 부족 | 상태 |',
+        '| --- | --- | --- | --- | --- | --- | --- | --- | --- |']
+    for r in timeline.itertuples():
+        lines.append(f'| {fmt(r.time_min)} | {r.target_label} / {r.reference_label} ({r.arm_id}) | {r.included_joint_A_forms} | '
+                     f'{r.site_attributable_forms}/{r.site_attributable_sites} | {r.scored_forms}/{r.scored_sites} | '
+                     f'{r.native_ranked_measurement_groups} | {r.native_selected_memberships} | '
+                     f'{r.evaluable_assays}/{r.insufficient_coverage_assays} | {r.status}; {fmt(r.reason)} |')
+    for (label,candidate), block in assays.groupby(['candidate_accession','candidate_id'],sort=False,dropna=False):
+        lines.extend(['',f'## {label} — `{candidate}`',
+            '| 시간 (min) | 조건 / reference | Activity Score | method p | method q | 기여 groups / universe | 상태 | 결과 ID |',
+            '| --- | --- | --- | --- | --- | --- | --- | --- |'])
+        for r in block.itertuples():
+            lines.append(f'| {fmt(r.time_min)} | {r.target_label} / {r.reference_label} ({r.arm_id}) | {fmt(r.score)} | '
+                         f'{fmt(r.method_p)} | {fmt(r.method_q)} | {r.eligible_site_count}/{r.universe_count} | '
+                         f'{r.status} | `{r.method_result_id}` |')
+    rendered = ''.join(('\n' if i and line.startswith('|') and lines[i-1].startswith('|') else '\n\n') + line
+                       for i,line in enumerate(lines)).lstrip()+'\n'
+    (directory/'PHOSX_TIME_COURSE.md').write_text(rendered,encoding='utf-8')
+    return ['reader/PHOSX_TIME_COURSE.md','reader/phosx_time_summary.csv','reader/phosx_assay_time_results.csv']
+
+
 def write_reader(directory, tables):
     """Deterministic JSON/Markdown views of the canonical reader tables."""
     from .generic_workflow import json_write
@@ -303,10 +412,13 @@ def write_reader(directory, tables):
             '전체 joint masks·U_all/P_all·실제 precursor membership·좌표 및 localization ID는 [카드](cards.csv)의 source_bindings와 [adapter 원본](../reader_adapter/form_contrasts.csv)에 보존됩니다.'])
     if packet.get('literature'):
         lines.insert(2, '[선정 관측별 문헌 검색·비교·접근 제한](LITERATURE.md) · [문헌 단계 요약](literature_summary.json)')
+    method_artifacts = write_phosx_time_views(directory, tables)
+    if method_artifacts:
+        lines.insert(2, '[PhosX 시간별 입력 범위·실행 상태·assay 결과](PHOSX_TIME_COURSE.md)')
     rendered = ''.join(('\n' if i and line.startswith('|') and lines[i-1].startswith('|') else '\n\n') + line
                        for i,line in enumerate(lines)).lstrip()+'\n'
     (directory/'reader/READ_ME.md').write_text(rendered,encoding='utf-8')
     if packet.get("literature"):
         from .astra_literature import write
-        return ARTIFACTS + write(directory,tables)
-    return ARTIFACTS
+        return ARTIFACTS + method_artifacts + write(directory,tables)
+    return ARTIFACTS + method_artifacts

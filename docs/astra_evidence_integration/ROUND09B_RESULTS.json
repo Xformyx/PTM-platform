@@ -1,0 +1,2842 @@
+{
+  "round": "09-B",
+  "base_main": "e28e5960f392dc054609a44720b95a4cdc0d5577",
+  "development_branch": "main (explicit user request)",
+  "implementation_commit": "Git commit containing this report; verified remote SHA in completion message",
+  "baseline_run_id": "g0-cd1bc357e03640608c3fefcf444aa120",
+  "run_id": "g0-1f09d0d2622540cb894a61e0bf1b1aa0",
+  "archive_path": "codex-inputs/round09b-20261009/execution/output/astra_analysis_package_g0-1f09d0d2622540cb894a61e0bf1b1aa0.zip",
+  "archive_sha256": "ff57954305b15debbebedefde90ecfafcdee16d77ffbe78530778716d4fb6a97",
+  "archive_bytes": 315930071,
+  "status": {
+    "requested_contrasts": 6,
+    "executed_contrasts": 6,
+    "scope_expansion": "passed",
+    "one_minute_preservation": "passed",
+    "independent_official_parity_new_time": "180 min passed; not asserted for 5/15/30/60 min",
+    "conditional_method_replay": "passed",
+    "offline_reader_replay": "passed",
+    "biological_accuracy_or_calibration": "not_evaluated",
+    "production_deployment": "not_performed"
+  },
+  "requested_contrasts": [
+    {
+      "contrast_id": "contrast_aea4869f398c5584",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_f541e2f63f702f17",
+      "target_condition_id": "condition_f541e2f63f702f17",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 1.0,
+      "reference_time_min": 0.0,
+      "target_label": "1min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero"
+    },
+    {
+      "contrast_id": "contrast_4147ebd64e7ecf80",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_bd68c45f543c5a83",
+      "target_condition_id": "condition_bd68c45f543c5a83",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 5.0,
+      "reference_time_min": 0.0,
+      "target_label": "5min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero"
+    },
+    {
+      "contrast_id": "contrast_eb2f813f825c4ccb",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_d9c5c91ebf3d5bfc",
+      "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 15.0,
+      "reference_time_min": 0.0,
+      "target_label": "15min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero"
+    },
+    {
+      "contrast_id": "contrast_c15817d77868a59a",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_c96e6ecd71344ff2",
+      "target_condition_id": "condition_c96e6ecd71344ff2",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 30.0,
+      "reference_time_min": 0.0,
+      "target_label": "30min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero"
+    },
+    {
+      "contrast_id": "contrast_fd5240cdb335e779",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_824bfd9a5e97c3aa",
+      "target_condition_id": "condition_824bfd9a5e97c3aa",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 60.0,
+      "reference_time_min": 0.0,
+      "target_label": "60min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero"
+    },
+    {
+      "contrast_id": "contrast_d6757f4b8563521f",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_a9adc1cf0158f4a6",
+      "target_condition_id": "condition_a9adc1cf0158f4a6",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 180.0,
+      "reference_time_min": 0.0,
+      "target_label": "180min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero"
+    }
+  ],
+  "counts": {
+    "forms": 2824,
+    "identity_rows": 11614,
+    "unique_site_ids_not_independent_sites": 9987,
+    "scorer_input_form_sites": 406,
+    "score_rows": 123018,
+    "score_status": {
+      "scored": 119988,
+      "not_evaluable": 3030
+    },
+    "selected_specificity_rows": 1795,
+    "all_native_results": 1818,
+    "all_native_memberships": 642360,
+    "selected_memberships": 9571,
+    "calibrated_calls": 0,
+    "selected_findings": 15
+  },
+  "contrast_summary": [
+    {
+      "contrast_id": "contrast_aea4869f398c5584",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_f541e2f63f702f17",
+      "target_condition_id": "condition_f541e2f63f702f17",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 1.0,
+      "reference_time_min": 0.0,
+      "target_label": "1min",
+      "reference_label": "Control",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "pairing": "unpaired",
+      "execution_id": "native_method_cd37bdf0df073c6042f8",
+      "method_id": "PhosX_native_functions",
+      "status": "executed",
+      "reason": null,
+      "parameters": "{\"input_unit\": \"one_per_measurement_group\", \"min_n_hits\": 4, \"min_quantile\": 0.95, \"n_proc\": 1, \"n_top_kinases\": 5, \"permutations\": 10000, \"ranking_statistic\": \"A\", \"residue\": \"ST\", \"seed\": 1729, \"source_pin_scope\": \"declared_local_resource\", \"upstream_activation_evidence\": false, \"zero_policy\": \"official_native_excludes_zero\"}",
+      "runtime_seconds": null,
+      "input_hash": "2bbf528ea51c9ad5d3a0733db348fad89e264f60a5a5657d68531885e10b2ddd",
+      "output_hash": "674fd7b6456fbc5e3524500533dc37b2d5bbcf7cf6f458d7096ea6a00ea8584f",
+      "log": "See methods/native_execution_runtime.json; timing excluded from scientific replay",
+      "included_joint_A_forms": 2276,
+      "site_attributable_forms": 400,
+      "site_attributable_sites": 360,
+      "site_attributable_form_sites": 400,
+      "scored_forms": 390,
+      "scored_sites": 350,
+      "scored_form_sites": 390,
+      "scored_measurement_groups": 369,
+      "score_rows": 118170,
+      "not_evaluable_score_rows": 3030,
+      "selected_specificity_rows": 1769,
+      "native_ranked_measurement_groups": 353,
+      "native_selected_memberships": 1595,
+      "native_selected_measurement_groups": 343,
+      "evaluable_assays": 153,
+      "insufficient_coverage_assays": 150,
+      "assay_results": 303,
+      "comparison_source": "quant/comparisons.csv",
+      "identity_source": "science/site_identity_audit.csv",
+      "score_source": "science/specificity_scores.csv",
+      "membership_source": "kinase/method_membership.csv",
+      "execution_source": "kinase/method_executions.csv"
+    },
+    {
+      "contrast_id": "contrast_4147ebd64e7ecf80",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_bd68c45f543c5a83",
+      "target_condition_id": "condition_bd68c45f543c5a83",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 5.0,
+      "reference_time_min": 0.0,
+      "target_label": "5min",
+      "reference_label": "Control",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "pairing": "unpaired",
+      "execution_id": "native_method_a815675cea66033d6a65",
+      "method_id": "PhosX_native_functions",
+      "status": "executed",
+      "reason": null,
+      "parameters": "{\"input_unit\": \"one_per_measurement_group\", \"min_n_hits\": 4, \"min_quantile\": 0.95, \"n_proc\": 1, \"n_top_kinases\": 5, \"permutations\": 10000, \"ranking_statistic\": \"A\", \"residue\": \"ST\", \"seed\": 1729, \"source_pin_scope\": \"declared_local_resource\", \"upstream_activation_evidence\": false, \"zero_policy\": \"official_native_excludes_zero\"}",
+      "runtime_seconds": null,
+      "input_hash": "75bb8c2eb7d00225a6f45c0a3b748cfda9f5584f6742ba86d7d914c6ad76a399",
+      "output_hash": "0db1194527594eb1efae1a3eb57a7be2f87053be9de9843f3a4ad3cda5e1e84a",
+      "log": "See methods/native_execution_runtime.json; timing excluded from scientific replay",
+      "included_joint_A_forms": 2310,
+      "site_attributable_forms": 399,
+      "site_attributable_sites": 360,
+      "site_attributable_form_sites": 399,
+      "scored_forms": 389,
+      "scored_sites": 350,
+      "scored_form_sites": 389,
+      "scored_measurement_groups": 371,
+      "score_rows": 117867,
+      "not_evaluable_score_rows": 3030,
+      "selected_specificity_rows": 1761,
+      "native_ranked_measurement_groups": 357,
+      "native_selected_memberships": 1612,
+      "native_selected_measurement_groups": 347,
+      "evaluable_assays": 158,
+      "insufficient_coverage_assays": 145,
+      "assay_results": 303,
+      "comparison_source": "quant/comparisons.csv",
+      "identity_source": "science/site_identity_audit.csv",
+      "score_source": "science/specificity_scores.csv",
+      "membership_source": "kinase/method_membership.csv",
+      "execution_source": "kinase/method_executions.csv"
+    },
+    {
+      "contrast_id": "contrast_eb2f813f825c4ccb",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_d9c5c91ebf3d5bfc",
+      "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 15.0,
+      "reference_time_min": 0.0,
+      "target_label": "15min",
+      "reference_label": "Control",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "pairing": "unpaired",
+      "execution_id": "native_method_e62e2335e1eb5f9face9",
+      "method_id": "PhosX_native_functions",
+      "status": "executed",
+      "reason": null,
+      "parameters": "{\"input_unit\": \"one_per_measurement_group\", \"min_n_hits\": 4, \"min_quantile\": 0.95, \"n_proc\": 1, \"n_top_kinases\": 5, \"permutations\": 10000, \"ranking_statistic\": \"A\", \"residue\": \"ST\", \"seed\": 1729, \"source_pin_scope\": \"declared_local_resource\", \"upstream_activation_evidence\": false, \"zero_policy\": \"official_native_excludes_zero\"}",
+      "runtime_seconds": null,
+      "input_hash": "f7c18219dd86793da450fc1c04a93c89283ed9e6bf98c3d5103a9288a0b3cb12",
+      "output_hash": "11fc455aa8c03f860548dcf99ca1e1eeec5b14565a50b2c88d86c9ce4dec585c",
+      "log": "See methods/native_execution_runtime.json; timing excluded from scientific replay",
+      "included_joint_A_forms": 2306,
+      "site_attributable_forms": 403,
+      "site_attributable_sites": 363,
+      "site_attributable_form_sites": 403,
+      "scored_forms": 394,
+      "scored_sites": 354,
+      "scored_form_sites": 394,
+      "scored_measurement_groups": 373,
+      "score_rows": 119382,
+      "not_evaluable_score_rows": 2727,
+      "selected_specificity_rows": 1785,
+      "native_ranked_measurement_groups": 357,
+      "native_selected_memberships": 1611,
+      "native_selected_measurement_groups": 347,
+      "evaluable_assays": 155,
+      "insufficient_coverage_assays": 148,
+      "assay_results": 303,
+      "comparison_source": "quant/comparisons.csv",
+      "identity_source": "science/site_identity_audit.csv",
+      "score_source": "science/specificity_scores.csv",
+      "membership_source": "kinase/method_membership.csv",
+      "execution_source": "kinase/method_executions.csv"
+    },
+    {
+      "contrast_id": "contrast_c15817d77868a59a",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_c96e6ecd71344ff2",
+      "target_condition_id": "condition_c96e6ecd71344ff2",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 30.0,
+      "reference_time_min": 0.0,
+      "target_label": "30min",
+      "reference_label": "Control",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "pairing": "unpaired",
+      "execution_id": "native_method_16557599d83be868d4e1",
+      "method_id": "PhosX_native_functions",
+      "status": "executed",
+      "reason": null,
+      "parameters": "{\"input_unit\": \"one_per_measurement_group\", \"min_n_hits\": 4, \"min_quantile\": 0.95, \"n_proc\": 1, \"n_top_kinases\": 5, \"permutations\": 10000, \"ranking_statistic\": \"A\", \"residue\": \"ST\", \"seed\": 1729, \"source_pin_scope\": \"declared_local_resource\", \"upstream_activation_evidence\": false, \"zero_policy\": \"official_native_excludes_zero\"}",
+      "runtime_seconds": null,
+      "input_hash": "041faf4cf906b46f409e6608093859515cfbdeadb74520b7c4ee2dd75c1b46e7",
+      "output_hash": "4176fc0e32f1443077e00d3f64c67070e097e0eef29435c405f7492c8f005040",
+      "log": "See methods/native_execution_runtime.json; timing excluded from scientific replay",
+      "included_joint_A_forms": 2299,
+      "site_attributable_forms": 397,
+      "site_attributable_sites": 357,
+      "site_attributable_form_sites": 397,
+      "scored_forms": 387,
+      "scored_sites": 347,
+      "scored_form_sites": 387,
+      "scored_measurement_groups": 368,
+      "score_rows": 117261,
+      "not_evaluable_score_rows": 3030,
+      "selected_specificity_rows": 1755,
+      "native_ranked_measurement_groups": 354,
+      "native_selected_memberships": 1601,
+      "native_selected_measurement_groups": 345,
+      "evaluable_assays": 156,
+      "insufficient_coverage_assays": 147,
+      "assay_results": 303,
+      "comparison_source": "quant/comparisons.csv",
+      "identity_source": "science/site_identity_audit.csv",
+      "score_source": "science/specificity_scores.csv",
+      "membership_source": "kinase/method_membership.csv",
+      "execution_source": "kinase/method_executions.csv"
+    },
+    {
+      "contrast_id": "contrast_fd5240cdb335e779",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_824bfd9a5e97c3aa",
+      "target_condition_id": "condition_824bfd9a5e97c3aa",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 60.0,
+      "reference_time_min": 0.0,
+      "target_label": "60min",
+      "reference_label": "Control",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "pairing": "unpaired",
+      "execution_id": "native_method_e51a1e6a07f0ab82148a",
+      "method_id": "PhosX_native_functions",
+      "status": "executed",
+      "reason": null,
+      "parameters": "{\"input_unit\": \"one_per_measurement_group\", \"min_n_hits\": 4, \"min_quantile\": 0.95, \"n_proc\": 1, \"n_top_kinases\": 5, \"permutations\": 10000, \"ranking_statistic\": \"A\", \"residue\": \"ST\", \"seed\": 1729, \"source_pin_scope\": \"declared_local_resource\", \"upstream_activation_evidence\": false, \"zero_policy\": \"official_native_excludes_zero\"}",
+      "runtime_seconds": null,
+      "input_hash": "fd65bcc65a78fce2aef8398a43f8fe938b9e386115f5d43d398c7275940ae398",
+      "output_hash": "22065c6ad4bbd0c20aea84c938de31484e4db01f3400cd278f59ed33f3c66e07",
+      "log": "See methods/native_execution_runtime.json; timing excluded from scientific replay",
+      "included_joint_A_forms": 2215,
+      "site_attributable_forms": 390,
+      "site_attributable_sites": 352,
+      "site_attributable_form_sites": 390,
+      "scored_forms": 381,
+      "scored_sites": 343,
+      "scored_form_sites": 381,
+      "scored_measurement_groups": 362,
+      "score_rows": 115443,
+      "not_evaluable_score_rows": 2727,
+      "selected_specificity_rows": 1724,
+      "native_ranked_measurement_groups": 348,
+      "native_selected_memberships": 1570,
+      "native_selected_measurement_groups": 338,
+      "evaluable_assays": 152,
+      "insufficient_coverage_assays": 151,
+      "assay_results": 303,
+      "comparison_source": "quant/comparisons.csv",
+      "identity_source": "science/site_identity_audit.csv",
+      "score_source": "science/specificity_scores.csv",
+      "membership_source": "kinase/method_membership.csv",
+      "execution_source": "kinase/method_executions.csv"
+    },
+    {
+      "contrast_id": "contrast_d6757f4b8563521f",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_a9adc1cf0158f4a6",
+      "target_condition_id": "condition_a9adc1cf0158f4a6",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 180.0,
+      "reference_time_min": 0.0,
+      "target_label": "180min",
+      "reference_label": "Control",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "pairing": "unpaired",
+      "execution_id": "native_method_971277a179d996dbb9cb",
+      "method_id": "PhosX_native_functions",
+      "status": "executed",
+      "reason": null,
+      "parameters": "{\"input_unit\": \"one_per_measurement_group\", \"min_n_hits\": 4, \"min_quantile\": 0.95, \"n_proc\": 1, \"n_top_kinases\": 5, \"permutations\": 10000, \"ranking_statistic\": \"A\", \"residue\": \"ST\", \"seed\": 1729, \"source_pin_scope\": \"declared_local_resource\", \"upstream_activation_evidence\": false, \"zero_policy\": \"official_native_excludes_zero\"}",
+      "runtime_seconds": null,
+      "input_hash": "a42a7963757d9b4e3561f31ad72cc02d1ed7a39e3121df58e8aabc1be6ca1459",
+      "output_hash": "e6fffd7b92b3feeb7cecbd2d7b061192ac58f3eca550e4140643678766f2fb03",
+      "log": "See methods/native_execution_runtime.json; timing excluded from scientific replay",
+      "included_joint_A_forms": 2298,
+      "site_attributable_forms": 392,
+      "site_attributable_sites": 353,
+      "site_attributable_form_sites": 392,
+      "scored_forms": 383,
+      "scored_sites": 344,
+      "scored_form_sites": 383,
+      "scored_measurement_groups": 365,
+      "score_rows": 116049,
+      "not_evaluable_score_rows": 2727,
+      "selected_specificity_rows": 1731,
+      "native_ranked_measurement_groups": 351,
+      "native_selected_memberships": 1582,
+      "native_selected_measurement_groups": 341,
+      "evaluable_assays": 153,
+      "insufficient_coverage_assays": 150,
+      "assay_results": 303,
+      "comparison_source": "quant/comparisons.csv",
+      "identity_source": "science/site_identity_audit.csv",
+      "score_source": "science/specificity_scores.csv",
+      "membership_source": "kinase/method_membership.csv",
+      "execution_source": "kinase/method_executions.csv"
+    }
+  ],
+  "contrast_audit": [
+    {
+      "contrast_id": "contrast_aea4869f398c5584",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_f541e2f63f702f17",
+      "target_condition_id": "condition_f541e2f63f702f17",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 1.0,
+      "reference_time_min": 0.0,
+      "target_label": "1min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "identity_audit_status_counts": {
+        "site_attribution_ineligible": 8222,
+        "not_included_joint_A": 2992,
+        "native_ranked": 364,
+        "multiple_sequence_windows_within_measurement_group": 20,
+        "resource_not_evaluable": 10,
+        "official_native_excludes_zero_A": 6
+      },
+      "native_exclusions": {
+        "multiple_sequence_windows_within_measurement_group": 10,
+        "official_native_excludes_zero_A": 6
+      },
+      "native_ranked_groups": 353,
+      "independently_reconstructed_ranked_input_sha256": "2bbf528ea51c9ad5d3a0733db348fad89e264f60a5a5657d68531885e10b2ddd",
+      "native_selected_memberships": 1595,
+      "specificity_contributions": 1576,
+      "method_status_counts": {
+        "computed_method_enrichment": 153,
+        "insufficient_coverage": 150
+      },
+      "scored_form_sites": 390,
+      "passed_all_native_form_site_rank_membership_checks": true
+    },
+    {
+      "contrast_id": "contrast_4147ebd64e7ecf80",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_bd68c45f543c5a83",
+      "target_condition_id": "condition_bd68c45f543c5a83",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 5.0,
+      "reference_time_min": 0.0,
+      "target_label": "5min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "identity_audit_status_counts": {
+        "site_attribution_ineligible": 8329,
+        "not_included_joint_A": 2886,
+        "native_ranked": 367,
+        "multiple_sequence_windows_within_measurement_group": 16,
+        "resource_not_evaluable": 10,
+        "official_native_excludes_zero_A": 6
+      },
+      "native_exclusions": {
+        "multiple_sequence_windows_within_measurement_group": 8,
+        "official_native_excludes_zero_A": 6
+      },
+      "native_ranked_groups": 357,
+      "independently_reconstructed_ranked_input_sha256": "75bb8c2eb7d00225a6f45c0a3b748cfda9f5584f6742ba86d7d914c6ad76a399",
+      "native_selected_memberships": 1612,
+      "specificity_contributions": 1573,
+      "method_status_counts": {
+        "computed_method_enrichment": 158,
+        "insufficient_coverage": 145
+      },
+      "scored_form_sites": 389,
+      "passed_all_native_form_site_rank_membership_checks": true
+    },
+    {
+      "contrast_id": "contrast_eb2f813f825c4ccb",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_d9c5c91ebf3d5bfc",
+      "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 15.0,
+      "reference_time_min": 0.0,
+      "target_label": "15min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "identity_audit_status_counts": {
+        "site_attribution_ineligible": 8343,
+        "not_included_joint_A": 2868,
+        "native_ranked": 368,
+        "multiple_sequence_windows_within_measurement_group": 20,
+        "resource_not_evaluable": 9,
+        "official_native_excludes_zero_A": 6
+      },
+      "native_exclusions": {
+        "multiple_sequence_windows_within_measurement_group": 10,
+        "official_native_excludes_zero_A": 6
+      },
+      "native_ranked_groups": 357,
+      "independently_reconstructed_ranked_input_sha256": "f7c18219dd86793da450fc1c04a93c89283ed9e6bf98c3d5103a9288a0b3cb12",
+      "native_selected_memberships": 1611,
+      "specificity_contributions": 1592,
+      "method_status_counts": {
+        "computed_method_enrichment": 155,
+        "insufficient_coverage": 148
+      },
+      "scored_form_sites": 394,
+      "passed_all_native_form_site_rank_membership_checks": true
+    },
+    {
+      "contrast_id": "contrast_c15817d77868a59a",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_c96e6ecd71344ff2",
+      "target_condition_id": "condition_c96e6ecd71344ff2",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 30.0,
+      "reference_time_min": 0.0,
+      "target_label": "30min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "identity_audit_status_counts": {
+        "site_attribution_ineligible": 8313,
+        "not_included_joint_A": 2904,
+        "native_ranked": 365,
+        "multiple_sequence_windows_within_measurement_group": 16,
+        "resource_not_evaluable": 10,
+        "official_native_excludes_zero_A": 6
+      },
+      "native_exclusions": {
+        "multiple_sequence_windows_within_measurement_group": 8,
+        "official_native_excludes_zero_A": 6
+      },
+      "native_ranked_groups": 354,
+      "independently_reconstructed_ranked_input_sha256": "041faf4cf906b46f409e6608093859515cfbdeadb74520b7c4ee2dd75c1b46e7",
+      "native_selected_memberships": 1601,
+      "specificity_contributions": 1562,
+      "method_status_counts": {
+        "computed_method_enrichment": 156,
+        "insufficient_coverage": 147
+      },
+      "scored_form_sites": 387,
+      "passed_all_native_form_site_rank_membership_checks": true
+    },
+    {
+      "contrast_id": "contrast_fd5240cdb335e779",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_824bfd9a5e97c3aa",
+      "target_condition_id": "condition_824bfd9a5e97c3aa",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 60.0,
+      "reference_time_min": 0.0,
+      "target_label": "60min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "identity_audit_status_counts": {
+        "site_attribution_ineligible": 7952,
+        "not_included_joint_A": 3272,
+        "native_ranked": 358,
+        "multiple_sequence_windows_within_measurement_group": 18,
+        "resource_not_evaluable": 9,
+        "official_native_excludes_zero_A": 5
+      },
+      "native_exclusions": {
+        "multiple_sequence_windows_within_measurement_group": 9,
+        "official_native_excludes_zero_A": 5
+      },
+      "native_ranked_groups": 348,
+      "independently_reconstructed_ranked_input_sha256": "fd65bcc65a78fce2aef8398a43f8fe938b9e386115f5d43d398c7275940ae398",
+      "native_selected_memberships": 1570,
+      "specificity_contributions": 1541,
+      "method_status_counts": {
+        "computed_method_enrichment": 152,
+        "insufficient_coverage": 151
+      },
+      "scored_form_sites": 381,
+      "passed_all_native_form_site_rank_membership_checks": true
+    },
+    {
+      "contrast_id": "contrast_d6757f4b8563521f",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_a9adc1cf0158f4a6",
+      "target_condition_id": "condition_a9adc1cf0158f4a6",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 180.0,
+      "reference_time_min": 0.0,
+      "target_label": "180min",
+      "reference_label": "Control",
+      "pairing": "unpaired",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "identity_audit_status_counts": {
+        "site_attribution_ineligible": 8323,
+        "not_included_joint_A": 2899,
+        "native_ranked": 361,
+        "multiple_sequence_windows_within_measurement_group": 16,
+        "resource_not_evaluable": 9,
+        "official_native_excludes_zero_A": 6
+      },
+      "native_exclusions": {
+        "multiple_sequence_windows_within_measurement_group": 8,
+        "official_native_excludes_zero_A": 6
+      },
+      "native_ranked_groups": 351,
+      "independently_reconstructed_ranked_input_sha256": "a42a7963757d9b4e3561f31ad72cc02d1ed7a39e3121df58e8aabc1be6ca1459",
+      "native_selected_memberships": 1582,
+      "specificity_contributions": 1543,
+      "method_status_counts": {
+        "computed_method_enrichment": 153,
+        "insufficient_coverage": 150
+      },
+      "scored_form_sites": 383,
+      "passed_all_native_form_site_rank_membership_checks": true
+    }
+  ],
+  "resource": {
+    "adapter": "phosx_official.v1",
+    "resource_id": "PhosX-0.23.1.bundled.S_T",
+    "resource_version": "b556f59c39f099b5f3fcb574a8a70856c3fdc82c",
+    "publication_doi": "10.1038/s41586-022-05575-3",
+    "source_url": "https://github.com/alussana/phosx/tree/b556f59c39f099b5f3fcb574a8a70856c3fdc82c/phosx/data",
+    "retrieved_at": "2026-10-05",
+    "verified_at": "2026-10-09",
+    "license_identifier": "Apache-2.0 (official PhosX distribution)",
+    "license_source_url": "https://github.com/alussana/phosx/blob/b556f59c39f099b5f3fcb574a8a70856c3fdc82c/LICENSE",
+    "license_sha256": "eb6d243d9b0ba5d5805bd2fc08f9725885175482d96c85c59e1748c2cae9768b",
+    "local_use_permission": "permitted",
+    "derived_export_permission": "permitted",
+    "permission_basis": "Official PhosX 0.23.1 distribution includes these exact HDF5 bytes under its Apache-2.0 package license; local computation and numeric derived outputs. No separate data exception found in this pinned distribution. Original atlas publication and separate kinase_pssms repository are not relicensed by this statement.",
+    "redistribution_status": "not_packaged_pending_upstream_atlas_redistribution_review",
+    "redistribution_reason": "Conservative export boundary: matrices and background supplied separately with identical hashes; package includes derived scores only.",
+    "assay_taxon": "9606",
+    "supported_center_residues": [
+      "S",
+      "T"
+    ],
+    "matrix_file": "S_T_PSSMs.h5",
+    "background_file": "S_T_PSSM_score_quantiles.h5",
+    "matrix_sha256": "7d18a78d6efc45925aacae9c62ea26c5d7c22519eb856b2891debeed0ea42c6d",
+    "background_sha256": "487beac611126c973c36b3b01161991a7c01d08e8d00f764136eb2c45aac1c11",
+    "n_top_kinases": 5,
+    "min_quantile": 0.95,
+    "enzyme_mapping": {},
+    "enzyme_mapping_status": "official_assay_labels_preserved_no_verified_accession_or_rat_orthology_mapping_supplied",
+    "enzyme_mapping_resource_sha256": "ab48c161eb8f35225cc410331c71cd0d35c1fd198a828a6eb78069d3fc341952",
+    "enzyme_mapping_inspection": "bundled metadata supplies family/specificity/sequences, not a verified accession crosswalk; inferred enzyme taxon remains unknown",
+    "window_offsets": [
+      -5,
+      -4,
+      -3,
+      -2,
+      -1,
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "terminal_policy": "official_underscore_neutral_factor",
+    "priming_policy": "multisite_excluded_as_unresolved",
+    "method_scope": "official_PSSM_and_native_rank_enrichment_without_upstream_activation_evidence"
+  },
+  "manifest_sha256": "12eff82db554b22355169115f39fc4ba0ce65584f26aac4dcccf9b4b999dfa0a",
+  "environment": {
+    "python_executable": "/private/tmp/ptm-official-methods-20261005-venv/bin/python",
+    "lock_file": "ROUND09_ENVIRONMENT.lock",
+    "lock_sha256": "94862f75dfe66a781f9ba827320faee2e8b5f758011ccc4352c00af41f542b4f",
+    "observed_freeze_sha256": "f58b1901a0b9df4d2ecb63e256225f66585da904e6d3ea33faf7dbf8e2652cd7",
+    "unchanged_since_round09": true,
+    "portable_lock_difference": "comment and verified local PhosX checkout replaced with pinned git commit URL"
+  },
+  "parameters": {
+    "contrast_ids": [
+      "contrast_aea4869f398c5584",
+      "contrast_4147ebd64e7ecf80",
+      "contrast_eb2f813f825c4ccb",
+      "contrast_c15817d77868a59a",
+      "contrast_fd5240cdb335e779",
+      "contrast_d6757f4b8563521f"
+    ],
+    "permutations": 10000,
+    "seed": 1729,
+    "timeout_seconds": 14400,
+    "ranking_statistic": "A",
+    "n_proc": 1,
+    "min_n_hits": 4,
+    "n_top_kinases": 5,
+    "min_quantile": 0.95,
+    "upstream_activation_evidence": false
+  },
+  "unaffected_13_tracks": {
+    "unaffected_tracks_compared": [
+      "P_all",
+      "P_joint",
+      "U_all",
+      "U_joint",
+      "curated_A",
+      "localized_A",
+      "motif_A",
+      "native_A",
+      "repeated_A",
+      "shared_site_excluded_A",
+      "source_caution_excluded_A",
+      "strict_parent_A",
+      "unadjusted_only_U"
+    ],
+    "rows": 49998,
+    "values_NA_preserved": true,
+    "specificity_profiles_by_contrast": [
+      {
+        "contrast_id": "contrast_4147ebd64e7ecf80",
+        "size": 641,
+        "count": 267
+      },
+      {
+        "contrast_id": "contrast_aea4869f398c5584",
+        "size": 641,
+        "count": 266
+      },
+      {
+        "contrast_id": "contrast_c15817d77868a59a",
+        "size": 641,
+        "count": 267
+      },
+      {
+        "contrast_id": "contrast_d6757f4b8563521f",
+        "size": 641,
+        "count": 267
+      },
+      {
+        "contrast_id": "contrast_eb2f813f825c4ccb",
+        "size": 641,
+        "count": 267
+      },
+      {
+        "contrast_id": "contrast_fd5240cdb335e779",
+        "size": 641,
+        "count": 266
+      }
+    ]
+  },
+  "one_minute_preservation": [
+    {
+      "table": "science/specificity_scores",
+      "rows_compared": 121200,
+      "all_common_columns_values_NA_equal": true
+    },
+    {
+      "table": "kinase/method_scores",
+      "rows_compared": 303,
+      "all_common_columns_values_NA_equal": true
+    },
+    {
+      "table": "kinase/method_membership",
+      "rows_compared": 106959,
+      "all_common_columns_values_NA_equal": true
+    },
+    {
+      "table": "kinase/method_executions",
+      "rows_compared": 1,
+      "all_common_columns_values_NA_equal": true
+    }
+  ],
+  "independent_official_parity_180": {
+    "implementation": "independent_official_functions",
+    "version": "0.23.1",
+    "contrast_id": "contrast_d6757f4b8563521f",
+    "permutations": 10000,
+    "seed": 1729,
+    "upstream_activation_evidence": false,
+    "matrix_sha256": "7d18a78d6efc45925aacae9c62ea26c5d7c22519eb856b2891debeed0ea42c6d",
+    "background_sha256": "487beac611126c973c36b3b01161991a7c01d08e8d00f764136eb2c45aac1c11",
+    "input_hash": "a42a7963757d9b4e3561f31ad72cc02d1ed7a39e3121df58e8aabc1be6ca1459",
+    "eligible_sites": 383,
+    "excluded_sites": 9,
+    "measurement_groups": 351,
+    "native_evaluable_kinases": 153,
+    "atol": 1e-12,
+    "rtol": 1e-12,
+    "passed": true,
+    "scored_rows_compared": 116049,
+    "native_results_compared": 303,
+    "native_membership_rows_compared": 106353,
+    "maximum_absolute_differences": {
+      "raw_score": 0.0,
+      "percentile": 0.0,
+      "native_score_p_q": 0.0
+    },
+    "skip_count": 0,
+    "comparison_scope": "raw_score_percentile_selection_native_activity_p_q_and_membership"
+  },
+  "conditional_method_replay": {
+    "passed": true,
+    "scope": "archived_code_specificity_and_native_method_from_frozen_quant_tables",
+    "run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+    "external_manifest_sha256": "12eff82db554b22355169115f39fc4ba0ce65584f26aac4dcccf9b4b999dfa0a",
+    "external_resource_required": true,
+    "quantification_recomputed": false,
+    "reader_replay_is_separate": true,
+    "network_requests": 0,
+    "permutations": 10000,
+    "score_rows": 123018,
+    "native_results": 1818,
+    "native_membership_rows": 642360,
+    "atol": 1e-12,
+    "rtol": 1e-12
+  },
+  "method_replay_final_package_binding": {
+    "passed": true,
+    "scientific_execution_run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+    "final_reader_run_id": "g0-1f09d0d2622540cb894a61e0bf1b1aa0",
+    "scientific_tables_byte_identical": 79,
+    "only_changed_code": [
+      "astra_reader.py"
+    ],
+    "method_code_resources_replay_config_inputs_outputs_identical": true,
+    "method_replay_scope": "recompute origin scientific execution with identical external resources; bind final rendering revision by exact code/input/output hashes",
+    "reader_replay_scope": "execute final archive writer separately",
+    "origin_manifest_sha256": "435522d3a9c73398d82aaf529a2c61d10ba16452f435484984ecd43ab6354612",
+    "final_manifest_sha256": "c714500c731d25ff555c10a5f593488edf12f1643738c257968d3e95c1612366",
+    "preserved_artifact_hashes": {
+      "reproducibility/replay_config.json": "b51ba5304b442f5739497cab0d5e0847c4490d31a85da9046a5dbf400848d742",
+      "references/source_pin.json": "f439a47aeef059bf1292b2c185cb79cc34252493a0f2234846612b50eb097f3f",
+      "references/literature_pin.json": "eefcb4207fa70699354856e7ff92e7f2a8f522a50918c410bad94b5688f1dfb8",
+      "references/finding_literature_pin.json": "f9eae7554a453c701cdb3969b025bf4e55c52f5858f08b2084f52f9483389487",
+      "methods/native_execution_runtime.json": "d88ff71cccb0110b02ed69ee3049af7d89db903cd324ee7ed7761f125bd5821b",
+      "science/resource_registry.json": "061024f380f760492cf6cfcab0fdfb7a124621f76864d143c80025dc0cce15a5"
+    },
+    "final_reader_table_format": "passed"
+  },
+  "reader_render_revision": {
+    "all_figures_reused": true,
+    "archive_path": "/Users/josephk/Projects/PTM-platform/codex-inputs/round09b-20261009/execution/output/astra_analysis_package_g0-1f09d0d2622540cb894a61e0bf1b1aa0.zip",
+    "archive_sha256": "ff57954305b15debbebedefde90ecfafcdee16d77ffbe78530778716d4fb6a97",
+    "changed_reader_artifacts": [
+      "reader/PHOSX_TIME_COURSE.md"
+    ],
+    "elapsed_seconds": 88.32962841598783,
+    "finding_selection_repeated": false,
+    "method_replay_binding": "unchanged method code/resources/replay config and all scientific table bytes; only reader serializer changed",
+    "operation": "reader_render_revision",
+    "origin_run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+    "parent_manifest_sha256": "435522d3a9c73398d82aaf529a2c61d10ba16452f435484984ecd43ab6354612",
+    "preserved_table_hashes": {
+      "evidence/censoring_bounds.csv": "bcf47ffe21e529dc7e02232ea079819609b4c87fd515f453dbd351ab335e66ed",
+      "evidence/coverage_funnel.csv": "ba6001e5a80d65bc354da5c2f249e05cd62eababd496b3c193437067a523737e",
+      "evidence/emergence_evidence.csv": "a1ae1d7f109bf4dddd1bb553f0e439adc5d421d30b2adc17344d2362892507df",
+      "evidence/feature_evidence_ledger.csv": "21013dba40e0ad84085cccbc8e86083a84e32c755315d66b6fdc01a77e2d961b",
+      "evidence/normalization_offsets.csv": "4f3fb13fa8e9b89cb05659712e5fee1fbfb583d1b794fc7bd95119c9bd43c47f",
+      "evidence/parent_adjustment_impact.csv": "7dc2cbcce7644e0ac36a71dfc063ca1a8b246d07dba01a703255d7e4bcba8cef",
+      "evidence/technical_dispersion.csv": "98c0e325a0e720583f62242d592ed88b48ae4a3c20db111b4674d1597b743033",
+      "evidence/technical_injection_omissions.csv": "ff1e6fd84af402b978489467695fc77c892dba554b76c2aa4b5685e32a4f076a",
+      "kinase/candidate_sensitivity.csv": "9df29482064b6ada1fb773616b57d844cf73d3d15cd196ce3f1fd88ebb2881d7",
+      "kinase/kea3_results.csv": "353764d299b94915559b68c8c0ecf0e0774bbff1d5f1b3de2cd3c08fa7f4502f",
+      "kinase/kinase_candidate_edges.csv": "c3ec5385259b3127a9d056b378b17ba603e0fdd0b256ee3980eff8856665254d",
+      "kinase/kinase_candidate_summary.csv": "bffd6972651cc91ad0f318179e15ace1cdcd4daa44f4a0311f92f9e6237cb939",
+      "kinase/kinase_protein_context.csv": "f2f88f5453717618fef617424f7881883a63d18d56183471ac4f9b935da9c19c",
+      "kinase/kinase_self_site_context.csv": "89be85c38f15cf550e7e9f5549f56e2b11767ba07c569882bc647beebd3cedaa",
+      "kinase/kinase_technical_omissions.csv": "c99c941ad452ecfe0a38687d2bc0d0aeae6264a76c481b3b73b6f77ad3295171",
+      "kinase/kinase_temporal_profiles.csv": "1099ced89f6e0a7a172279e2fdc3ef27757972351c7f5480f2b424dc94e292f1",
+      "kinase/method_executions.csv": "a66fb96d7fd33ee229cf1c65089e68bdce4d637533a41bd0eb4fc257ba427960",
+      "kinase/method_membership.csv": "6f4613e4dfbf88aa142ccb24507a451db8a9a278c52748c21d66808571bee3c5",
+      "kinase/method_scores.csv": "97b16c4c92201e2ce8f02782d2d4f72d8c45d6eb4d9b3e5f06b72d15b51f5252",
+      "kinase/substrate_contributions.csv": "2418db2aea6a48f6a77b89a9126468c73702260b843e4858e0eab92836229abf",
+      "quant/annotation_edges.csv": "ab555595c3f294dd63e65960e46c90744ac81efe49c5ebc9a08e0d8d93fb0bc4",
+      "quant/comparisons.csv": "865952249a46a4f0392369f99bc216b4a6add4a05429dcd6b081a39286dd12c9",
+      "quant/detection.csv": "df8b5d9123acae3e51b21b63aae92645853845a03178c0ae0f4b7d0589f341fa",
+      "quant/emergent_kinase_evidence.csv": "cd8e1ac9670efe6d8ed65373f45780fce6a30fa79f6935f947d092ae84b2034e",
+      "quant/form_evidence_status.csv": "0229daf7ca1f0383d7f15dda2e67973cf07c9f7b17e6092fccc111db6f7c3639",
+      "quant/kinase_injection_omissions.csv": "c7dd60af7fb3ef655ec58ff9aec19d3d02391f30852bb61e3e1b7c456c28446b",
+      "quant/kinase_membership.csv": "0949fcf78cb754c90b43cb3314385934fca46e58f9e6298ccc8c8aca5e352915",
+      "quant/kinase_profiles.csv": "df78178a41f3aa50bc3fd391f6b9750598ed071a0f2a1259b89c467d81e56bee",
+      "quant/kinase_sensitivity.csv": "dd482c1d58e71e4154d9e6f9f9eeea632bff75e4b036724c12a4c9e333d48161",
+      "quant/primary_A_input.csv": "4c826dc8191bb4160cf5f442387f3fa626b20001ffe00dcadbf44cf94afd6835",
+      "quant/protein_contrasts.csv": "f8b511c3ba15d9d049442ebd0849495a9b495060fcd5bd04e67ef30c255e8717",
+      "quant/runlevel.csv": "d90987da85f296ea7ae29f8b9334a49e7db4f0a2dd02c029d5004c537e9af138",
+      "quant/site_mapping.csv": "2690b405e44bbf3ef56b521fd9cfc3063adff10d00756333721c52cef0807bea",
+      "quant/strict_parent_complete.csv": "8358db1d81212b46665d36170aabaf9e8caa145d739650316ffbeaf66089acb8",
+      "quant/strict_parent_paired.csv": "b2b35ffadefe043679591680d2d80d7abf52c3fb9c5da782ca1d7a9d3d9cb31e",
+      "quant/strict_parent_peptide_masks.csv": "e2807f8a5cf1e7e5d315d7c4a73d3e8220a649ba253db75bdae0641facdf6532",
+      "quant/strict_selected_sequences.csv": "9636bee80af780425c3eeea7720d314523cbda2b0155c0c8481e59f509394184",
+      "quant/strict_unmodified_proteins.csv": "b15f349a8902c5acee631cf471ca74fc50fc4093b0790bd4c885a14a12ed08b3",
+      "quant/strict_unmodified_sequences.csv": "8f18cdbf1dd357e0d5c8c50e3e97a54880909c8751fe462a11e318cdcde766ba",
+      "quant/summary.csv": "4d90b48233fb106cf67869f117f9221338846ab3e71a4574faa66e871598d100",
+      "quant/temporal_protein_summary.csv": "173746aff05917a8599bc83739c4fc10a5c449b0e16b12daf0181527570027ae",
+      "quant/validation_panel.csv": "90888a0d560e242d0a8854adf500f06d46fe0c51a7c7668d767e2e200e7bcdcd",
+      "reader/cards.csv": "6c596a74f9c4e7f65e83bcfcd03c7dd05511961a058414f50d3e98ab032fd360",
+      "reader/coverage.csv": "f9fbcafc3657f2e6b5e3d9c872ef66f0b15719f5d9908de864280ee363cb9e4f",
+      "reader/findings.csv": "1b0e7103f1130ab82717a87cc62161a8d04191e08dc974d8f17ab9d8f62ec369",
+      "reader/literature_comparisons.csv": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+      "reader/literature_search.csv": "69dd85c7296313e1e10958263ac668a20c26a5a578d3bb475dee17e103eb8a5f",
+      "reader/literature_sources.csv": "2becf04a73ddd9980dc8c1bf92f18b4230623bd9c02390196354c9271819864c",
+      "reader/packet.csv": "747fe4c390a693b289a0a7124c294d42cee0e30fbdd3de3263dc0d6e145be58f",
+      "reader_adapter/form_contrasts.csv": "03e2b7d55d6f442639ab8567ac34a2f0e2c061416d0060050f8e5960bccf7eab",
+      "reader_adapter/form_identity.csv": "31bd366391f9b87991b15fd6514141b9e0ac68ee388c55b26dad101cd1d7fd43",
+      "reader_adapter/precursor_membership.csv": "c2fee673621c5b23a73f1f676b8fbfda5ad35988e84ca0eeee2c0ade49dc4b01",
+      "reader_adapter/study_metadata.csv": "e74f7b9d1fd6ad497a7dbf889d2fc41844215fb64b42ab3135ea14fc0eacb027",
+      "references/source_query_ledger.csv": "a9e36d542343524a18fadeb91039f4d97bee2794ba4a8ce3fde42292739452d0",
+      "science/calibrated_calls.csv": "98c834126bb0d6a1df2a005d78ba3731742de0494d3ce8a528b09416df91d25d",
+      "science/calibration_provenance.csv": "fe5375e0c79150b59b5bac8ff4e188022fc87b7fbc6cf8889e2d3ba25d8135fb",
+      "science/evidence_dependency_groups.csv": "2650104b979ff79736d44b2616aacb564a9579e8cf7710146735e66397d2f1e2",
+      "science/group_excluded_anchors.csv": "f39007033115b6d7b3ea18ed4d6ba9d8710b311a4f8530cc607bfa34e8de0358",
+      "science/inference_results.csv": "3e8ea06ba2d4e93d7b2130c1d2765fe27ca4dccdc8ebc9809cac35f1b4ef9bbc",
+      "science/kinase_calls.csv": "3e8ea06ba2d4e93d7b2130c1d2765fe27ca4dccdc8ebc9809cac35f1b4ef9bbc",
+      "science/localization_by_contrast.csv": "8a1bc216501a8144f1108f6fd21da50fd263709c55593e1dd8bd03b05e0ab5ec",
+      "science/measurement_observations.csv": "7ec7e26708ae60bac85cf2aacb5b8e7107c76f4e69d793a7c6a974026af5abe5",
+      "science/observation_sites.csv": "dfb5af701edf4a2de9e5e398dd73d7c6ae232f78e6ee2480fb992675f65a5861",
+      "science/perturbation_validation.csv": "af0d9228f01323a2fb279a06ac2805c3538d6913366e82c65af256d23745a076",
+      "science/reference_inventory.csv": "a1ee6875bce7b09f947ba73e057303e97b351b4d29986dc865ce4104120a3807",
+      "science/replicate_uncertainty.csv": "1c5b7323e799cc78c6479bcd6275de81511c59b3a78470526cdcd346976cc4cc",
+      "science/site_identity_audit.csv": "11efc4b4397c499fe81e7246919fec1411b15d019105100f91da9cb13852f94a",
+      "science/site_report_observations.csv": "a7e15f62ecc51859bb35991978d3aba233d1c012c069257cb578c23b860fb9f9",
+      "science/specificity_scores.csv": "d9280b0b93056dbd90d60eae26da133c329555d467abbd51f184ca196893f7cf",
+      "study/input_field_manifest.csv": "75fcad38b4f01922aea05acfc72335fac1d2dd99adfc8402ad50360caa6db0c6",
+      "temporal/cross_layer_links.csv": "073149dfe201b58949fa6090535752237b59d6b4a72658a003c39d4c08112d8b",
+      "temporal/group_excluded_cowave.csv": "9d24223bd18f7ecdbdaae1aabfcba3b3c5c9b4d3d68fa7983e83f2e86175acdc",
+      "temporal/interval_contrasts.csv": "53b0670a480c1ca6b42044c7deb9ee5f17176a3cca327fd01e4bd7fef7bcd833",
+      "temporal/kinase_fixed_membership.csv": "87830c66a569c7fe85c7313f95c5353d3184bd043367ae793cf996a1c8875bda",
+      "temporal/kinase_temporal_features.csv": "71533ed05c0980be15a34f1bb421c1d0a69d6d2b31e3c69cc106ebfbb2ebb5d7",
+      "temporal/protein_temporal_features.csv": "60c0c828575fcb65e05d0e07af36a05e8367915c395bb2f15063db8ff062848e",
+      "temporal/ptm_temporal_features.csv": "5a6054d81a0712b2202f4c5b88ceb7d9db15459f5042ff5038e248e95deee72a",
+      "temporal/target_excluded_anchors.csv": "fa7c9b1ad7e32a0616e370bb720306043b794603b108f23741550b442a554531",
+      "temporal/temporal_series.csv": "41ac78c386cb557aa7743b04c3ecf2d82a3a033cea28943da33a5ec237a604c2"
+    },
+    "run_id": "g0-1f09d0d2622540cb894a61e0bf1b1aa0",
+    "scientific_recalculation": false,
+    "source_literature_queries": 0
+  },
+  "offline_reader_replay": {
+    "passed": true,
+    "scope": "reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables",
+    "scientific_requantification": false,
+    "network_requests": 0,
+    "repository_code_used": false,
+    "run_id": "g0-1f09d0d2622540cb894a61e0bf1b1aa0",
+    "files": [
+      {
+        "file": "reader/READ_ME.md",
+        "sha256": "af2b4c2c7c765341439ffe68d64e805c70a7e651b8675f60ded0f9566b0fa007",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/authoring_packet.json",
+        "sha256": "b153f8ec3dc3627cd82841e618d14648736e8a611449f548727f4c04847b7a73",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/coverage_summary.json",
+        "sha256": "2e84d37d90266cfff9270e5f8080189d7105d2a24d4f0b7e024f270d263107a5",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/question_map.json",
+        "sha256": "abc165f56caf5e36aa8711baa430fd44fa327ccb729d2d7fb56cc29be94c70c2",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/selection_audit.json",
+        "sha256": "c74f12b94ab6aadb8269668fd4491ec6c1d163d3f5e2b498a0a1245ff744be25",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/PHOSX_TIME_COURSE.md",
+        "sha256": "cb0b2196f4913ba4a7a734e3eedf9776ec6829b090254dd58e706cec126f73cb",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/phosx_time_summary.csv",
+        "sha256": "41b4651fd7893f97a68f498718519237e230387c9ebf799185295fab28df7c8c",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/phosx_assay_time_results.csv",
+        "sha256": "e6688457d5111bebf51ed1e2bbe4b887a587beb77b16f58ebe5919139f569679",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/LITERATURE.md",
+        "sha256": "301107501f8f8d38ae6feffbc740513224324e5eeb5b4a23a3526b50823fd669",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_summary.json",
+        "sha256": "f78b6ce33c810bf51bb3b1ab4522de783a9cc0bcb33d7f3462aea2ff2d8e93c6",
+        "byte_equal": true
+      },
+      {
+        "file": "references/finding_literature_pin.json",
+        "sha256": "f9eae7554a453c701cdb3969b025bf4e55c52f5858f08b2084f52f9483389487",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/cards.csv",
+        "sha256": "6c596a74f9c4e7f65e83bcfcd03c7dd05511961a058414f50d3e98ab032fd360",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/findings.csv",
+        "sha256": "1b0e7103f1130ab82717a87cc62161a8d04191e08dc974d8f17ab9d8f62ec369",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/coverage.csv",
+        "sha256": "f9fbcafc3657f2e6b5e3d9c872ef66f0b15719f5d9908de864280ee363cb9e4f",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/packet.csv",
+        "sha256": "747fe4c390a693b289a0a7124c294d42cee0e30fbdd3de3263dc0d6e145be58f",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_search.csv",
+        "sha256": "69dd85c7296313e1e10958263ac668a20c26a5a578d3bb475dee17e103eb8a5f",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_sources.csv",
+        "sha256": "2becf04a73ddd9980dc8c1bf92f18b4230623bd9c02390196354c9271819864c",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_comparisons.csv",
+        "sha256": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+        "byte_equal": true
+      }
+    ],
+    "validation": {
+      "source_rows_checked": 16944,
+      "cards_checked": 14658,
+      "findings_checked": 15,
+      "values_times_NA_masks_ids": "passed"
+    }
+  },
+  "preservation": [
+    {
+      "table": "evidence/censoring_bounds",
+      "old_rows": 1722,
+      "new_rows": 1722,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "evidence/coverage_funnel",
+      "old_rows": 9,
+      "new_rows": 9,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 1] (column name=\"count\") are different\n\nDataFrame.iloc[:, 1] (column name=\"count\") values are different (11.11111 %)\n[index]: [0, 1, 2, 3, 4, 5, 6, 7, 8]\n[left]:  [2824, 2628, 2625, 13704, 11920, 641, 168738, 53844, 9525]\n[right]: [2824, 2628, 2625, 13704, 11920, 641, 170556, 53844, 9525]\nAt positional index 6, first diff: 168738 "
+    },
+    {
+      "table": "evidence/emergence_evidence",
+      "old_rows": 19768,
+      "new_rows": 19768,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 18] (column name=\"candidate_ids\") are different\n\nDataFrame.iloc[:, 18] (column name=\"candidate_ids\") values are different (0.21246 %)\n[index]: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49"
+    },
+    {
+      "table": "evidence/feature_evidence_ledger",
+      "old_rows": 16944,
+      "new_rows": 16944,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 5] (column name=\"candidate_count\") are different\n\nDataFrame.iloc[:, 5] (column name=\"candidate_count\") values are different (0.21246 %)\n[index]: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, "
+    },
+    {
+      "table": "evidence/normalization_offsets",
+      "old_rows": 16944,
+      "new_rows": 16944,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "evidence/parent_adjustment_impact",
+      "old_rows": 16944,
+      "new_rows": 16944,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "evidence/technical_dispersion",
+      "old_rows": 59304,
+      "new_rows": 59304,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "evidence/technical_injection_omissions",
+      "old_rows": 101664,
+      "new_rows": 101664,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "kinase/candidate_sensitivity",
+      "old_rows": 34346,
+      "new_rows": 59702,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (34346, 9)\n[right]: (59702, 9)"
+    },
+    {
+      "table": "kinase/kea3_results",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "kinase/kinase_candidate_edges",
+      "old_rows": 168738,
+      "new_rows": 170556,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (168738, 53)\n[right]: (170556, 53)"
+    },
+    {
+      "table": "kinase/kinase_candidate_summary",
+      "old_rows": 641,
+      "new_rows": 641,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 8] (column name=\"maximum_independent_genes\") are different\n\nDataFrame.iloc[:, 8] (column name=\"maximum_independent_genes\") values are different (4.05616 %)\n[index]: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, "
+    },
+    {
+      "table": "kinase/kinase_protein_context",
+      "old_rows": 3918,
+      "new_rows": 3918,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "kinase/kinase_self_site_context",
+      "old_rows": 576,
+      "new_rows": 576,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "kinase/kinase_technical_omissions",
+      "old_rows": 3660,
+      "new_rows": 11664,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (3660, 7)\n[right]: (11664, 7)"
+    },
+    {
+      "table": "kinase/kinase_temporal_profiles",
+      "old_rows": 53844,
+      "new_rows": 53844,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 8] (column name=\"activity_magnitude\") are different\n\nDataFrame.iloc[:, 8] (column name=\"activity_magnitude\") values are different (2.47753 %)\n[index]: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47"
+    },
+    {
+      "table": "kinase/method_executions",
+      "old_rows": 6,
+      "new_rows": 6,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 0] (column name=\"execution_id\") are different\n\nDataFrame.iloc[:, 0] (column name=\"execution_id\") values are different (83.33333 %)\n[index]: [0, 1, 2, 3, 4, 5]\n[left]:  [native_method_a29a25159c1d636c17d2, native_method_cd37bdf0df073c6042f8, native_method_89eee8a31d51de752546, native_method_b7ab878435f9f003506e, native_method_100d4"
+    },
+    {
+      "table": "kinase/method_membership",
+      "old_rows": 106959,
+      "new_rows": 642360,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (106959, 11)\n[right]: (642360, 11)"
+    },
+    {
+      "table": "kinase/method_scores",
+      "old_rows": 344,
+      "new_rows": 1859,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (344, 20)\n[right]: (1859, 20)"
+    },
+    {
+      "table": "kinase/substrate_contributions",
+      "old_rows": 13408,
+      "new_rows": 21219,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (13408, 18)\n[right]: (21219, 18)"
+    },
+    {
+      "table": "quant/annotation_edges",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/comparisons",
+      "old_rows": 16944,
+      "new_rows": 16944,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/detection",
+      "old_rows": 16944,
+      "new_rows": 16944,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/emergent_kinase_evidence",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/form_evidence_status",
+      "old_rows": 16944,
+      "new_rows": 16944,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/kinase_injection_omissions",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/kinase_membership",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/kinase_profiles",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/kinase_sensitivity",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/primary_A_input",
+      "old_rows": 13704,
+      "new_rows": 13704,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/protein_contrasts",
+      "old_rows": 57150,
+      "new_rows": 57150,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/runlevel",
+      "old_rows": 59304,
+      "new_rows": 59304,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/site_mapping",
+      "old_rows": 11614,
+      "new_rows": 11614,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/strict_parent_complete",
+      "old_rows": 13704,
+      "new_rows": 13704,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/strict_parent_paired",
+      "old_rows": 13704,
+      "new_rows": 13704,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/strict_parent_peptide_masks",
+      "old_rows": 445712,
+      "new_rows": 445712,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/strict_selected_sequences",
+      "old_rows": 111311,
+      "new_rows": 111311,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/strict_unmodified_proteins",
+      "old_rows": 54456,
+      "new_rows": 54456,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/strict_unmodified_sequences",
+      "old_rows": 667866,
+      "new_rows": 667866,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/summary",
+      "old_rows": 2824,
+      "new_rows": 2824,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/temporal_protein_summary",
+      "old_rows": 18601,
+      "new_rows": 18601,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "quant/validation_panel",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "reader/cards",
+      "old_rows": 14658,
+      "new_rows": 14658,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "reader/coverage",
+      "old_rows": 16944,
+      "new_rows": 16944,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "reader/findings",
+      "old_rows": 15,
+      "new_rows": 15,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "reader/literature_comparisons",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "reader/literature_search",
+      "old_rows": 15,
+      "new_rows": 15,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "reader/literature_sources",
+      "old_rows": 12,
+      "new_rows": 12,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "reader/packet",
+      "old_rows": 1,
+      "new_rows": 1,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 1] (column name=\"packet_json\") are different\n\nDataFrame.iloc[:, 1] (column name=\"packet_json\") values are different (100.0 %)\n[index]: [0]\n[left]:  [{\"astra_reader_version\": \"astra_reader.v1\", \"authoring_rules\": {\"citation_marker\": \"Use [REF:pmid:*], [REF:doi:*], or [REF:title:*] only for supplied literature cards.\", \"de_novo\": \"C"
+    },
+    {
+      "table": "reader_adapter/form_contrasts",
+      "old_rows": 16944,
+      "new_rows": 16944,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "reader_adapter/form_identity",
+      "old_rows": 2824,
+      "new_rows": 2824,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "reader_adapter/precursor_membership",
+      "old_rows": 3035,
+      "new_rows": 3035,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "reader_adapter/study_metadata",
+      "old_rows": 1,
+      "new_rows": 1,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "references/source_query_ledger",
+      "old_rows": 25,
+      "new_rows": 25,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/calibrated_calls",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/calibration_provenance",
+      "old_rows": 1,
+      "new_rows": 1,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/evidence_dependency_groups",
+      "old_rows": 12284,
+      "new_rows": 20785,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (12284, 10)\n[right]: (20785, 10)"
+    },
+    {
+      "table": "science/group_excluded_anchors",
+      "old_rows": 22486,
+      "new_rows": 38697,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (22486, 13)\n[right]: (38697, 13)"
+    },
+    {
+      "table": "science/inference_results",
+      "old_rows": 11538,
+      "new_rows": 11538,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 7] (column name=\"direction\") are different\n\nDataFrame.iloc[:, 7] (column name=\"direction\") values are different (11.5618 %)\n[index]: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, "
+    },
+    {
+      "table": "science/kinase_calls",
+      "old_rows": 11538,
+      "new_rows": 11538,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 7] (column name=\"direction\") are different\n\nDataFrame.iloc[:, 7] (column name=\"direction\") values are different (11.5618 %)\n[index]: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, "
+    },
+    {
+      "table": "science/localization_by_contrast",
+      "old_rows": 69684,
+      "new_rows": 69684,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/measurement_observations",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/observation_sites",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/perturbation_validation",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/reference_inventory",
+      "old_rows": 54495,
+      "new_rows": 54495,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/replicate_uncertainty",
+      "old_rows": 16944,
+      "new_rows": 16944,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/site_identity_audit",
+      "old_rows": 11614,
+      "new_rows": 11614,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/site_report_observations",
+      "old_rows": 0,
+      "new_rows": 0,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "science/specificity_scores",
+      "old_rows": 121200,
+      "new_rows": 123018,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (121200, 27)\n[right]: (123018, 27)"
+    },
+    {
+      "table": "study/input_field_manifest",
+      "old_rows": 720,
+      "new_rows": 720,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "temporal/cross_layer_links",
+      "old_rows": 3345,
+      "new_rows": 3345,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "temporal/group_excluded_cowave",
+      "old_rows": 6452,
+      "new_rows": 6504,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (6452, 14)\n[right]: (6504, 14)"
+    },
+    {
+      "table": "temporal/interval_contrasts",
+      "old_rows": 16944,
+      "new_rows": 16944,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "temporal/kinase_fixed_membership",
+      "old_rows": 53844,
+      "new_rows": 53844,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 4] (column name=\"fixed_common_score\") are different\n\nDataFrame.iloc[:, 4] (column name=\"fixed_common_score\") values are different (2.95298 %)\n[index]: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47"
+    },
+    {
+      "table": "temporal/kinase_temporal_features",
+      "old_rows": 8974,
+      "new_rows": 8974,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame.iloc[:, 7] (column name=\"values\") are different\n\nDataFrame.iloc[:, 7] (column name=\"values\") values are different (2.97526 %)\n[index]: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53"
+    },
+    {
+      "table": "temporal/protein_temporal_features",
+      "old_rows": 18601,
+      "new_rows": 18601,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "temporal/ptm_temporal_features",
+      "old_rows": 11296,
+      "new_rows": 11296,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    },
+    {
+      "table": "temporal/target_excluded_anchors",
+      "old_rows": 3226,
+      "new_rows": 3252,
+      "semantic_equal": false,
+      "byte_equal": false,
+      "difference": "DataFrame are different\n\nDataFrame shape mismatch\n[left]:  (3226, 10)\n[right]: (3252, 10)"
+    },
+    {
+      "table": "temporal/temporal_series",
+      "old_rows": 1,
+      "new_rows": 1,
+      "semantic_equal": true,
+      "byte_equal": true,
+      "difference": null
+    }
+  ],
+  "figure_files": [
+    {
+      "file": "U_P_A_examples.svg",
+      "byte_equal": true
+    },
+    {
+      "file": "U_P_A_examples_source.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "coverage.svg",
+      "byte_equal": false
+    },
+    {
+      "file": "coverage_source.csv",
+      "byte_equal": false
+    },
+    {
+      "file": "cross_layer_timing.svg",
+      "byte_equal": true
+    },
+    {
+      "file": "cross_layer_timing_source.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "emerging_detection.svg",
+      "byte_equal": true
+    },
+    {
+      "file": "emerging_detection_columns.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "emerging_detection_source.csv",
+      "byte_equal": false
+    },
+    {
+      "file": "figure_legends.json",
+      "byte_equal": true
+    },
+    {
+      "file": "kinase_footprints.svg",
+      "byte_equal": true
+    },
+    {
+      "file": "kinase_footprints_points.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "kinase_footprints_selection.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "kinase_footprints_source.csv",
+      "byte_equal": false
+    },
+    {
+      "file": "parent_correction.svg",
+      "byte_equal": true
+    },
+    {
+      "file": "parent_correction_source.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "protein_trajectories.svg",
+      "byte_equal": true
+    },
+    {
+      "file": "protein_trajectories_points.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "protein_trajectories_selection.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "protein_trajectories_source.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "substrate_contrast_heatmap.svg",
+      "byte_equal": true
+    },
+    {
+      "file": "substrate_contrast_heatmap_columns.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "substrate_contrast_heatmap_source.csv",
+      "byte_equal": true
+    },
+    {
+      "file": "technical_dispersion.svg",
+      "byte_equal": true
+    },
+    {
+      "file": "technical_dispersion_source.csv",
+      "byte_equal": true
+    }
+  ],
+  "baseline_manifest_sha256": "6614fbeccb18902363aab1a1cef81b2f0647f02c3d6d656d318d2ce8e31116f2",
+  "baseline_archive_sha256": "01876488ec019bef4553aba5ba13b9409d837b260a2d8fa903d9359e3efccbef",
+  "source_pin_sha256": "7560c13a6b430363744157d74ad160a83e0939ec0754cedce20d7c0fe9dcbd8e",
+  "source_pin_file_sha256": "f439a47aeef059bf1292b2c185cb79cc34252493a0f2234846612b50eb097f3f",
+  "literature_pin_file_sha256": "eefcb4207fa70699354856e7ff92e7f2a8f522a50918c410bad94b5688f1dfb8",
+  "literature_comparison_pin_file_sha256": "f9eae7554a453c701cdb3969b025bf4e55c52f5858f08b2084f52f9483389487",
+  "input_audit_rows": 69684,
+  "lineage_rows": 10525,
+  "membership_turnover": [
+    {
+      "from_contrast": "contrast_aea4869f398c5584",
+      "to_contrast": "contrast_4147ebd64e7ecf80",
+      "shared": 349,
+      "lost": [
+        "measurement_55bde3145d431cc781c8",
+        "measurement_79c3c05905686552c4d9",
+        "measurement_866ea35e5797daddd2b6",
+        "measurement_e6a75e2daf824444c18b"
+      ],
+      "gained": [
+        "measurement_2664e47eb2d5a92388cc",
+        "measurement_59c425407536bce5e86c",
+        "measurement_5b4b460a21a517fe1216",
+        "measurement_5bc8060adbd16ca344e7",
+        "measurement_881ef12feb1c813297da",
+        "measurement_9f07da1b75c405e81709",
+        "measurement_b2cb8e59d5db029fbbeb",
+        "measurement_cfdfd0d4bb511f1db14d"
+      ]
+    },
+    {
+      "from_contrast": "contrast_4147ebd64e7ecf80",
+      "to_contrast": "contrast_eb2f813f825c4ccb",
+      "shared": 353,
+      "lost": [
+        "measurement_59c425407536bce5e86c",
+        "measurement_5bc8060adbd16ca344e7",
+        "measurement_82dc27bcf404bf5d7ccc",
+        "measurement_f18d800e67085b0ea8d4"
+      ],
+      "gained": [
+        "measurement_55bde3145d431cc781c8",
+        "measurement_79c3c05905686552c4d9",
+        "measurement_866ea35e5797daddd2b6",
+        "measurement_e6a75e2daf824444c18b"
+      ]
+    },
+    {
+      "from_contrast": "contrast_eb2f813f825c4ccb",
+      "to_contrast": "contrast_c15817d77868a59a",
+      "shared": 351,
+      "lost": [
+        "measurement_43eb79f9dd17317af2ee",
+        "measurement_55bde3145d431cc781c8",
+        "measurement_8773f0ce97070d6f0807",
+        "measurement_9e18eaf35d58020d7435",
+        "measurement_9f07da1b75c405e81709",
+        "measurement_d6f663539c2dcbdf27be"
+      ],
+      "gained": [
+        "measurement_2bb0f0832078d784a65a",
+        "measurement_5bc8060adbd16ca344e7",
+        "measurement_82dc27bcf404bf5d7ccc"
+      ]
+    },
+    {
+      "from_contrast": "contrast_c15817d77868a59a",
+      "to_contrast": "contrast_fd5240cdb335e779",
+      "shared": 342,
+      "lost": [
+        "measurement_2bb0f0832078d784a65a",
+        "measurement_2c396e4261ccf6a324c5",
+        "measurement_5bc8060adbd16ca344e7",
+        "measurement_866ea35e5797daddd2b6",
+        "measurement_8c7f5f21ee41e83ed15f",
+        "measurement_9d3dee2456aaa609842c",
+        "measurement_9ffd943c436b99a26093",
+        "measurement_a41bec208945a144e69b",
+        "measurement_b06d1f4fed1481defc5b",
+        "measurement_b65ec87275235e30582c",
+        "measurement_bbd256725f1f107a4e3e",
+        "measurement_bd49098c21e63654d6f3"
+      ],
+      "gained": [
+        "measurement_59d9fb447c0b0754cdc9",
+        "measurement_8773f0ce97070d6f0807",
+        "measurement_9e18eaf35d58020d7435",
+        "measurement_9f07da1b75c405e81709",
+        "measurement_d6f663539c2dcbdf27be",
+        "measurement_f18d800e67085b0ea8d4"
+      ]
+    },
+    {
+      "from_contrast": "contrast_fd5240cdb335e779",
+      "to_contrast": "contrast_d6757f4b8563521f",
+      "shared": 341,
+      "lost": [
+        "measurement_356dd4d748823dabdb27",
+        "measurement_59d9fb447c0b0754cdc9",
+        "measurement_79c3c05905686552c4d9",
+        "measurement_82dc27bcf404bf5d7ccc",
+        "measurement_98009abd09852e42c097",
+        "measurement_9e18eaf35d58020d7435",
+        "measurement_d452e291329a40c710cc"
+      ],
+      "gained": [
+        "measurement_2bb0f0832078d784a65a",
+        "measurement_2c396e4261ccf6a324c5",
+        "measurement_5bc8060adbd16ca344e7",
+        "measurement_8c7f5f21ee41e83ed15f",
+        "measurement_9d3dee2456aaa609842c",
+        "measurement_9ffd943c436b99a26093",
+        "measurement_b06d1f4fed1481defc5b",
+        "measurement_b65ec87275235e30582c",
+        "measurement_bbd256725f1f107a4e3e",
+        "measurement_bd49098c21e63654d6f3"
+      ]
+    }
+  ],
+  "common_ranked_groups_all_times": 331,
+  "representative_six_time_lineage": [
+    {
+      "contrast_id": "contrast_aea4869f398c5584",
+      "time_min": 1.0,
+      "form_id": "form_002ba74002edd12d",
+      "site_id": "site_identity_8a2e375b06295a358288",
+      "measurement_group_id": "measurement_634a69cc74b333473ee4",
+      "candidate_id": "specificity_candidate_77e477e51765dc11ea6c",
+      "assay_label": "P38B",
+      "specificity_id": "official_specificity_7b6b0a15fe9e0a37fc67",
+      "edge_id": "edge_3c8ad6aa48fc84443549",
+      "contribution_id": "contribution_06a60bcc095b775225e2",
+      "sequence_window": "GQAPITPQQG",
+      "raw_score": 45.469129952909896,
+      "percentile": 97.76,
+      "U_joint": 0.16071049798753378,
+      "P_joint": 0.09975055329097415,
+      "A": 0.06095994469656141,
+      "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+      "target_joint_run_ids": "injection_3c5fda9ab6d0f382;injection_6753024f5f818482;injection_9562ca828277ecb9",
+      "descriptive_contribution_value": 0.06095994469656141,
+      "method_membership_id": "native_membership_e9f735a49365b706dfdc",
+      "selected": true,
+      "ranking_statistic": 0.06095994469656141,
+      "method_result_id": "method_result_058c594cd6b0516bdcdd",
+      "score": 0.73311,
+      "method_p": 0.18488,
+      "method_q": 0.37716,
+      "status": "computed_method_enrichment"
+    },
+    {
+      "contrast_id": "contrast_4147ebd64e7ecf80",
+      "time_min": 5.0,
+      "form_id": "form_002ba74002edd12d",
+      "site_id": "site_identity_8a2e375b06295a358288",
+      "measurement_group_id": "measurement_634a69cc74b333473ee4",
+      "candidate_id": "specificity_candidate_77e477e51765dc11ea6c",
+      "assay_label": "P38B",
+      "specificity_id": "official_specificity_7b6b0a15fe9e0a37fc67",
+      "edge_id": "edge_3c8ad6aa48fc84443549",
+      "contribution_id": "contribution_a89c857747014e90a87d",
+      "sequence_window": "GQAPITPQQG",
+      "raw_score": 45.469129952909896,
+      "percentile": 97.76,
+      "U_joint": -0.4543250781611512,
+      "P_joint": 0.085378784228336,
+      "A": -0.5397038623894854,
+      "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+      "target_joint_run_ids": "injection_0714c6c9670575d4;injection_1500f97f51d61470;injection_70edf1dcce14dda9",
+      "descriptive_contribution_value": -0.5397038623894854,
+      "method_membership_id": "native_membership_742a924e222b14adaf98",
+      "selected": true,
+      "ranking_statistic": -0.5397038623894854,
+      "method_result_id": "method_result_06ffc0508e9c6c8ea88b",
+      "score": 0.92267,
+      "method_p": 0.11949,
+      "method_q": 0.38824,
+      "status": "computed_method_enrichment"
+    },
+    {
+      "contrast_id": "contrast_eb2f813f825c4ccb",
+      "time_min": 15.0,
+      "form_id": "form_002ba74002edd12d",
+      "site_id": "site_identity_8a2e375b06295a358288",
+      "measurement_group_id": "measurement_634a69cc74b333473ee4",
+      "candidate_id": "specificity_candidate_77e477e51765dc11ea6c",
+      "assay_label": "P38B",
+      "specificity_id": "official_specificity_7b6b0a15fe9e0a37fc67",
+      "edge_id": "edge_3c8ad6aa48fc84443549",
+      "contribution_id": "contribution_d0c4720b0abdb0b7adae",
+      "sequence_window": "GQAPITPQQG",
+      "raw_score": 45.469129952909896,
+      "percentile": 97.76,
+      "U_joint": -0.20202852464311505,
+      "P_joint": 0.11599455400769543,
+      "A": -0.3180230786508087,
+      "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+      "target_joint_run_ids": "injection_4d76518dc0aa4f6a;injection_6f129e1f7b3e91b7;injection_c7b4cd92fb947404",
+      "descriptive_contribution_value": -0.3180230786508087,
+      "method_membership_id": "native_membership_67b75ed533c4251cae54",
+      "selected": true,
+      "ranking_statistic": -0.3180230786508087,
+      "method_result_id": "method_result_23c3ecc4dc09f93baf7a",
+      "score": 0.67391,
+      "method_p": 0.21188,
+      "method_q": 0.42649,
+      "status": "computed_method_enrichment"
+    },
+    {
+      "contrast_id": "contrast_c15817d77868a59a",
+      "time_min": 30.0,
+      "form_id": "form_002ba74002edd12d",
+      "site_id": "site_identity_8a2e375b06295a358288",
+      "measurement_group_id": "measurement_634a69cc74b333473ee4",
+      "candidate_id": "specificity_candidate_77e477e51765dc11ea6c",
+      "assay_label": "P38B",
+      "specificity_id": "official_specificity_7b6b0a15fe9e0a37fc67",
+      "edge_id": "edge_3c8ad6aa48fc84443549",
+      "contribution_id": "contribution_6f83592016415c0ca670",
+      "sequence_window": "GQAPITPQQG",
+      "raw_score": 45.469129952909896,
+      "percentile": 97.76,
+      "U_joint": -0.49009230604571385,
+      "P_joint": 0.09943091139283311,
+      "A": -0.5895232174385523,
+      "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+      "target_joint_run_ids": "injection_226c9fbdf44fa344;injection_35303801ddb0713f;injection_550fade904902c8f",
+      "descriptive_contribution_value": -0.5895232174385523,
+      "method_membership_id": "native_membership_735027775c381ef00a7d",
+      "selected": true,
+      "ranking_statistic": -0.5895232174385523,
+      "method_result_id": "method_result_ce4f3a5c7d1a495d3e50",
+      "score": 1.06606,
+      "method_p": 0.08589,
+      "method_q": 0.39883,
+      "status": "computed_method_enrichment"
+    },
+    {
+      "contrast_id": "contrast_fd5240cdb335e779",
+      "time_min": 60.0,
+      "form_id": "form_002ba74002edd12d",
+      "site_id": "site_identity_8a2e375b06295a358288",
+      "measurement_group_id": "measurement_634a69cc74b333473ee4",
+      "candidate_id": "specificity_candidate_77e477e51765dc11ea6c",
+      "assay_label": "P38B",
+      "specificity_id": "official_specificity_7b6b0a15fe9e0a37fc67",
+      "edge_id": "edge_3c8ad6aa48fc84443549",
+      "contribution_id": "contribution_509b137899c2f1d323ac",
+      "sequence_window": "GQAPITPQQG",
+      "raw_score": 45.469129952909896,
+      "percentile": 97.76,
+      "U_joint": -0.44900588289386434,
+      "P_joint": -0.05387479575419718,
+      "A": -0.39513108713966894,
+      "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+      "target_joint_run_ids": "injection_1bf0682ac74d04cb;injection_b9511428064d86b5;injection_d9f4d9b18afe3676",
+      "descriptive_contribution_value": -0.39513108713966894,
+      "method_membership_id": "native_membership_67c0b9c633791fd7837d",
+      "selected": true,
+      "ranking_statistic": -0.39513108713966894,
+      "method_result_id": "method_result_dc31fa2fc4a83ff4b909",
+      "score": 0.70404,
+      "method_p": 0.19768,
+      "method_q": 0.44815,
+      "status": "computed_method_enrichment"
+    },
+    {
+      "contrast_id": "contrast_d6757f4b8563521f",
+      "time_min": 180.0,
+      "form_id": "form_002ba74002edd12d",
+      "site_id": "site_identity_8a2e375b06295a358288",
+      "measurement_group_id": "measurement_634a69cc74b333473ee4",
+      "candidate_id": "specificity_candidate_77e477e51765dc11ea6c",
+      "assay_label": "P38B",
+      "specificity_id": "official_specificity_7b6b0a15fe9e0a37fc67",
+      "edge_id": "edge_3c8ad6aa48fc84443549",
+      "contribution_id": "contribution_e3d5469517d38819ae7d",
+      "sequence_window": "GQAPITPQQG",
+      "raw_score": 45.469129952909896,
+      "percentile": 97.76,
+      "U_joint": -0.5014206162608374,
+      "P_joint": 0.13980001497376193,
+      "A": -0.6412206312346029,
+      "reference_joint_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+      "target_joint_run_ids": "injection_1733c7b79c22161c;injection_87cc5890d56f0e1b;injection_8dcd9b8e5f55b1e5",
+      "descriptive_contribution_value": -0.6412206312346029,
+      "method_membership_id": "native_membership_ee3079605eedce979948",
+      "selected": true,
+      "ranking_statistic": -0.6412206312346029,
+      "method_result_id": "method_result_e48980fb2246c4db1669",
+      "score": 0.57289,
+      "method_p": 0.26737,
+      "method_q": 0.45817,
+      "status": "computed_method_enrichment"
+    }
+  ],
+  "reader": {
+    "time_summary": "reader/phosx_time_summary.csv",
+    "assay_results": "reader/phosx_assay_time_results.csv",
+    "readable": "reader/PHOSX_TIME_COURSE.md",
+    "links_checked": 72,
+    "original_reader_validation": {
+      "source_rows_checked": 16944,
+      "cards_checked": 14658,
+      "findings_checked": 15,
+      "values_times_NA_masks_ids": "passed"
+    }
+  },
+  "execution": {
+    "scope": "local_v6_engine_with_existing_order70_worker_config; no production_API_DB_run",
+    "wall_seconds": 2305.594942457974,
+    "network_LLM_quantification_forbidden": true,
+    "quant_cache": [
+      {
+        "status": "reused",
+        "fingerprint": "quant_v6_59024921d6b79f54630d",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63"
+      },
+      {
+        "status": "reused",
+        "fingerprint": "quant_v6_66ce0aceb9d95ad1f53c",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63"
+      }
+    ],
+    "stage_reuse": {
+      "normalization_sensitivity": {
+        "fingerprint": "quant_v6_66ce0aceb9d95ad1f53c",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      },
+      "quant": {
+        "fingerprint": "quant_v6_59024921d6b79f54630d",
+        "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+        "status": "reused"
+      }
+    },
+    "stage_ledger": {
+      "profile": "astra_analysis.v6",
+      "stages": [
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "7a33b500557d6a505d8bfc882c26b101a156e25f0d0075a7f02ecaa54895413d",
+          "config_hash": "dda04e8c5cadd69f2978dccd4d19e9591bdea2143c1c6e37772d723ace974d56",
+          "dependencies": [],
+          "elapsed_seconds": 0.9877812500344589,
+          "finished_utc": "2026-10-09T09:19:59.729870+00:00",
+          "process_peak_memory_bytes": 416284672,
+          "stage": "resolve_inputs_and_plan",
+          "started_utc": "2026-10-09T09:19:58.742081+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "7a33b500557d6a505d8bfc882c26b101a156e25f0d0075a7f02ecaa54895413d",
+          "config_hash": "dda04e8c5cadd69f2978dccd4d19e9591bdea2143c1c6e37772d723ace974d56",
+          "dependencies": [
+            "resolve_inputs_and_plan"
+          ],
+          "elapsed_seconds": 20.561973624979146,
+          "finished_utc": "2026-10-09T09:20:20.294492+00:00",
+          "process_peak_memory_bytes": 1928445952,
+          "stage": "quantify_evidence",
+          "started_utc": "2026-10-09T09:19:59.732348+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "7a33b500557d6a505d8bfc882c26b101a156e25f0d0075a7f02ecaa54895413d",
+          "config_hash": "dda04e8c5cadd69f2978dccd4d19e9591bdea2143c1c6e37772d723ace974d56",
+          "dependencies": [
+            "resolve_inputs_and_plan"
+          ],
+          "elapsed_seconds": 2.206765125039965,
+          "finished_utc": "2026-10-09T09:20:22.503886+00:00",
+          "process_peak_memory_bytes": 2103115776,
+          "stage": "resolve_annotation",
+          "started_utc": "2026-10-09T09:20:20.297102+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "7a33b500557d6a505d8bfc882c26b101a156e25f0d0075a7f02ecaa54895413d",
+          "config_hash": "dda04e8c5cadd69f2978dccd4d19e9591bdea2143c1c6e37772d723ace974d56",
+          "dependencies": [
+            "identity_localization",
+            "resolve_annotation"
+          ],
+          "elapsed_seconds": 27.1470229170518,
+          "finished_utc": "2026-10-09T09:21:00.368204+00:00",
+          "process_peak_memory_bytes": 3027009536,
+          "stage": "discover_regulators",
+          "started_utc": "2026-10-09T09:20:33.220957+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "7a33b500557d6a505d8bfc882c26b101a156e25f0d0075a7f02ecaa54895413d",
+          "config_hash": "dda04e8c5cadd69f2978dccd4d19e9591bdea2143c1c6e37772d723ace974d56",
+          "dependencies": [
+            "discover_regulators"
+          ],
+          "elapsed_seconds": 135.5000294590136,
+          "finished_utc": "2026-10-09T09:23:15.873665+00:00",
+          "process_peak_memory_bytes": 3344547840,
+          "stage": "score_regulator_footprints",
+          "started_utc": "2026-10-09T09:21:00.372522+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "7a33b500557d6a505d8bfc882c26b101a156e25f0d0075a7f02ecaa54895413d",
+          "config_hash": "dda04e8c5cadd69f2978dccd4d19e9591bdea2143c1c6e37772d723ace974d56",
+          "dependencies": [
+            "score_regulator_footprints"
+          ],
+          "elapsed_seconds": 1263.6614545839839,
+          "finished_utc": "2026-10-09T09:45:59.723240+00:00",
+          "process_peak_memory_bytes": 3734765568,
+          "stage": "integrate_temporal_layers",
+          "started_utc": "2026-10-09T09:24:56.051431+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "7a33b500557d6a505d8bfc882c26b101a156e25f0d0075a7f02ecaa54895413d",
+          "config_hash": "dda04e8c5cadd69f2978dccd4d19e9591bdea2143c1c6e37772d723ace974d56",
+          "dependencies": [
+            "integrate_temporal_layers"
+          ],
+          "elapsed_seconds": 68.97242737491615,
+          "finished_utc": "2026-10-09T09:57:26.163345+00:00",
+          "process_peak_memory_bytes": 5459755008,
+          "stage": "assemble_evidence_package",
+          "started_utc": "2026-10-09T09:56:17.190348+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "7a33b500557d6a505d8bfc882c26b101a156e25f0d0075a7f02ecaa54895413d",
+          "config_hash": "dda04e8c5cadd69f2978dccd4d19e9591bdea2143c1c6e37772d723ace974d56",
+          "dependencies": [
+            "assemble_evidence_package"
+          ],
+          "elapsed_seconds": 57.05264808307402,
+          "finished_utc": "2026-10-09T09:58:23.220150+00:00",
+          "process_peak_memory_bytes": 6944358400,
+          "stage": "validate_and_publish",
+          "started_utc": "2026-10-09T09:57:26.167032+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "7a33b500557d6a505d8bfc882c26b101a156e25f0d0075a7f02ecaa54895413d",
+          "config_hash": "dda04e8c5cadd69f2978dccd4d19e9591bdea2143c1c6e37772d723ace974d56",
+          "dependencies": [
+            "quantify_evidence"
+          ],
+          "elapsed_seconds": 10.046603124937974,
+          "finished_utc": "2026-10-09T09:20:33.217378+00:00",
+          "process_peak_memory_bytes": 2524315648,
+          "stage": "identity_localization",
+          "started_utc": "2026-10-09T09:20:23.170692+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "7a33b500557d6a505d8bfc882c26b101a156e25f0d0075a7f02ecaa54895413d",
+          "config_hash": "dda04e8c5cadd69f2978dccd4d19e9591bdea2143c1c6e37772d723ace974d56",
+          "dependencies": [
+            "integrate_temporal_layers"
+          ],
+          "elapsed_seconds": 0.34501591697335243,
+          "finished_utc": "2026-10-09T09:56:17.186420+00:00",
+          "process_peak_memory_bytes": 4933500928,
+          "stage": "finding_literature",
+          "started_utc": "2026-10-09T09:56:16.841404+00:00",
+          "status": "completed"
+        }
+      ]
+    },
+    "reader_revision_stage_ledger": {
+      "profile": "astra_analysis.v6",
+      "stages": [
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "d33c58f7401ab2c475a5c9c74d1a54a0b1e6568989166e0c944b72b75f575404",
+          "config_hash": "9fa760bcd8899131888b938f3a08d92b6f0a8c99896b93f75f93d74c3059668a",
+          "dependencies": [],
+          "origin_run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+          "scientific_recalculation": false,
+          "stage": "resolve_inputs_and_plan",
+          "status": "reused"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "d33c58f7401ab2c475a5c9c74d1a54a0b1e6568989166e0c944b72b75f575404",
+          "config_hash": "9fa760bcd8899131888b938f3a08d92b6f0a8c99896b93f75f93d74c3059668a",
+          "dependencies": [
+            "resolve_inputs_and_plan"
+          ],
+          "origin_run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+          "scientific_recalculation": false,
+          "stage": "quantify_evidence",
+          "status": "reused"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "d33c58f7401ab2c475a5c9c74d1a54a0b1e6568989166e0c944b72b75f575404",
+          "config_hash": "9fa760bcd8899131888b938f3a08d92b6f0a8c99896b93f75f93d74c3059668a",
+          "dependencies": [
+            "resolve_inputs_and_plan"
+          ],
+          "origin_run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+          "scientific_recalculation": false,
+          "stage": "resolve_annotation",
+          "status": "reused"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "d33c58f7401ab2c475a5c9c74d1a54a0b1e6568989166e0c944b72b75f575404",
+          "config_hash": "9fa760bcd8899131888b938f3a08d92b6f0a8c99896b93f75f93d74c3059668a",
+          "dependencies": [
+            "identity_localization",
+            "resolve_annotation"
+          ],
+          "origin_run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+          "scientific_recalculation": false,
+          "stage": "discover_regulators",
+          "status": "reused"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "d33c58f7401ab2c475a5c9c74d1a54a0b1e6568989166e0c944b72b75f575404",
+          "config_hash": "9fa760bcd8899131888b938f3a08d92b6f0a8c99896b93f75f93d74c3059668a",
+          "dependencies": [
+            "discover_regulators"
+          ],
+          "origin_run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+          "scientific_recalculation": false,
+          "stage": "score_regulator_footprints",
+          "status": "reused"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "d33c58f7401ab2c475a5c9c74d1a54a0b1e6568989166e0c944b72b75f575404",
+          "config_hash": "9fa760bcd8899131888b938f3a08d92b6f0a8c99896b93f75f93d74c3059668a",
+          "dependencies": [
+            "score_regulator_footprints"
+          ],
+          "origin_run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+          "scientific_recalculation": false,
+          "stage": "integrate_temporal_layers",
+          "status": "reused"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "d33c58f7401ab2c475a5c9c74d1a54a0b1e6568989166e0c944b72b75f575404",
+          "config_hash": "9fa760bcd8899131888b938f3a08d92b6f0a8c99896b93f75f93d74c3059668a",
+          "dependencies": [
+            "integrate_temporal_layers"
+          ],
+          "elapsed_seconds": 17.82085358304903,
+          "finished_utc": "2026-10-09T10:03:10.201131+00:00",
+          "process_peak_memory_bytes": 3318185984,
+          "stage": "assemble_evidence_package",
+          "started_utc": "2026-10-09T10:02:52.380132+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "d33c58f7401ab2c475a5c9c74d1a54a0b1e6568989166e0c944b72b75f575404",
+          "config_hash": "9fa760bcd8899131888b938f3a08d92b6f0a8c99896b93f75f93d74c3059668a",
+          "dependencies": [
+            "assemble_evidence_package"
+          ],
+          "elapsed_seconds": 50.17533912498038,
+          "finished_utc": "2026-10-09T10:04:00.377696+00:00",
+          "process_peak_memory_bytes": 4727947264,
+          "stage": "validate_and_publish",
+          "started_utc": "2026-10-09T10:03:10.201941+00:00",
+          "status": "completed"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "d33c58f7401ab2c475a5c9c74d1a54a0b1e6568989166e0c944b72b75f575404",
+          "config_hash": "9fa760bcd8899131888b938f3a08d92b6f0a8c99896b93f75f93d74c3059668a",
+          "dependencies": [
+            "quantify_evidence"
+          ],
+          "origin_run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+          "scientific_recalculation": false,
+          "stage": "identity_localization",
+          "status": "reused"
+        },
+        {
+          "checkpoint": {
+            "discovery": "discovery_v6_d127f3cdbacb4522bd51",
+            "identity_localization": "identity_v6_98757c19efa94c6eb92c",
+            "inference": "inference_v6_c5191019dcad4c6eb1d2",
+            "literature": "be592eff13f761c2de30159b11c357cd542d0f9d8b2533aeadfa57343b55c865",
+            "quant": "quant_v6_59024921d6b79f54630d",
+            "temporal": "temporal_v6_25b3f86d44b6be4b8263"
+          },
+          "code_hash": "d33c58f7401ab2c475a5c9c74d1a54a0b1e6568989166e0c944b72b75f575404",
+          "config_hash": "9fa760bcd8899131888b938f3a08d92b6f0a8c99896b93f75f93d74c3059668a",
+          "dependencies": [
+            "integrate_temporal_layers"
+          ],
+          "origin_run_id": "g0-3ba483e5a13f4e5faec3b684c5b228f5",
+          "scientific_recalculation": false,
+          "stage": "finding_literature",
+          "status": "reused"
+        }
+      ]
+    },
+    "native_runtimes": [
+      {
+        "contrast_id": "contrast_4147ebd64e7ecf80",
+        "method": "PhosX",
+        "runtime_seconds": 68.39719695900567,
+        "status": "executed"
+      },
+      {
+        "contrast_id": "contrast_aea4869f398c5584",
+        "method": "PhosX",
+        "runtime_seconds": 65.68664029205684,
+        "status": "executed"
+      },
+      {
+        "contrast_id": "contrast_c15817d77868a59a",
+        "method": "PhosX",
+        "runtime_seconds": 67.76610708306544,
+        "status": "executed"
+      },
+      {
+        "contrast_id": "contrast_d6757f4b8563521f",
+        "method": "PhosX",
+        "runtime_seconds": 66.32138245902024,
+        "status": "executed"
+      },
+      {
+        "contrast_id": "contrast_eb2f813f825c4ccb",
+        "method": "PhosX",
+        "runtime_seconds": 67.19990670902189,
+        "status": "executed"
+      },
+      {
+        "contrast_id": "contrast_fd5240cdb335e779",
+        "method": "PhosX",
+        "runtime_seconds": 65.82112112489995,
+        "status": "executed"
+      }
+    ],
+    "publication": {
+      "elapsed_seconds": 56.32466891594231,
+      "archive_bytes": 315918674,
+      "manifest_files": 224,
+      "source_requests": 24,
+      "cache_hits": 5
+    },
+    "publication_request_count_semantics": "24 source queries and 5 cache flags carried in reused pin; zero new network requests in this run",
+    "failure_protection": "isolated_output; before seal all six executed plus quant/findings/literature invariants required; old archive and pointer untouched",
+    "renderer_warning": "Fontconfig default cache not writable; Matplotlib used a temporary cache. Saved figures and scientific values were verified."
+  },
+  "tests": {
+    "reader_official_boundary": {
+      "passed": 16,
+      "skipped": 0,
+      "log": "tests.log"
+    },
+    "round02_03_figures": {
+      "passed": 13,
+      "skipped": 0,
+      "log": "figures.log"
+    },
+    "new_reader_and_multicontrast_comparator": {
+      "passed": 3,
+      "skipped": 0,
+      "log": "comparator_tests.log",
+      "overlap_with_first_suite": 2
+    },
+    "unique_tests_passed": 30
+  },
+  "code": {
+    "annotation_registry.py": {
+      "sha256": "79a95fa3079417cc0d4b613b17e561d1aac6c37237f6211eda295fe9b452ac51",
+      "workspace_matches": true
+    },
+    "annotation_species.py": {
+      "sha256": "7c6c7b8f6e4f55960e9d20eb06b7ad3bfd40cedcca833cbc8b1eecbaa047c9ec",
+      "workspace_matches": true
+    },
+    "astra_card_inputs.py": {
+      "sha256": "77df49bde1f4fee24e3317109713637043e2c87eebfee5c2e818e095b6fc9b3b",
+      "workspace_matches": true
+    },
+    "astra_discovery.py": {
+      "sha256": "dba061da84e508715fc87f866cede264d387e4d1db817a913c9add8ec3b7e853",
+      "workspace_matches": true
+    },
+    "astra_evidence.py": {
+      "sha256": "64eef1653b0015355b44c996623cc5d7f0a8a3b77219f072a04040170a8a038e",
+      "workspace_matches": true
+    },
+    "astra_evidence_v6.py": {
+      "sha256": "b58a895125ec3048ae8fb55875f0734e000b79b16d259378f701a642cb9a1a55",
+      "workspace_matches": true
+    },
+    "astra_figures.py": {
+      "sha256": "1fefdd3c2c98e4baa4af74f7c35c56857bf99d6db224f7ea4a52812381276d97",
+      "workspace_matches": true
+    },
+    "astra_inputs.py": {
+      "sha256": "a599555fcc076c00b1de25bd377d88100b461e5567a97d83ae72a76fc9679025",
+      "workspace_matches": true
+    },
+    "astra_literature.py": {
+      "sha256": "351d6b6a4b36327b6086f2216f081f6aea861971f01c7ae759a073cc24055cfb",
+      "workspace_matches": true
+    },
+    "astra_package.py": {
+      "sha256": "15c7c70d58e5b4a62be06de9746f3b59fd185004811f7801ed59591521591513",
+      "workspace_matches": true
+    },
+    "astra_plan.py": {
+      "sha256": "b0eabb0ee618cf3af025c7b3546027801d0f7de70170a44092b56b68da17d974",
+      "workspace_matches": true
+    },
+    "astra_reader.py": {
+      "sha256": "f5513c3eaa92fa2cb2fa1f823c4c8933bd0322d93ec75cd8426096d06259215c",
+      "workspace_matches": true
+    },
+    "astra_reader_revision.py": {
+      "sha256": "cc40fbc87680dc0febf0e447765f5981d863ccbe451aeaed314cf036bcbe05d5",
+      "workspace_matches": true
+    },
+    "astra_science.py": {
+      "sha256": "32f12e1032e2e048603caab136f6b8c49686f55e5b4a76c80d11efcec017706d",
+      "workspace_matches": true
+    },
+    "astra_sources.py": {
+      "sha256": "52badc6c9947ec5fc4af7d72505c26616023e3a2ee981e37aabd81a52012c22b",
+      "workspace_matches": true
+    },
+    "astra_temporal.py": {
+      "sha256": "19ae5f4d648c20dc449d264812c1b3fb08fd0750a08fbd8ac2a4919c2a07adf3",
+      "workspace_matches": true
+    },
+    "contrast_quantification.py": {
+      "sha256": "0f6ffb2776df8ee744469720610d9c681d2593880cbcb3c6671afdc629fb7cf6",
+      "workspace_matches": true
+    },
+    "de_novo_representation.py": {
+      "sha256": "f65f35dc1e1d8f6054f8a89e27a0987e1e195bf3639c333d06187a857e26a676",
+      "workspace_matches": true
+    },
+    "diann_evidence.py": {
+      "sha256": "8e0a165a249837ba5d64467ba3f0a5e30e5db91f6da3f2adce99d4f089278c14",
+      "workspace_matches": true
+    },
+    "directed_temporal_relationship.py": {
+      "sha256": "6296e613ccba22c8f9ef236f16458a6f9b46d9094ecaaebcdae4a77ba2235f9d",
+      "workspace_matches": true
+    },
+    "evidence_contracts.py": {
+      "sha256": "3451e5429e26c5bb9090a231fcf7189466e7d8b5f738f5cfe992cdf907f3bb26",
+      "workspace_matches": true
+    },
+    "evidence_methods.py": {
+      "sha256": "e6d39dc6c14898581893f1e96b8be68495396084f3ec4083d7e17f56b69d3c2e",
+      "workspace_matches": true
+    },
+    "evidence_stage_cache.py": {
+      "sha256": "c600b8338dedab370507183d9956d871798614bb3c93dcaadce9c283cd236f35",
+      "workspace_matches": true
+    },
+    "evidence_temporal.py": {
+      "sha256": "e2e63d36040cc681c3d5fb8c7349b6a8de7d51c9c301043b778a9918686aa71e",
+      "workspace_matches": true
+    },
+    "feature_identity.py": {
+      "sha256": "6521cebe17aa1feb6f65e2517ea7a28aaa0a13a9623693c89ab0ad0dff4ee159",
+      "workspace_matches": true
+    },
+    "finding_literature.py": {
+      "sha256": "3fa73699e2518e92c20ac6816696dec0412a3f57fb2de4ad85fed55879285c9d",
+      "workspace_matches": true
+    },
+    "generic_kinase.py": {
+      "sha256": "2046c02ed8e351759b962ce296d5284947a73aedc11cc81415374cda42d526d4",
+      "workspace_matches": true
+    },
+    "generic_workflow.py": {
+      "sha256": "12ef4d307b533d26ec06eeb2413f5fcf12659cb53b038e49559b55ff00a98c21",
+      "workspace_matches": true
+    },
+    "inference_policy.py": {
+      "sha256": "dde6c8faa7237b4bc862c1c22598f518d92400a0d6625994e536b8696dde3fa6",
+      "workspace_matches": true
+    },
+    "kea3_evidence.py": {
+      "sha256": "a44cb01c2b5b785397f09987382af99cd3ef80431ebe0ea860f0078e253f77fd",
+      "workspace_matches": true
+    },
+    "kinase_family_registry.json": {
+      "sha256": "0bd5c1b8defb0c9ffb6ee774e699a612d3ab5358493c568b5a29d5b587e55f03",
+      "workspace_matches": true
+    },
+    "kinase_specificity.py": {
+      "sha256": "2f6b98208f3789505d44371fa96afe5528dd699a87d981bf8766c3c8013a2eb5",
+      "workspace_matches": true
+    },
+    "kinase_trajectory_evidence.py": {
+      "sha256": "084ced5ed79d7c76a9b75e050a402c185f06c20177412bb5b5c702be766a6618",
+      "workspace_matches": true
+    },
+    "literature_cards.py": {
+      "sha256": "4055cc400eb6bd5324b9e9fe73f0c6ba74225c7f8170a815eb022e81628d4c35",
+      "workspace_matches": true
+    },
+    "localization_evidence.py": {
+      "sha256": "4727fe4610e3b27617f95b3ae5ecbb03911c53594b3957c663c7a6d791de366f",
+      "workspace_matches": true
+    },
+    "measured_feature_cards.py": {
+      "sha256": "274fdf0ebfbe1b6ecad397df198f693c929a950a31a6456c32883379eade9d7f",
+      "workspace_matches": true
+    },
+    "motif_candidate_calibration.py": {
+      "sha256": "8415bdf297054fbc3b36180fa11b567245cc4770fb162dc544f4e1fc64e93c68",
+      "workspace_matches": true
+    },
+    "motif_library.json": {
+      "sha256": "0e6e55fe7bce4d1376beafcf137a7dc83a4014d35b964778191094b2285f7897",
+      "workspace_matches": true
+    },
+    "normalization_provenance.py": {
+      "sha256": "ac7e3f553983642522231d58fe48884ea1cd811f6e51a19407ad41ab15eaa8fb",
+      "workspace_matches": true
+    },
+    "official_method_tracks.py": {
+      "sha256": "3537000c3504097551db19ddee9c4e2010c50a8c472382d0842289e809e63aed",
+      "workspace_matches": true
+    },
+    "official_specificity.py": {
+      "sha256": "87c97b64446c7cd96330d0a37b7714424b968dd0b77924b2c74059713e77372c",
+      "workspace_matches": true
+    },
+    "perturbation_validation.py": {
+      "sha256": "f4a738bbbd2960490135ac37144a5f57fb9e87daf682216ec00a39eff09eaaf5",
+      "workspace_matches": true
+    },
+    "phosx_activity_adapter.py": {
+      "sha256": "66d4d20ccd2cd26dda7be7f7fd933e0393aa6352c11a83784040d7ccea512722",
+      "workspace_matches": true
+    },
+    "probabilistic_cowave.py": {
+      "sha256": "0ea0dd397e5e46f05f3d14d1933ab906f8702fa762fc8d666af1c0b23f902c71",
+      "workspace_matches": true
+    },
+    "quantitative_fields.py": {
+      "sha256": "6f7c65e268a0d8fce60a84c991fccd77984943a12c95bbaf96d6df392d0129af",
+      "workspace_matches": true
+    },
+    "reader_authoring.py": {
+      "sha256": "aa90fffc9a5f6da88e1b24c4b7bb370f8d0e4a2d532540328c54306dd5917cfb",
+      "workspace_matches": true
+    },
+    "reader_observations.py": {
+      "sha256": "3d53ab87d5379b1f9715906beb49f9a98c142311fddb7bbc21f92a4e33e96d4e",
+      "workspace_matches": true
+    },
+    "report_compatible_kinase.py": {
+      "sha256": "a9dc4528e60a986780ba291436a7be27b14932d1aa35bcdfdcc43379155adf7d",
+      "workspace_matches": true
+    },
+    "report_compatible_quantification.py": {
+      "sha256": "f0e86d1433e49ba5e159f81b2521dd2834266bd76ad92dbea577d64027cbb4af",
+      "workspace_matches": true
+    },
+    "research_questions.py": {
+      "sha256": "dbecfbeeba8399ded996ce44bf70d7609d1f15c42dcb129d53f047da4e548420",
+      "workspace_matches": true
+    },
+    "science_inference.py": {
+      "sha256": "38b9c49057c2f9b69c3bdcf8b0977cf2b79b56660388acaf913ed58f0b053ac6",
+      "workspace_matches": true
+    },
+    "science_reference.py": {
+      "sha256": "0f5191de0b07f66d6156537680eeb1b4feaf818bef2c54cb82a7baccbe29fa1d",
+      "workspace_matches": true
+    },
+    "source_acquisition.py": {
+      "sha256": "4e52f29c07d434ecfce38f9986da851a55cb7a9930847937d32ffa611d6a823f",
+      "workspace_matches": true
+    },
+    "species_registry.py": {
+      "sha256": "dda947766dc06caaf48107a20f9cc16c474e617008c15645bde6a64bf3bc56af",
+      "workspace_matches": true
+    },
+    "study_design.py": {
+      "sha256": "803b7809448af56b974354d58ecdc43a5e0239fec61a60aad24dc9a30902d71a",
+      "workspace_matches": true
+    },
+    "study_design.schema.json": {
+      "sha256": "5425f0a24e70416f845945f64946112dbe8a1aa0432c57137332113b3cab2f80",
+      "workspace_matches": true
+    },
+    "study_design.v4.schema.json": {
+      "sha256": "988965a49cf7a66062942981e73bcb9d619868ba08dd78531e00ce758a40c742",
+      "workspace_matches": true
+    },
+    "study_metadata.py": {
+      "sha256": "de52100f1b870c51347203159975414582887c06bf6df7eaa02344ddd316657e",
+      "workspace_matches": true
+    },
+    "study_presets.py": {
+      "sha256": "fb06a85111bd4ee04ab7ece726d6236508041388c6690d1bc4da7544dc42d313",
+      "workspace_matches": true
+    },
+    "study_temporal_context.py": {
+      "sha256": "733933876e5dd3fa66f67d2e062bb5cebc6632797fd3d5a56175876784149fa3",
+      "workspace_matches": true
+    },
+    "study_temporal_context_resolution.py": {
+      "sha256": "193585c6e2482b26ae90e2d9b2757cb6f1542457fb908ea8f44e5249b7c90b55",
+      "workspace_matches": true
+    },
+    "substrate_temporal_dynamics.py": {
+      "sha256": "d0c831b628e7f65dee0ee26fe2a41308deebd9b9c5530f29916a6bb0de727b20",
+      "workspace_matches": true
+    }
+  },
+  "scripts": {
+    "validate_phosx_parity.py": "7c678ba355b55661d7cb6236851fa94212d325edaf3155c2989670359778af0b",
+    "replay_astra_reader.py": "40a7fa0e6c814c485722ca90646623656b33a1488dd00c8374208b099d39b006",
+    "replay_phosx_evidence.py": "e1c4ff0bfc5545e7f95a545ce36374a1135c08d111956972f7569a8d0fe69229"
+  },
+  "limits": [
+    "S/T_only; unsupported_Tyr_not_inactive",
+    "enzyme_accession_and_rat_orthology_unverified",
+    "assay_human_substrate_taxon_retained",
+    "measured_localization_unavailable",
+    "technical_repeats_not_biological_replication",
+    "native_score_not_log2_A_or_causal_activity",
+    "per_contrast_q_not_time_axis_FDR",
+    "varying_input_universes_preclude_claiming_score_max_as_activation_peak",
+    "no_calibration_or_independent_experiment_added",
+    "raw_HDF5_not_in_archive; method_replay_requires_same_hash_external_resources",
+    "no_raw_input_requantification_replay_this_round",
+    "5_15_30_60_not_independently_official_parity_tested",
+    "no_operational_deployment_flag_change_or_round10"
+  ],
+  "validation_runtime_seconds": {
+    "conditional_method": 485.68,
+    "offline_reader": 28.85
+  }
+}
