@@ -21,7 +21,7 @@ CODE_FILES += ['evidence_contracts.py','annotation_species.py']
 from .astra_reader import build_reader_tables, validate_reader, write_reader, TABLE_KEYS as READER_KEYS
 from .astra_literature import TABLE_KEYS as LITERATURE_KEYS, validate as validate_literature
 CODE_FILES += ['astra_literature.py','finding_literature.py','literature_cards.py','astra_reader_revision.py']
-CODE_FILES += ['astra_reader.py','measured_feature_cards.py','reader_observations.py','research_questions.py','reader_authoring.py','quantitative_fields.py','de_novo_representation.py']
+CODE_FILES += ['astra_reader.py','astra_reader_temporal.py','measured_feature_cards.py','reader_observations.py','research_questions.py','reader_authoring.py','quantitative_fields.py','de_novo_representation.py']
 KEYS={**legacy.KEYS,'site_report_observations':['site_report_row_id'],
       'localization_by_contrast':['localization_id'],'inference_results':['call_id'],
       'calibrated_calls':['call_id'],'evidence_dependency_groups':['dependency_id'],'calibration_provenance':['policy_id']}

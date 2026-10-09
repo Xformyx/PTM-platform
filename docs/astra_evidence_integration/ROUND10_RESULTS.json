@@ -1,0 +1,1983 @@
+{
+  "passed": true,
+  "parent_run_id": "g0-1f09d0d2622540cb894a61e0bf1b1aa0",
+  "run_id": "g0-02484ac7623548fe970d9f88f57ea2e1",
+  "scientific_recalculation": false,
+  "preserved_dictionary_tables": 78,
+  "quant_csv_preserved": 22,
+  "figures_preserved": 25,
+  "preserved_hashes": {
+    "evidence/censoring_bounds.csv": "bcf47ffe21e529dc7e02232ea079819609b4c87fd515f453dbd351ab335e66ed",
+    "evidence/coverage_funnel.csv": "ba6001e5a80d65bc354da5c2f249e05cd62eababd496b3c193437067a523737e",
+    "evidence/emergence_evidence.csv": "a1ae1d7f109bf4dddd1bb553f0e439adc5d421d30b2adc17344d2362892507df",
+    "evidence/feature_evidence_ledger.csv": "21013dba40e0ad84085cccbc8e86083a84e32c755315d66b6fdc01a77e2d961b",
+    "evidence/normalization_offsets.csv": "4f3fb13fa8e9b89cb05659712e5fee1fbfb583d1b794fc7bd95119c9bd43c47f",
+    "evidence/parent_adjustment_impact.csv": "7dc2cbcce7644e0ac36a71dfc063ca1a8b246d07dba01a703255d7e4bcba8cef",
+    "evidence/technical_dispersion.csv": "98c0e325a0e720583f62242d592ed88b48ae4a3c20db111b4674d1597b743033",
+    "evidence/technical_injection_omissions.csv": "ff1e6fd84af402b978489467695fc77c892dba554b76c2aa4b5685e32a4f076a",
+    "kinase/candidate_sensitivity.csv": "9df29482064b6ada1fb773616b57d844cf73d3d15cd196ce3f1fd88ebb2881d7",
+    "kinase/kea3_results.csv": "353764d299b94915559b68c8c0ecf0e0774bbff1d5f1b3de2cd3c08fa7f4502f",
+    "kinase/kinase_candidate_edges.csv": "c3ec5385259b3127a9d056b378b17ba603e0fdd0b256ee3980eff8856665254d",
+    "kinase/kinase_candidate_summary.csv": "bffd6972651cc91ad0f318179e15ace1cdcd4daa44f4a0311f92f9e6237cb939",
+    "kinase/kinase_protein_context.csv": "f2f88f5453717618fef617424f7881883a63d18d56183471ac4f9b935da9c19c",
+    "kinase/kinase_self_site_context.csv": "89be85c38f15cf550e7e9f5549f56e2b11767ba07c569882bc647beebd3cedaa",
+    "kinase/kinase_technical_omissions.csv": "c99c941ad452ecfe0a38687d2bc0d0aeae6264a76c481b3b73b6f77ad3295171",
+    "kinase/kinase_temporal_profiles.csv": "1099ced89f6e0a7a172279e2fdc3ef27757972351c7f5480f2b424dc94e292f1",
+    "kinase/method_executions.csv": "a66fb96d7fd33ee229cf1c65089e68bdce4d637533a41bd0eb4fc257ba427960",
+    "kinase/method_membership.csv": "6f4613e4dfbf88aa142ccb24507a451db8a9a278c52748c21d66808571bee3c5",
+    "kinase/method_scores.csv": "97b16c4c92201e2ce8f02782d2d4f72d8c45d6eb4d9b3e5f06b72d15b51f5252",
+    "kinase/substrate_contributions.csv": "2418db2aea6a48f6a77b89a9126468c73702260b843e4858e0eab92836229abf",
+    "quant/annotation_edges.csv": "ab555595c3f294dd63e65960e46c90744ac81efe49c5ebc9a08e0d8d93fb0bc4",
+    "quant/comparisons.csv": "865952249a46a4f0392369f99bc216b4a6add4a05429dcd6b081a39286dd12c9",
+    "quant/detection.csv": "df8b5d9123acae3e51b21b63aae92645853845a03178c0ae0f4b7d0589f341fa",
+    "quant/emergent_kinase_evidence.csv": "cd8e1ac9670efe6d8ed65373f45780fce6a30fa79f6935f947d092ae84b2034e",
+    "quant/form_evidence_status.csv": "0229daf7ca1f0383d7f15dda2e67973cf07c9f7b17e6092fccc111db6f7c3639",
+    "quant/kinase_injection_omissions.csv": "c7dd60af7fb3ef655ec58ff9aec19d3d02391f30852bb61e3e1b7c456c28446b",
+    "quant/kinase_membership.csv": "0949fcf78cb754c90b43cb3314385934fca46e58f9e6298ccc8c8aca5e352915",
+    "quant/kinase_profiles.csv": "df78178a41f3aa50bc3fd391f6b9750598ed071a0f2a1259b89c467d81e56bee",
+    "quant/kinase_sensitivity.csv": "dd482c1d58e71e4154d9e6f9f9eeea632bff75e4b036724c12a4c9e333d48161",
+    "quant/primary_A_input.csv": "4c826dc8191bb4160cf5f442387f3fa626b20001ffe00dcadbf44cf94afd6835",
+    "quant/protein_contrasts.csv": "f8b511c3ba15d9d049442ebd0849495a9b495060fcd5bd04e67ef30c255e8717",
+    "quant/runlevel.csv": "d90987da85f296ea7ae29f8b9334a49e7db4f0a2dd02c029d5004c537e9af138",
+    "quant/site_mapping.csv": "2690b405e44bbf3ef56b521fd9cfc3063adff10d00756333721c52cef0807bea",
+    "quant/strict_parent_complete.csv": "8358db1d81212b46665d36170aabaf9e8caa145d739650316ffbeaf66089acb8",
+    "quant/strict_parent_paired.csv": "b2b35ffadefe043679591680d2d80d7abf52c3fb9c5da782ca1d7a9d3d9cb31e",
+    "quant/strict_parent_peptide_masks.csv": "e2807f8a5cf1e7e5d315d7c4a73d3e8220a649ba253db75bdae0641facdf6532",
+    "quant/strict_selected_sequences.csv": "9636bee80af780425c3eeea7720d314523cbda2b0155c0c8481e59f509394184",
+    "quant/strict_unmodified_proteins.csv": "b15f349a8902c5acee631cf471ca74fc50fc4093b0790bd4c885a14a12ed08b3",
+    "quant/strict_unmodified_sequences.csv": "8f18cdbf1dd357e0d5c8c50e3e97a54880909c8751fe462a11e318cdcde766ba",
+    "quant/summary.csv": "4d90b48233fb106cf67869f117f9221338846ab3e71a4574faa66e871598d100",
+    "quant/temporal_protein_summary.csv": "173746aff05917a8599bc83739c4fc10a5c449b0e16b12daf0181527570027ae",
+    "quant/validation_panel.csv": "90888a0d560e242d0a8854adf500f06d46fe0c51a7c7668d767e2e200e7bcdcd",
+    "reader/cards.csv": "6c596a74f9c4e7f65e83bcfcd03c7dd05511961a058414f50d3e98ab032fd360",
+    "reader/coverage.csv": "f9fbcafc3657f2e6b5e3d9c872ef66f0b15719f5d9908de864280ee363cb9e4f",
+    "reader/findings.csv": "1b0e7103f1130ab82717a87cc62161a8d04191e08dc974d8f17ab9d8f62ec369",
+    "reader/literature_comparisons.csv": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+    "reader/literature_search.csv": "69dd85c7296313e1e10958263ac668a20c26a5a578d3bb475dee17e103eb8a5f",
+    "reader/literature_sources.csv": "2becf04a73ddd9980dc8c1bf92f18b4230623bd9c02390196354c9271819864c",
+    "reader_adapter/form_contrasts.csv": "03e2b7d55d6f442639ab8567ac34a2f0e2c061416d0060050f8e5960bccf7eab",
+    "reader_adapter/form_identity.csv": "31bd366391f9b87991b15fd6514141b9e0ac68ee388c55b26dad101cd1d7fd43",
+    "reader_adapter/precursor_membership.csv": "c2fee673621c5b23a73f1f676b8fbfda5ad35988e84ca0eeee2c0ade49dc4b01",
+    "reader_adapter/study_metadata.csv": "e74f7b9d1fd6ad497a7dbf889d2fc41844215fb64b42ab3135ea14fc0eacb027",
+    "references/source_query_ledger.csv": "a9e36d542343524a18fadeb91039f4d97bee2794ba4a8ce3fde42292739452d0",
+    "science/calibrated_calls.csv": "98c834126bb0d6a1df2a005d78ba3731742de0494d3ce8a528b09416df91d25d",
+    "science/calibration_provenance.csv": "fe5375e0c79150b59b5bac8ff4e188022fc87b7fbc6cf8889e2d3ba25d8135fb",
+    "science/evidence_dependency_groups.csv": "2650104b979ff79736d44b2616aacb564a9579e8cf7710146735e66397d2f1e2",
+    "science/group_excluded_anchors.csv": "f39007033115b6d7b3ea18ed4d6ba9d8710b311a4f8530cc607bfa34e8de0358",
+    "science/inference_results.csv": "3e8ea06ba2d4e93d7b2130c1d2765fe27ca4dccdc8ebc9809cac35f1b4ef9bbc",
+    "science/kinase_calls.csv": "3e8ea06ba2d4e93d7b2130c1d2765fe27ca4dccdc8ebc9809cac35f1b4ef9bbc",
+    "science/localization_by_contrast.csv": "8a1bc216501a8144f1108f6fd21da50fd263709c55593e1dd8bd03b05e0ab5ec",
+    "science/measurement_observations.csv": "7ec7e26708ae60bac85cf2aacb5b8e7107c76f4e69d793a7c6a974026af5abe5",
+    "science/observation_sites.csv": "dfb5af701edf4a2de9e5e398dd73d7c6ae232f78e6ee2480fb992675f65a5861",
+    "science/perturbation_validation.csv": "af0d9228f01323a2fb279a06ac2805c3538d6913366e82c65af256d23745a076",
+    "science/reference_inventory.csv": "a1ee6875bce7b09f947ba73e057303e97b351b4d29986dc865ce4104120a3807",
+    "science/replicate_uncertainty.csv": "1c5b7323e799cc78c6479bcd6275de81511c59b3a78470526cdcd346976cc4cc",
+    "science/site_identity_audit.csv": "11efc4b4397c499fe81e7246919fec1411b15d019105100f91da9cb13852f94a",
+    "science/site_report_observations.csv": "a7e15f62ecc51859bb35991978d3aba233d1c012c069257cb578c23b860fb9f9",
+    "science/specificity_scores.csv": "d9280b0b93056dbd90d60eae26da133c329555d467abbd51f184ca196893f7cf",
+    "study/input_field_manifest.csv": "75fcad38b4f01922aea05acfc72335fac1d2dd99adfc8402ad50360caa6db0c6",
+    "temporal/cross_layer_links.csv": "073149dfe201b58949fa6090535752237b59d6b4a72658a003c39d4c08112d8b",
+    "temporal/group_excluded_cowave.csv": "9d24223bd18f7ecdbdaae1aabfcba3b3c5c9b4d3d68fa7983e83f2e86175acdc",
+    "temporal/interval_contrasts.csv": "53b0670a480c1ca6b42044c7deb9ee5f17176a3cca327fd01e4bd7fef7bcd833",
+    "temporal/kinase_fixed_membership.csv": "87830c66a569c7fe85c7313f95c5353d3184bd043367ae793cf996a1c8875bda",
+    "temporal/kinase_temporal_features.csv": "71533ed05c0980be15a34f1bb421c1d0a69d6d2b31e3c69cc106ebfbb2ebb5d7",
+    "temporal/protein_temporal_features.csv": "60c0c828575fcb65e05d0e07af36a05e8367915c395bb2f15063db8ff062848e",
+    "temporal/ptm_temporal_features.csv": "5a6054d81a0712b2202f4c5b88ceb7d9db15459f5042ff5038e248e95deee72a",
+    "temporal/target_excluded_anchors.csv": "fa7c9b1ad7e32a0616e370bb720306043b794603b108f23741550b442a554531",
+    "temporal/temporal_series.csv": "41ac78c386cb557aa7743b04c3ecf2d82a3a033cea28943da33a5ec237a604c2",
+    "figures/U_P_A_examples.svg": "04c52b017be5a4e4de48d190578dde6f8ad06f6bf1da1dd44f4ba33706addc76",
+    "figures/U_P_A_examples_source.csv": "7dc2cbcce7644e0ac36a71dfc063ca1a8b246d07dba01a703255d7e4bcba8cef",
+    "figures/coverage.svg": "5cf4d06d803bc489e6c06c911699e6450b8c9691e4b122396e71ebd31d9efe48",
+    "figures/coverage_source.csv": "ba6001e5a80d65bc354da5c2f249e05cd62eababd496b3c193437067a523737e",
+    "figures/cross_layer_timing.svg": "e7ddea41eb6cfbc88a3a466c8082fb03b456cc8b7e27c0805d48b917070a3dc5",
+    "figures/cross_layer_timing_source.csv": "073149dfe201b58949fa6090535752237b59d6b4a72658a003c39d4c08112d8b",
+    "figures/emerging_detection.svg": "f17e3af1461c250462146af11580e81201ca61a3e782082adf1514c0fdedb093",
+    "figures/emerging_detection_columns.csv": "dffa3c856d3b02ec51f971c67fcf451365862a9a9b09f853bde1a5a369b01e88",
+    "figures/emerging_detection_source.csv": "a1ae1d7f109bf4dddd1bb553f0e439adc5d421d30b2adc17344d2362892507df",
+    "figures/figure_legends.json": "9292e54f1665dcadd76f0229e44ee46aeebf066e2328b6091e6944a1327d6ea1",
+    "figures/kinase_footprints.svg": "2fae3a22f820118bb701b3fbe5ba4214ff3c37d13211c9ad652b1aa676ef3e6b",
+    "figures/kinase_footprints_points.csv": "e6c73d4a4ac2d1911b456734f9b16767f75d9710563e15599390f12836ef0ffd",
+    "figures/kinase_footprints_selection.csv": "80d8b62a69b5872b2bcdbd2ed88eadca13be6704ac5ba1e0bfeed047168df718",
+    "figures/kinase_footprints_source.csv": "1099ced89f6e0a7a172279e2fdc3ef27757972351c7f5480f2b424dc94e292f1",
+    "figures/parent_correction.svg": "8fe960629101de62212266fe4c6181c11974f489d71cb4352629d86a8f374ff7",
+    "figures/parent_correction_source.csv": "7dc2cbcce7644e0ac36a71dfc063ca1a8b246d07dba01a703255d7e4bcba8cef",
+    "figures/protein_trajectories.svg": "add013f646afa47b356d8644d4295e7943938ae771521f9aed248b92e886bc49",
+    "figures/protein_trajectories_points.csv": "ec96ba892442436552b4081febf2b23fd7aa5d74383d3ee005dd027190d2298f",
+    "figures/protein_trajectories_selection.csv": "fa3d88b1cdd81cca66aee12aa01d29cdcc6466097238db3d207fab85f69da161",
+    "figures/protein_trajectories_source.csv": "f8b511c3ba15d9d049442ebd0849495a9b495060fcd5bd04e67ef30c255e8717",
+    "figures/substrate_contrast_heatmap.svg": "9682acd99c0c5a098875c979c742b57d37cf3334d81ce66f06f854abf33436e5",
+    "figures/substrate_contrast_heatmap_columns.csv": "4d91b6e60f859beb31898143ce7bf918e22d6e014b6f1db3865e0b8d655ae41d",
+    "figures/substrate_contrast_heatmap_source.csv": "865952249a46a4f0392369f99bc216b4a6add4a05429dcd6b081a39286dd12c9",
+    "figures/technical_dispersion.svg": "26f7d7e8583288bd4bc71557dd25b55270ed409716fd5b79f482bb9304618e9d",
+    "figures/technical_dispersion_source.csv": "98c0e325a0e720583f62242d592ed88b48ae4a3c20db111b4674d1597b743033",
+    "references/bibliographic_records.json": "596e45c9f28a11674bc6e650f8a1818f9cb864129a211fda1129d6228dae6e09",
+    "references/context_relations.json": "3e9fbcdd99206b5f6b2ccc65e4d70bd83189520f830f9a3fa8a411a5647fd259",
+    "references/documents/976d148ce4117fcd3f99c277fd9b35e3a06a2f19deb1afaa37e84b043460b353.docx": "976d148ce4117fcd3f99c277fd9b35e3a06a2f19deb1afaa37e84b043460b353",
+    "references/finding_literature_pin.json": "f9eae7554a453c701cdb3969b025bf4e55c52f5858f08b2084f52f9483389487",
+    "references/literature_comparison_packet.json": "1f2ef5dee48c01ad4d2c0e0898826000783013f4f7128f423d8baa1d81e50fb2",
+    "references/literature_pin.json": "eefcb4207fa70699354856e7ff92e7f2a8f522a50918c410bad94b5688f1dfb8",
+    "references/source_execution.json": "36b299ec1ea59348b3f331a84d16bf33567789b100febdaf132c66d278bf3b69",
+    "references/source_pin.json": "f439a47aeef059bf1292b2c185cb79cc34252493a0f2234846612b50eb097f3f"
+  },
+  "original_packet_except_temporal_additions_equal": true,
+  "finding_order": [
+    "finding_cf8f4249c4fa5bd2be47",
+    "finding_8d461aa65e3c36763221",
+    "finding_ac77a2145e4e726099e4",
+    "finding_6ff9b5317c9757cd32df",
+    "finding_46014d4da0dbfc4c3eb5",
+    "finding_73ec03a8ce3caf8e4155",
+    "finding_2114f9540b7df28b918f",
+    "finding_8db4d4e823a204a0e06c",
+    "finding_07f274450364a1c20919",
+    "finding_fec46f1f1b3e76d0404f",
+    "finding_2facbbc04ff9a833d825",
+    "finding_5655109b0640a68315be",
+    "finding_4b06279febeea1746cdd",
+    "finding_7b649b1f8325352ca0e9",
+    "finding_21636fa7f4f9f9b08727"
+  ],
+  "coverage": {
+    "linked": 15
+  },
+  "source_inventory": [
+    {
+      "linked_unique_rows": 1,
+      "outside_reader_rows": 0,
+      "retained": "full_source_table",
+      "table": "temporal/temporal_series.csv",
+      "total_rows": 1
+    },
+    {
+      "linked_unique_rows": 60,
+      "outside_reader_rows": 11236,
+      "retained": "full_source_table",
+      "table": "temporal/ptm_temporal_features.csv",
+      "total_rows": 11296
+    },
+    {
+      "linked_unique_rows": 30,
+      "outside_reader_rows": 18571,
+      "retained": "full_source_table",
+      "table": "temporal/protein_temporal_features.csv",
+      "total_rows": 18601
+    },
+    {
+      "linked_unique_rows": 23,
+      "outside_reader_rows": 8951,
+      "retained": "full_source_table",
+      "table": "temporal/kinase_temporal_features.csv",
+      "total_rows": 8974
+    },
+    {
+      "linked_unique_rows": 90,
+      "outside_reader_rows": 16854,
+      "retained": "full_source_table",
+      "table": "temporal/interval_contrasts.csv",
+      "total_rows": 16944
+    },
+    {
+      "linked_unique_rows": 138,
+      "outside_reader_rows": 53706,
+      "retained": "full_source_table",
+      "table": "temporal/kinase_fixed_membership.csv",
+      "total_rows": 53844
+    },
+    {
+      "linked_unique_rows": 25,
+      "outside_reader_rows": 3227,
+      "retained": "full_source_table",
+      "table": "temporal/target_excluded_anchors.csv",
+      "total_rows": 3252
+    },
+    {
+      "linked_unique_rows": 50,
+      "outside_reader_rows": 6454,
+      "retained": "full_source_table",
+      "table": "temporal/group_excluded_cowave.csv",
+      "total_rows": 6504
+    },
+    {
+      "linked_unique_rows": 138,
+      "outside_reader_rows": 53706,
+      "retained": "full_source_table",
+      "table": "kinase/kinase_temporal_profiles.csv",
+      "total_rows": 53844
+    },
+    {
+      "linked_unique_rows": 156,
+      "outside_reader_rows": 21063,
+      "retained": "full_source_table",
+      "table": "kinase/substrate_contributions.csv",
+      "total_rows": 21219
+    },
+    {
+      "linked_unique_rows": 15,
+      "outside_reader_rows": 2809,
+      "retained": "full_source_table",
+      "table": "quant/summary.csv",
+      "total_rows": 2824
+    },
+    {
+      "linked_unique_rows": 90,
+      "outside_reader_rows": 16854,
+      "retained": "full_source_table",
+      "table": "quant/comparisons.csv",
+      "total_rows": 16944
+    },
+    {
+      "linked_unique_rows": 90,
+      "outside_reader_rows": 57060,
+      "retained": "full_source_table",
+      "table": "quant/protein_contrasts.csv",
+      "total_rows": 57150
+    },
+    {
+      "linked_unique_rows": 90,
+      "outside_reader_rows": 54366,
+      "retained": "full_source_table",
+      "table": "quant/strict_unmodified_proteins.csv",
+      "total_rows": 54456
+    }
+  ],
+  "findings_with_candidate_contributions": 4,
+  "exact_projected_rows_checked": 1049,
+  "feature_points_checked": 696,
+  "unique_finding_source_links": 1049,
+  "relative_links_checked": 103,
+  "changed_files": [
+    "START_HERE_ASTRA.md",
+    "evidence_report.html",
+    "provenance.json",
+    "reader/READ_ME.md",
+    "reader/authoring_packet.json",
+    "reader/packet.csv",
+    "reader/question_map.json",
+    "reproducibility/code/ptm_shared/astra_evidence_v6.py",
+    "reproducibility/code/ptm_shared/astra_reader.py",
+    "reproducibility/code/ptm_shared/astra_reader_revision.py",
+    "study/analysis_plan.json"
+  ],
+  "examples_selection": "first_two_retained_findings_then_first_with_saved_computed_exclusion",
+  "native_method_replay": "not_repeated; method code/resources/inputs/results unchanged",
+  "base_commit": "11db1e5e34178c96aa1814a8eb6feb8d741463a5",
+  "scope": "round10_saved_temporal_reader_only",
+  "package_path": "codex-inputs/round10-20261009/output/astra_analysis_package_g0-02484ac7623548fe970d9f88f57ea2e1.zip",
+  "package_sha256": "c710ad40ebc75f5bb41a4eb5e505c690003c62d92a4e0d6c9a7747f2ce8bd9a3",
+  "package_bytes": 316909006,
+  "manifest_sha256": "98b90d13839dc39e03694542edd48986665287017f6c8867671f0a813ef99367",
+  "reader_path": "codex-inputs/round10-20261009/output/enrichment_free_runs/g0-02484ac7623548fe970d9f88f57ea2e1/reader/TEMPORAL_EVIDENCE.md",
+  "reader_revision_seconds": 128.70440345804673,
+  "reader_replay": {
+    "passed": true,
+    "files_byte_identical": 21,
+    "files": [
+      {
+        "file": "reader/READ_ME.md",
+        "sha256": "1028528d6bff0e1f955f69c74ef5034b698269bbd71d37a8a6732f0c50618fb2",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/authoring_packet.json",
+        "sha256": "ff63dc866ff50928a99d2694fe41d6072b8ad4c926d87b16e76f2d329d32c65f",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/coverage_summary.json",
+        "sha256": "2e84d37d90266cfff9270e5f8080189d7105d2a24d4f0b7e024f270d263107a5",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/question_map.json",
+        "sha256": "858c551916af6ab270669c569160c61ebc0d96f09ab1dc5b06a95d3c23310cbe",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/selection_audit.json",
+        "sha256": "c74f12b94ab6aadb8269668fd4491ec6c1d163d3f5e2b498a0a1245ff744be25",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/PHOSX_TIME_COURSE.md",
+        "sha256": "cb0b2196f4913ba4a7a734e3eedf9776ec6829b090254dd58e706cec126f73cb",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/phosx_time_summary.csv",
+        "sha256": "41b4651fd7893f97a68f498718519237e230387c9ebf799185295fab28df7c8c",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/phosx_assay_time_results.csv",
+        "sha256": "e6688457d5111bebf51ed1e2bbe4b887a587beb77b16f58ebe5919139f569679",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/TEMPORAL_EVIDENCE.md",
+        "sha256": "aa4c6d29c6c4b997a1742967e26f506a9d25f60defcc615df8a4a529f2d33c09",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/temporal_evidence.json",
+        "sha256": "bb7c201640b6415786f69e77274a30e87047adc70a30eb6455e56020d9bc92df",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/temporal_links.csv",
+        "sha256": "241ed08ed26eaf2819d8f3cc8ae83419a13bfe368a595c369696bcda88271a5b",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/LITERATURE.md",
+        "sha256": "301107501f8f8d38ae6feffbc740513224324e5eeb5b4a23a3526b50823fd669",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_summary.json",
+        "sha256": "f78b6ce33c810bf51bb3b1ab4522de783a9cc0bcb33d7f3462aea2ff2d8e93c6",
+        "byte_equal": true
+      },
+      {
+        "file": "references/finding_literature_pin.json",
+        "sha256": "f9eae7554a453c701cdb3969b025bf4e55c52f5858f08b2084f52f9483389487",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/cards.csv",
+        "sha256": "6c596a74f9c4e7f65e83bcfcd03c7dd05511961a058414f50d3e98ab032fd360",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/findings.csv",
+        "sha256": "1b0e7103f1130ab82717a87cc62161a8d04191e08dc974d8f17ab9d8f62ec369",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/coverage.csv",
+        "sha256": "f9fbcafc3657f2e6b5e3d9c872ef66f0b15719f5d9908de864280ee363cb9e4f",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/packet.csv",
+        "sha256": "afb09a7b606e5ad6ccc476b07bf624b4b54fb9ac69360067d7a052b2bed005b8",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_search.csv",
+        "sha256": "69dd85c7296313e1e10958263ac668a20c26a5a578d3bb475dee17e103eb8a5f",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_sources.csv",
+        "sha256": "2becf04a73ddd9980dc8c1bf92f18b4230623bd9c02390196354c9271819864c",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_comparisons.csv",
+        "sha256": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+        "byte_equal": true
+      }
+    ],
+    "network_requests": 0,
+    "archive_code_only": true,
+    "validation": {
+      "source_rows_checked": 16944,
+      "cards_checked": 14658,
+      "findings_checked": 15,
+      "values_times_NA_masks_ids": "passed"
+    }
+  },
+  "tests": {
+    "passed": 12,
+    "deselected": 1,
+    "elapsed_seconds": 1.48,
+    "command": "env PYTHONPATH=.:workers /tmp/ptm-round10-reader-venv/bin/python -m pytest ptm_shared/tests/test_astra_reader_temporal.py ptm_shared/tests/test_astra_reader.py ptm_shared/tests/test_phosx_reader_time.py -k 'not real_v6_package_invocation' -q",
+    "deselected_reason": "Existing portable test executes scientific stages; forbidden in Round10. Actual immutable revision and offline reader replay replace that boundary validation."
+  },
+  "render": {
+    "tables": 98,
+    "rows_including_headers": 613,
+    "consistent_column_counts": true,
+    "relative_links_checked": 103,
+    "directly_inspected": [
+      "dock7.png",
+      "exclusions.png",
+      "pnn.png"
+    ],
+    "artifact_directory": "codex-inputs/round10-20261009/render"
+  },
+  "no_calls": {
+    "quantification": true,
+    "specificity_scoring": true,
+    "native_PhosX": true,
+    "temporal_calculation": true,
+    "reference_acquisition": true,
+    "literature_retrieval": true,
+    "LLM_comparison": true
+  },
+  "scientific_improvement": "not_evaluated; existing evidence consumption only",
+  "production_deployment": false,
+  "feature_flags_changed": false,
+  "failures_resolved": [
+    {
+      "stage": "initial_sealing",
+      "reason": "nullable bool CSV string/inferred bool mismatch",
+      "resolution": "typed boolean reader projection; source bytes unchanged; initial attempt was not published"
+    },
+    {
+      "stage": "first_reader_replay",
+      "reason": "temporary venv files disappeared; pandas submodule missing",
+      "resolution": "restored pinned reader-only libraries in /tmp/ptm-round10-reader-venv; no scientific method rerun"
+    }
+  ],
+  "code_sha256": {
+    "ptm_shared/astra_reader_temporal.py": "e8241e77dd4c2e22f7d7e2637522e2b0803af29cee6054b9e8f98476339ff136",
+    "ptm_shared/astra_reader.py": "f812284027fd156eb4f708a07afd34034d87713bc0e5a9effa25c499cc982400",
+    "ptm_shared/astra_reader_revision.py": "5ac48daca098eb7217a0b0ba811f1acf787cd6dec7694dff19556eb3395ce820",
+    "ptm_shared/astra_evidence_v6.py": "c671243cfb601a39577c8f0419707b1f61e5f9d3ba03ef5da1d77fede455b8f8",
+    "scripts/replay_astra_reader.py": "06d84802e43437b02b74152a2b5e8c7fa4173558624279975332e6b2cb93338d",
+    "scripts/revise_astra_temporal_reader.py": "f13a3abab1b5b65458375cabf938b0309b1c9aec076cedd82af1f52917abab56",
+    "scripts/validate_astra_temporal_reader.py": "2e5de5bbc6c1bea9955efb0f5ceb49fd10f7ff2a5ab817eed05d7aae4ad94318",
+    "ptm_shared/tests/test_astra_reader_temporal.py": "3ba56f8d42029f069108f07f3bcaddc748f1f35fc463384f1a4772bd6ecf488a",
+    "ptm_shared/tests/test_astra_reader.py": "716e60585d1c1b3462066880c90c720e18d1c118ac9bb73a5991942ddfde63ea",
+    "ptm_shared/tests/test_astra_literature.py": "62bc61fa550700bf7523297f80393162351a88c1ca5c42f5410612d2452d08e2"
+  },
+  "findings": [
+    {
+      "order": 1,
+      "finding_id": "finding_cf8f4249c4fa5bd2be47",
+      "form_id": "form_5f6b1591279b085d",
+      "label": "DOCK7 modified-precursor feature annotated at S1423",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 2,
+      "finding_id": "finding_8d461aa65e3c36763221",
+      "form_id": "form_0307f4dc0d707fd5",
+      "label": "SIK3 modified-precursor feature annotated at S779",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 3,
+      "finding_id": "finding_ac77a2145e4e726099e4",
+      "form_id": "form_927c72b605b8f2bd",
+      "label": "RBM26 modified-precursor feature annotated at S127",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 4,
+      "finding_id": "finding_6ff9b5317c9757cd32df",
+      "form_id": "form_50dd63617f0b3f64",
+      "label": "ITPR1 modified-precursor feature annotated at S1589",
+      "status": "linked",
+      "reasons": [],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 1,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 5,
+      "finding_id": "finding_46014d4da0dbfc4c3eb5",
+      "form_id": "form_6939a1c00932ed01",
+      "label": "OSBPL3 modified-precursor feature annotated at S303",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 6,
+      "finding_id": "finding_73ec03a8ce3caf8e4155",
+      "form_id": "form_38d93d08c9e62872",
+      "label": "GTPBP1 modified-precursor feature annotated at S6;S25",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 7,
+      "finding_id": "finding_2114f9540b7df28b918f",
+      "form_id": "form_aee8bfc47ce1a311",
+      "label": "ULK1 modified-precursor feature annotated at S450",
+      "status": "linked",
+      "reasons": [],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 9,
+      "exclusion_rows": 27
+    },
+    {
+      "order": 8,
+      "finding_id": "finding_8db4d4e823a204a0e06c",
+      "form_id": "form_8d313eca11039e36",
+      "label": "SMARCC1 modified-precursor feature annotated at S327",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 9,
+      "finding_id": "finding_07f274450364a1c20919",
+      "form_id": "form_319395e40bb1b4cf",
+      "label": "PALLD modified-precursor feature annotated at S398",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 10,
+      "finding_id": "finding_fec46f1f1b3e76d0404f",
+      "form_id": "form_a42b0cc2bd54c30d",
+      "label": "PCBP2 modified-precursor feature annotated at S189",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 11,
+      "finding_id": "finding_2facbbc04ff9a833d825",
+      "form_id": "form_f85801b1da033eee",
+      "label": "SPECC1L modified-precursor feature annotated at S833",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 12,
+      "finding_id": "finding_5655109b0640a68315be",
+      "form_id": "form_8d945f8154ee2806",
+      "label": "RPLP0 modified-precursor feature annotated at T122",
+      "status": "linked",
+      "reasons": [],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 7,
+      "exclusion_rows": 21
+    },
+    {
+      "order": 13,
+      "finding_id": "finding_4b06279febeea1746cdd",
+      "form_id": "form_aea4edaa60566c70",
+      "label": "TELO2 modified-precursor feature annotated at S463",
+      "status": "linked",
+      "reasons": [],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 9,
+      "exclusion_rows": 27
+    },
+    {
+      "order": 14,
+      "finding_id": "finding_7b649b1f8325352ca0e9",
+      "form_id": "form_a15cbbbb88625e60",
+      "label": "SEC16A modified-precursor feature annotated at S1330",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    },
+    {
+      "order": 15,
+      "finding_id": "finding_21636fa7f4f9f9b08727",
+      "form_id": "form_cd7e5ed3c71781a3",
+      "label": "PNN modified-precursor feature annotated at S96;S100",
+      "status": "linked",
+      "reasons": [
+        "no_saved_candidate_contribution_for_form_and_series"
+      ],
+      "feature_rows": 6,
+      "interval_rows": 6,
+      "candidate_track_series": 0,
+      "exclusion_rows": 0
+    }
+  ],
+  "question_scope": [
+    {
+      "question_id": "BQ-001",
+      "finding_count": 15,
+      "temporal_links": 1049,
+      "answer_scope": "Saved sampled brackets/absolute observed peak/adjacent contrasts and same-data sensitivity only; not precise event times, causality or independent validation.",
+      "literature_status": "retrieved_comparison_pending"
+    }
+  ],
+  "examples": [
+    {
+      "finding_id": "finding_cf8f4249c4fa5bd2be47",
+      "form_id": "form_5f6b1591279b085d",
+      "label": "DOCK7 modified-precursor feature annotated at S1423",
+      "ptm_A": {
+        "contrast_ids": [
+          "contrast_aea4869f398c5584",
+          "contrast_4147ebd64e7ecf80",
+          "contrast_eb2f813f825c4ccb",
+          "contrast_c15817d77868a59a",
+          "contrast_fd5240cdb335e779",
+          "contrast_d6757f4b8563521f"
+        ],
+        "role": "ptm",
+        "row": {
+          "adjacent_absolute_auc": 76.81252495639367,
+          "adjacent_intervals": "[{\"from_min\":1.0,\"to_min\":5.0,\"dt_min\":4.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":0.357185539492213,\"rate_log2_per_min\":0.08929638487305325},{\"from_min\":5.0,\"to_min\":15.0,\"dt_min\":10.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":0.23788518312395013,\"rate_log2_per_min\":0.023788518312395014},{\"from_min\":15.0,\"to_min\":30.0,\"dt_min\":15.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":-0.10508963163659502,\"rate_log2_per_min\":-0.007005975442439668},{\"from_min\":30.0,\"to_min\":60.0,\"dt_min\":30.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":0.07615834483924466,\"rate_log2_per_min\":0.002538611494641489},{\"from_min\":60.0,\"to_min\":180.0,\"dt_min\":120.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":-0.1962062412531811,\"rate_log2_per_min\":-0.0016350520104431757}]",
+          "adjacent_trapezoid_auc": 76.61121794473327,
+          "arm_id": "arm_8ac02a113972dcb9",
+          "auc_supported_duration_min": 179.0,
+          "baseline_anchor_is_independent_observation": false,
+          "causality_status": "not_tested",
+          "entity_id": "form_5f6b1591279b085d",
+          "estimator_version": "observed_grid_temporal.v1",
+          "feature_id": "feature_6587835ed9bd2bce90c6",
+          "gap_intervals": 0,
+          "legacy_pattern_candidate": "multi_peak_candidate",
+          "loto_pattern_stability": 0.8333333333333334,
+          "maximum_absolute_effect": 0.5447439697010603,
+          "normalization_pattern_agreement": true,
+          "observation_counts": "[{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0}]",
+          "observed_duration_min": 179.0,
+          "observed_mask": "[true,true,true,true,true,true]",
+          "observed_peak_time_min": 15.0,
+          "observed_points": 6,
+          "onset_left_censored": false,
+          "onset_lower_min": 5.0,
+          "onset_upper_min": 15.0,
+          "parent_pattern_agreement": true,
+          "pattern": "transient_observed",
+          "recovery_lower_min": 15.0,
+          "recovery_upper_min": 30.0,
+          "reference_condition_id": "condition_32d7e82082479b8c",
+          "right_censored": false,
+          "series_id": "series_5fbe10ec151c613c0e74",
+          "signed_peak": 0.5447439697010603,
+          "threshold": 0.5,
+          "threshold_sensitive": true,
+          "times_minutes": "[1.0,5.0,15.0,30.0,60.0,180.0]",
+          "track": "A",
+          "values": "[-0.0503267529151028,0.3068587865771102,0.5447439697010603,0.4396543380644653,0.51581268290371,0.31960644165052887]"
+        },
+        "source": {
+          "key": {
+            "feature_id": "feature_6587835ed9bd2bce90c6"
+          },
+          "table": "temporal/ptm_temporal_features.csv"
+        }
+      },
+      "intervals": [
+        {
+          "row": {
+            "A": -0.05032675291510813,
+            "P_all": -8.045355750851968e-05,
+            "P_joint": -8.045355750851968e-05,
+            "U_all": -0.05040720647261665,
+            "U_joint": -0.05040720647261665,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 1.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_5f6b1591279b085d",
+            "from_min": 0.0,
+            "interval_id": "interval_a6574b00cebfc4465a9c",
+            "reference_condition_id": "condition_32d7e82082479b8c",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_f541e2f63f702f17",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_3c5fda9ab6d0f382;injection_6753024f5f818482;injection_9562ca828277ecb9",
+            "to_min": 1.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_a6574b00cebfc4465a9c"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": 0.3571855394922139,
+            "P_all": -0.021153540274791993,
+            "P_joint": -0.021153540274791993,
+            "U_all": 0.3360319992174219,
+            "U_joint": 0.3360319992174219,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 4.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_5f6b1591279b085d",
+            "from_min": 1.0,
+            "interval_id": "interval_73a138c2c6c2294c29f9",
+            "reference_condition_id": "condition_f541e2f63f702f17",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_3c5fda9ab6d0f382;injection_6753024f5f818482;injection_9562ca828277ecb9",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_bd68c45f543c5a83",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_0714c6c9670575d4;injection_1500f97f51d61470;injection_70edf1dcce14dda9",
+            "to_min": 5.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_73a138c2c6c2294c29f9"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": 0.23788518312395368,
+            "P_all": -0.028357013699167766,
+            "P_joint": -0.028357013699167766,
+            "U_all": 0.20952816942478591,
+            "U_joint": 0.20952816942478591,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 10.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_5f6b1591279b085d",
+            "from_min": 5.0,
+            "interval_id": "interval_25faa4aeec64a4684f33",
+            "reference_condition_id": "condition_bd68c45f543c5a83",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_0714c6c9670575d4;injection_1500f97f51d61470;injection_70edf1dcce14dda9",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_4d76518dc0aa4f6a;injection_6f129e1f7b3e91b7;injection_c7b4cd92fb947404",
+            "to_min": 15.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_25faa4aeec64a4684f33"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": -0.10508963163659502,
+            "P_all": -0.08115753889578059,
+            "P_joint": -0.08115753889578059,
+            "U_all": -0.1862471705323756,
+            "U_joint": -0.1862471705323756,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 15.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_5f6b1591279b085d",
+            "from_min": 15.0,
+            "interval_id": "interval_30b338ced4cf61288751",
+            "reference_condition_id": "condition_d9c5c91ebf3d5bfc",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_4d76518dc0aa4f6a;injection_6f129e1f7b3e91b7;injection_c7b4cd92fb947404",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_c96e6ecd71344ff2",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_226c9fbdf44fa344;injection_35303801ddb0713f;injection_550fade904902c8f",
+            "to_min": 30.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_30b338ced4cf61288751"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": 0.07615834483924289,
+            "P_all": -0.046819306071739675,
+            "P_joint": -0.046819306071739675,
+            "U_all": 0.02933903876750321,
+            "U_joint": 0.02933903876750321,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 30.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_5f6b1591279b085d",
+            "from_min": 30.0,
+            "interval_id": "interval_aad207d3556b18013f5b",
+            "reference_condition_id": "condition_c96e6ecd71344ff2",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_226c9fbdf44fa344;injection_35303801ddb0713f;injection_550fade904902c8f",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_824bfd9a5e97c3aa",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_1bf0682ac74d04cb;injection_b9511428064d86b5;injection_d9f4d9b18afe3676",
+            "to_min": 60.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_aad207d3556b18013f5b"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": -0.19620624125318287,
+            "P_all": 0.036642136428671535,
+            "P_joint": 0.036642136428671535,
+            "U_all": -0.15956410482451133,
+            "U_joint": -0.15956410482451133,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 120.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_5f6b1591279b085d",
+            "from_min": 60.0,
+            "interval_id": "interval_ae3b4c76f736a40f3527",
+            "reference_condition_id": "condition_824bfd9a5e97c3aa",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_1bf0682ac74d04cb;injection_b9511428064d86b5;injection_d9f4d9b18afe3676",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_a9adc1cf0158f4a6",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_1733c7b79c22161c;injection_87cc5890d56f0e1b;injection_8dcd9b8e5f55b1e5",
+            "to_min": 180.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_ae3b4c76f736a40f3527"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        }
+      ]
+    },
+    {
+      "finding_id": "finding_8d461aa65e3c36763221",
+      "form_id": "form_0307f4dc0d707fd5",
+      "label": "SIK3 modified-precursor feature annotated at S779",
+      "ptm_A": {
+        "contrast_ids": [
+          "contrast_aea4869f398c5584",
+          "contrast_4147ebd64e7ecf80",
+          "contrast_eb2f813f825c4ccb",
+          "contrast_c15817d77868a59a",
+          "contrast_fd5240cdb335e779",
+          "contrast_d6757f4b8563521f"
+        ],
+        "role": "ptm",
+        "row": {
+          "adjacent_absolute_auc": 161.50999690094815,
+          "adjacent_intervals": "[{\"from_min\":1.0,\"to_min\":5.0,\"dt_min\":4.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":0.3656143501674034,\"rate_log2_per_min\":0.09140358754185085},{\"from_min\":5.0,\"to_min\":15.0,\"dt_min\":10.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":0.11266346364350799,\"rate_log2_per_min\":0.0112663463643508},{\"from_min\":15.0,\"to_min\":30.0,\"dt_min\":15.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":-0.24344759200567623,\"rate_log2_per_min\":-0.016229839467045083},{\"from_min\":30.0,\"to_min\":60.0,\"dt_min\":30.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":0.15987828608765398,\"rate_log2_per_min\":0.005329276202921799},{\"from_min\":60.0,\"to_min\":180.0,\"dt_min\":120.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":0.08023816965944164,\"rate_log2_per_min\":0.0006686514138286803}]",
+          "adjacent_trapezoid_auc": 161.50999690094815,
+          "arm_id": "arm_8ac02a113972dcb9",
+          "auc_supported_duration_min": 179.0,
+          "baseline_anchor_is_independent_observation": false,
+          "causality_status": "not_tested",
+          "entity_id": "form_0307f4dc0d707fd5",
+          "estimator_version": "observed_grid_temporal.v1",
+          "feature_id": "feature_a14498e23d1c7c558d60",
+          "gap_intervals": 0,
+          "legacy_pattern_candidate": "sustained_activation",
+          "loto_pattern_stability": 1.0,
+          "maximum_absolute_effect": 0.9787728140422836,
+          "normalization_pattern_agreement": true,
+          "observation_counts": "[{\"reference_joint_n\":2,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":2,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":2,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":2,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":2,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":2,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0}]",
+          "observed_duration_min": 179.0,
+          "observed_mask": "[true,true,true,true,true,true]",
+          "observed_peak_time_min": 15.0,
+          "observed_points": 6,
+          "onset_left_censored": true,
+          "onset_lower_min": null,
+          "onset_upper_min": 1.0,
+          "parent_pattern_agreement": true,
+          "pattern": "sustained_over_observed_points",
+          "recovery_lower_min": null,
+          "recovery_upper_min": null,
+          "reference_condition_id": "condition_32d7e82082479b8c",
+          "right_censored": true,
+          "series_id": "series_5fbe10ec151c613c0e74",
+          "signed_peak": 0.9787728140422836,
+          "threshold": 0.5,
+          "threshold_sensitive": true,
+          "times_minutes": "[1.0,5.0,15.0,30.0,60.0,180.0]",
+          "track": "A",
+          "values": "[0.5004950002313722,0.8661093503987756,0.9787728140422836,0.7353252220366073,0.8952035081242613,0.9754416777837029]"
+        },
+        "source": {
+          "key": {
+            "feature_id": "feature_a14498e23d1c7c558d60"
+          },
+          "table": "temporal/ptm_temporal_features.csv"
+        }
+      },
+      "intervals": [
+        {
+          "row": {
+            "A": 0.5004950002313677,
+            "P_all": -0.11811975626994808,
+            "P_joint": -0.11921211911493046,
+            "U_all": 0.38128288111643727,
+            "U_joint": 0.38128288111643727,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 1.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_0307f4dc0d707fd5",
+            "from_min": 0.0,
+            "interval_id": "interval_c2a25645b1d031f5b35c",
+            "reference_condition_id": "condition_32d7e82082479b8c",
+            "reference_joint_n": 2,
+            "reference_run_ids": "injection_53b8a398cbb308dd;injection_bc15bd17ed414f94",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_f541e2f63f702f17",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_3c5fda9ab6d0f382;injection_6753024f5f818482;injection_9562ca828277ecb9",
+            "to_min": 1.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_c2a25645b1d031f5b35c"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": 0.3656143501674016,
+            "P_all": 0.05328011852103032,
+            "P_joint": 0.05328011852103032,
+            "U_all": 0.41889446868843194,
+            "U_joint": 0.41889446868843194,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 4.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_0307f4dc0d707fd5",
+            "from_min": 1.0,
+            "interval_id": "interval_d3380e71e889d50b4c6f",
+            "reference_condition_id": "condition_f541e2f63f702f17",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_3c5fda9ab6d0f382;injection_6753024f5f818482;injection_9562ca828277ecb9",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_bd68c45f543c5a83",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_0714c6c9670575d4;injection_1500f97f51d61470;injection_70edf1dcce14dda9",
+            "to_min": 5.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_d3380e71e889d50b4c6f"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": 0.11266346364351065,
+            "P_all": 0.05171967100189079,
+            "P_joint": 0.05171967100189079,
+            "U_all": 0.16438313464540144,
+            "U_joint": 0.16438313464540144,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 10.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_0307f4dc0d707fd5",
+            "from_min": 5.0,
+            "interval_id": "interval_085c53502baab3f2a13b",
+            "reference_condition_id": "condition_bd68c45f543c5a83",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_0714c6c9670575d4;injection_1500f97f51d61470;injection_70edf1dcce14dda9",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_4d76518dc0aa4f6a;injection_6f129e1f7b3e91b7;injection_c7b4cd92fb947404",
+            "to_min": 15.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_085c53502baab3f2a13b"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": -0.24344759200567623,
+            "P_all": -0.02761364148127754,
+            "P_joint": -0.02761364148127754,
+            "U_all": -0.27106123348695377,
+            "U_joint": -0.27106123348695377,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 15.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_0307f4dc0d707fd5",
+            "from_min": 15.0,
+            "interval_id": "interval_a034286233d258f3b0ae",
+            "reference_condition_id": "condition_d9c5c91ebf3d5bfc",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_4d76518dc0aa4f6a;injection_6f129e1f7b3e91b7;injection_c7b4cd92fb947404",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_c96e6ecd71344ff2",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_226c9fbdf44fa344;injection_35303801ddb0713f;injection_550fade904902c8f",
+            "to_min": 30.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_a034286233d258f3b0ae"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": 0.15987828608765398,
+            "P_all": -0.09131392181873466,
+            "P_joint": -0.09131392181873466,
+            "U_all": 0.06856436426891932,
+            "U_joint": 0.06856436426891932,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 30.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_0307f4dc0d707fd5",
+            "from_min": 30.0,
+            "interval_id": "interval_9a14123272dde6374267",
+            "reference_condition_id": "condition_c96e6ecd71344ff2",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_226c9fbdf44fa344;injection_35303801ddb0713f;injection_550fade904902c8f",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_824bfd9a5e97c3aa",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_1bf0682ac74d04cb;injection_b9511428064d86b5;injection_d9f4d9b18afe3676",
+            "to_min": 60.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_9a14123272dde6374267"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": 0.08023816965944164,
+            "P_all": 0.07698231251801246,
+            "P_joint": 0.07698231251801246,
+            "U_all": 0.1572204821774541,
+            "U_joint": 0.1572204821774541,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 120.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_0307f4dc0d707fd5",
+            "from_min": 60.0,
+            "interval_id": "interval_242f7160e0c1d302bfda",
+            "reference_condition_id": "condition_824bfd9a5e97c3aa",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_1bf0682ac74d04cb;injection_b9511428064d86b5;injection_d9f4d9b18afe3676",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_a9adc1cf0158f4a6",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_1733c7b79c22161c;injection_87cc5890d56f0e1b;injection_8dcd9b8e5f55b1e5",
+            "to_min": 180.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_242f7160e0c1d302bfda"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        }
+      ]
+    },
+    {
+      "finding_id": "finding_2114f9540b7df28b918f",
+      "form_id": "form_aee8bfc47ce1a311",
+      "label": "ULK1 modified-precursor feature annotated at S450",
+      "ptm_A": {
+        "contrast_ids": [
+          "contrast_aea4869f398c5584",
+          "contrast_4147ebd64e7ecf80",
+          "contrast_eb2f813f825c4ccb",
+          "contrast_c15817d77868a59a",
+          "contrast_fd5240cdb335e779",
+          "contrast_d6757f4b8563521f"
+        ],
+        "role": "ptm",
+        "row": {
+          "adjacent_absolute_auc": 59.40039603940042,
+          "adjacent_intervals": "[{\"from_min\":1.0,\"to_min\":5.0,\"dt_min\":4.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":-0.0787166906745922,\"rate_log2_per_min\":-0.01967917266864805},{\"from_min\":5.0,\"to_min\":15.0,\"dt_min\":10.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":0.03497278008157423,\"rate_log2_per_min\":0.003497278008157423},{\"from_min\":15.0,\"to_min\":30.0,\"dt_min\":15.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":0.26649420071583574,\"rate_log2_per_min\":0.017766280047722384},{\"from_min\":30.0,\"to_min\":60.0,\"dt_min\":30.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":-0.39866124650380197,\"rate_log2_per_min\":-0.013288708216793399},{\"from_min\":60.0,\"to_min\":180.0,\"dt_min\":120.0,\"status\":\"adjacent_observed_trapezoid\",\"delta\":0.3801884501744004,\"rate_log2_per_min\":0.00316823708478667}]",
+          "adjacent_trapezoid_auc": 59.40039603940042,
+          "arm_id": "arm_8ac02a113972dcb9",
+          "auc_supported_duration_min": 179.0,
+          "baseline_anchor_is_independent_observation": false,
+          "causality_status": "not_tested",
+          "entity_id": "form_aee8bfc47ce1a311",
+          "estimator_version": "observed_grid_temporal.v1",
+          "feature_id": "feature_233e4073dac417df10c1",
+          "gap_intervals": 0,
+          "legacy_pattern_candidate": "sustained_activation",
+          "loto_pattern_stability": 0.8333333333333334,
+          "maximum_absolute_effect": 0.5379625936409225,
+          "normalization_pattern_agreement": true,
+          "observation_counts": "[{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0},{\"reference_joint_n\":3,\"target_joint_n\":3,\"reference_biological_n\":1.0,\"target_biological_n\":1.0}]",
+          "observed_duration_min": 179.0,
+          "observed_mask": "[true,true,true,true,true,true]",
+          "observed_peak_time_min": 30.0,
+          "observed_points": 6,
+          "onset_left_censored": false,
+          "onset_lower_min": 15.0,
+          "onset_upper_min": 30.0,
+          "parent_pattern_agreement": true,
+          "pattern": "delayed_or_variable_observed",
+          "recovery_lower_min": 30.0,
+          "recovery_upper_min": 60.0,
+          "reference_condition_id": "condition_32d7e82082479b8c",
+          "right_censored": true,
+          "series_id": "series_5fbe10ec151c613c0e74",
+          "signed_peak": 0.5379625936409225,
+          "threshold": 0.5,
+          "threshold_sensitive": true,
+          "times_minutes": "[1.0,5.0,15.0,30.0,60.0,180.0]",
+          "track": "A",
+          "values": "[0.3152123035181047,0.2364956128435125,0.27146839292508673,0.5379625936409225,0.1393013471371205,0.5194897973115209]"
+        },
+        "source": {
+          "key": {
+            "feature_id": "feature_233e4073dac417df10c1"
+          },
+          "table": "temporal/ptm_temporal_features.csv"
+        }
+      },
+      "intervals": [
+        {
+          "row": {
+            "A": 0.3152123035181056,
+            "P_all": 0.05734729544111161,
+            "P_joint": 0.05734729544111161,
+            "U_all": 0.3725595989592172,
+            "U_joint": 0.3725595989592172,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 1.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_aee8bfc47ce1a311",
+            "from_min": 0.0,
+            "interval_id": "interval_78f9b8c638c13ded3c68",
+            "reference_condition_id": "condition_32d7e82082479b8c",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_53b8a398cbb308dd;injection_85d8e428878a76e9;injection_bc15bd17ed414f94",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_f541e2f63f702f17",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_3c5fda9ab6d0f382;injection_6753024f5f818482;injection_9562ca828277ecb9",
+            "to_min": 1.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_78f9b8c638c13ded3c68"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": -0.07871669067458953,
+            "P_all": -0.1257789058305825,
+            "P_joint": -0.1257789058305825,
+            "U_all": -0.20449559650517202,
+            "U_joint": -0.20449559650517202,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 4.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_aee8bfc47ce1a311",
+            "from_min": 1.0,
+            "interval_id": "interval_c414c8be88ccae295bd0",
+            "reference_condition_id": "condition_f541e2f63f702f17",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_3c5fda9ab6d0f382;injection_6753024f5f818482;injection_9562ca828277ecb9",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_bd68c45f543c5a83",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_0714c6c9670575d4;injection_1500f97f51d61470;injection_70edf1dcce14dda9",
+            "to_min": 5.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_c414c8be88ccae295bd0"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": 0.034972780081570676,
+            "P_all": -0.03125071017876735,
+            "P_joint": -0.03125071017876735,
+            "U_all": 0.0037220699028033266,
+            "U_joint": 0.0037220699028033266,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 10.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_aee8bfc47ce1a311",
+            "from_min": 5.0,
+            "interval_id": "interval_a41746dae24e863e18b5",
+            "reference_condition_id": "condition_bd68c45f543c5a83",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_0714c6c9670575d4;injection_1500f97f51d61470;injection_70edf1dcce14dda9",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_4d76518dc0aa4f6a;injection_6f129e1f7b3e91b7;injection_c7b4cd92fb947404",
+            "to_min": 15.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_a41746dae24e863e18b5"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": 0.2664942007158402,
+            "P_all": 0.02215458267567172,
+            "P_joint": 0.02215458267567172,
+            "U_all": 0.2886487833915119,
+            "U_joint": 0.2886487833915119,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 15.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_aee8bfc47ce1a311",
+            "from_min": 15.0,
+            "interval_id": "interval_178cd9b7d7239353fff4",
+            "reference_condition_id": "condition_d9c5c91ebf3d5bfc",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_4d76518dc0aa4f6a;injection_6f129e1f7b3e91b7;injection_c7b4cd92fb947404",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_c96e6ecd71344ff2",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_226c9fbdf44fa344;injection_35303801ddb0713f;injection_550fade904902c8f",
+            "to_min": 30.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_178cd9b7d7239353fff4"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": -0.39866124650380463,
+            "P_all": 0.07170857636933903,
+            "P_joint": 0.07170857636933903,
+            "U_all": -0.3269526701344656,
+            "U_joint": -0.3269526701344656,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 30.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_aee8bfc47ce1a311",
+            "from_min": 30.0,
+            "interval_id": "interval_f539cbfebc6ffe222e32",
+            "reference_condition_id": "condition_c96e6ecd71344ff2",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_226c9fbdf44fa344;injection_35303801ddb0713f;injection_550fade904902c8f",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_824bfd9a5e97c3aa",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_1bf0682ac74d04cb;injection_b9511428064d86b5;injection_d9f4d9b18afe3676",
+            "to_min": 60.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_f539cbfebc6ffe222e32"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        },
+        {
+          "row": {
+            "A": 0.3801884501744013,
+            "P_all": -0.03434183593375195,
+            "P_joint": -0.03434183593375195,
+            "U_all": 0.34584661424064933,
+            "U_joint": 0.34584661424064933,
+            "arm_id": "arm_8ac02a113972dcb9",
+            "duration_min": 120.0,
+            "estimator_version": "adjacent_same_injection_unit_balanced.v1",
+            "form_id": "form_aee8bfc47ce1a311",
+            "from_min": 60.0,
+            "interval_id": "interval_e4e1eb5e62ef082513d5",
+            "reference_condition_id": "condition_824bfd9a5e97c3aa",
+            "reference_joint_n": 3,
+            "reference_run_ids": "injection_1bf0682ac74d04cb;injection_b9511428064d86b5;injection_d9f4d9b18afe3676",
+            "series_id": "series_5fbe10ec151c613c0e74",
+            "statistical_unit": "biological_unit",
+            "status": "quantifiable_change",
+            "target_condition_id": "condition_a9adc1cf0158f4a6",
+            "target_joint_n": 3,
+            "target_run_ids": "injection_1733c7b79c22161c;injection_87cc5890d56f0e1b;injection_8dcd9b8e5f55b1e5",
+            "to_min": 180.0
+          },
+          "source": {
+            "key": {
+              "interval_id": "interval_e4e1eb5e62ef082513d5"
+            },
+            "table": "temporal/interval_contrasts.csv"
+          }
+        }
+      ],
+      "candidate_sensitivity": {
+        "candidate_id": "candidate_104bbab4968a374908a4",
+        "track": "motif_A",
+        "series_id": "series_5fbe10ec151c613c0e74",
+        "candidate_label": "CDK/MAPK (Pro-directed)",
+        "fixed_membership": [
+          {
+            "row": {
+              "available_sites": 149,
+              "candidate_id": "candidate_104bbab4968a374908a4",
+              "contrast_id": "contrast_aea4869f398c5584",
+              "departed_sites": 0,
+              "entered_sites": 149,
+              "fixed_common_score": 0.1867187261203239,
+              "fixed_common_sites": 138,
+              "membership_turnover": 1.0,
+              "series_id": "series_5fbe10ec151c613c0e74",
+              "track": "motif_A"
+            },
+            "source": {
+              "key": {
+                "candidate_id": "candidate_104bbab4968a374908a4",
+                "contrast_id": "contrast_aea4869f398c5584",
+                "series_id": "series_5fbe10ec151c613c0e74",
+                "track": "motif_A"
+              },
+              "table": "temporal/kinase_fixed_membership.csv"
+            },
+            "unavailable_reason": null
+          },
+          {
+            "row": {
+              "available_sites": 150,
+              "candidate_id": "candidate_104bbab4968a374908a4",
+              "contrast_id": "contrast_4147ebd64e7ecf80",
+              "departed_sites": 2,
+              "entered_sites": 3,
+              "fixed_common_score": 0.2801791380545421,
+              "fixed_common_sites": 138,
+              "membership_turnover": 0.03289473684210526,
+              "series_id": "series_5fbe10ec151c613c0e74",
+              "track": "motif_A"
+            },
+            "source": {
+              "key": {
+                "candidate_id": "candidate_104bbab4968a374908a4",
+                "contrast_id": "contrast_4147ebd64e7ecf80",
+                "series_id": "series_5fbe10ec151c613c0e74",
+                "track": "motif_A"
+              },
+              "table": "temporal/kinase_fixed_membership.csv"
+            },
+            "unavailable_reason": null
+          },
+          {
+            "row": {
+              "available_sites": 151,
+              "candidate_id": "candidate_104bbab4968a374908a4",
+              "contrast_id": "contrast_eb2f813f825c4ccb",
+              "departed_sites": 1,
+              "entered_sites": 2,
+              "fixed_common_score": 0.35417484490732404,
+              "fixed_common_sites": 138,
+              "membership_turnover": 0.019736842105263157,
+              "series_id": "series_5fbe10ec151c613c0e74",
+              "track": "motif_A"
+            },
+            "source": {
+              "key": {
+                "candidate_id": "candidate_104bbab4968a374908a4",
+                "contrast_id": "contrast_eb2f813f825c4ccb",
+                "series_id": "series_5fbe10ec151c613c0e74",
+                "track": "motif_A"
+              },
+              "table": "temporal/kinase_fixed_membership.csv"
+            },
+            "unavailable_reason": null
+          },
+          {
+            "row": {
+              "available_sites": 148,
+              "candidate_id": "candidate_104bbab4968a374908a4",
+              "contrast_id": "contrast_c15817d77868a59a",
+              "departed_sites": 3,
+              "entered_sites": 0,
+              "fixed_common_score": 0.26547948000945243,
+              "fixed_common_sites": 138,
+              "membership_turnover": 0.019867549668874173,
+              "series_id": "series_5fbe10ec151c613c0e74",
+              "track": "motif_A"
+            },
+            "source": {
+              "key": {
+                "candidate_id": "candidate_104bbab4968a374908a4",
+                "contrast_id": "contrast_c15817d77868a59a",
+                "series_id": "series_5fbe10ec151c613c0e74",
+                "track": "motif_A"
+              },
+              "table": "temporal/kinase_fixed_membership.csv"
+            },
+            "unavailable_reason": null
+          },
+          {
+            "row": {
+              "available_sites": 145,
+              "candidate_id": "candidate_104bbab4968a374908a4",
+              "contrast_id": "contrast_fd5240cdb335e779",
+              "departed_sites": 5,
+              "entered_sites": 2,
+              "fixed_common_score": 0.09527046237282566,
+              "fixed_common_sites": 138,
+              "membership_turnover": 0.04666666666666667,
+              "series_id": "series_5fbe10ec151c613c0e74",
+              "track": "motif_A"
+            },
+            "source": {
+              "key": {
+                "candidate_id": "candidate_104bbab4968a374908a4",
+                "contrast_id": "contrast_fd5240cdb335e779",
+                "series_id": "series_5fbe10ec151c613c0e74",
+                "track": "motif_A"
+              },
+              "table": "temporal/kinase_fixed_membership.csv"
+            },
+            "unavailable_reason": null
+          },
+          {
+            "row": {
+              "available_sites": 147,
+              "candidate_id": "candidate_104bbab4968a374908a4",
+              "contrast_id": "contrast_d6757f4b8563521f",
+              "departed_sites": 2,
+              "entered_sites": 4,
+              "fixed_common_score": 0.191757802384044,
+              "fixed_common_sites": 138,
+              "membership_turnover": 0.040268456375838924,
+              "series_id": "series_5fbe10ec151c613c0e74",
+              "track": "motif_A"
+            },
+            "source": {
+              "key": {
+                "candidate_id": "candidate_104bbab4968a374908a4",
+                "contrast_id": "contrast_d6757f4b8563521f",
+                "series_id": "series_5fbe10ec151c613c0e74",
+                "track": "motif_A"
+              },
+              "table": "temporal/kinase_fixed_membership.csv"
+            },
+            "unavailable_reason": null
+          }
+        ],
+        "exclusions": [
+          {
+            "source": {
+              "key": {
+                "candidate_id": "candidate_104bbab4968a374908a4",
+                "series_id": "series_5fbe10ec151c613c0e74",
+                "site_key": "site_15426259a5511f9b5113",
+                "track": "motif_A"
+              },
+              "table": "temporal/target_excluded_anchors.csv"
+            },
+            "remaining_support": {
+              "interval_counts": [
+                {
+                  "anchor_reason": null,
+                  "anchor_status": "computed",
+                  "fixed_common_anchor_groups": 136,
+                  "from": "1min",
+                  "interval_id": "1min->5min",
+                  "n_anchor_groups": 144,
+                  "to": "5min"
+                },
+                {
+                  "anchor_reason": null,
+                  "anchor_status": "computed",
+                  "fixed_common_anchor_groups": 136,
+                  "from": "5min",
+                  "interval_id": "5min->15min",
+                  "n_anchor_groups": 146,
+                  "to": "15min"
+                },
+                {
+                  "anchor_reason": null,
+                  "anchor_status": "computed",
+                  "fixed_common_anchor_groups": 136,
+                  "from": "15min",
+                  "interval_id": "15min->30min",
+                  "n_anchor_groups": 145,
+                  "to": "30min"
+                },
+                {
+                  "anchor_reason": null,
+                  "anchor_status": "computed",
+                  "fixed_common_anchor_groups": 136,
+                  "from": "30min",
+                  "interval_id": "30min->60min",
+                  "n_anchor_groups": 141,
+                  "to": "60min"
+                },
+                {
+                  "anchor_reason": null,
+                  "anchor_status": "computed",
+                  "fixed_common_anchor_groups": 136,
+                  "from": "60min",
+                  "interval_id": "60min->180min",
+                  "n_anchor_groups": 141,
+                  "to": "180min"
+                }
+              ],
+              "site_keys_status": "not_explicit_in_saved_target_anchor; do_not_infer_gene_or_group_exclusion"
+            },
+            "row": {
+              "candidate_id": "candidate_104bbab4968a374908a4",
+              "independent_validation": false,
+              "interval_concordance": 0.6,
+              "series_id": "series_5fbe10ec151c613c0e74",
+              "signed_correlation": 0.32296118688372744,
+              "site_key": "site_15426259a5511f9b5113",
+              "support_status": "computed",
+              "target_excluded": true,
+              "track": "motif_A"
+            }
+          },
+          {
+            "source": {
+              "key": {
+                "cowave_id": "cowave_21b99316466cd356589d"
+              },
+              "table": "temporal/group_excluded_cowave.csv"
+            },
+            "remaining_support": {
+              "site_keys": [
+                "site_01669cc1e3fcbf0cf25e",
+                "site_03b55d592da99468c62d",
+                "site_08ecd8e125aacc4ab6cc",
+                "site_0f2c9bdd844c8cb2f625",
+                "site_102c28de996cb1258640",
+                "site_10bda128642ccc94de57",
+                "site_125f106b8a478723d709",
+                "site_135fc3694339d0d0e2f9",
+                "site_17a9c210321578d0e7a3",
+                "site_1946fafc8282a5c9ff00",
+                "site_19bd6b1be1398d5ad2df",
+                "site_1aca27f81cce53694461",
+                "site_1b437bdfe6e451fb33cc",
+                "site_1d9cd05942f29e82e7fa",
+                "site_1e234b89c58f385ac7d5",
+                "site_22f8f65d682014f51abb",
+                "site_230219cdfb17636df2ad",
+                "site_23528b7bda261d3ce06c",
+                "site_23f3bfdc3195bb4fec9a",
+                "site_24de8d4102a3e6da05e2",
+                "site_2642f7b3fd2f453e7d6d",
+                "site_2a7016ece20a3872b08c",
+                "site_2d89834783c6cc428ba6",
+                "site_2de699870dc4f098f7a5",
+                "site_351ba8eb4c0126b2d267",
+                "site_35970ae0bd9e95258d06",
+                "site_361c2a8bd7796af65ab3",
+                "site_36a504faae6afd9583cc",
+                "site_375badc8771b9c734e1c",
+                "site_384f987aea644c0d18a2",
+                "site_385e461fe059bf6dbc8d",
+                "site_3b156e1b79f10e8cf958",
+                "site_3dc15f7855cc4fc20a59",
+                "site_3fac9b1e5238b7fee7c4",
+                "site_3fc62fc7a813a0a5ca43",
+                "site_41144fee45860eab7e0b",
+                "site_42a9f2250de6fee9d9a9",
+                "site_43a9eca987a7024a0a49",
+                "site_45bae223283ef639eef9",
+                "site_45cad1753590b505b90c",
+                "site_4bc4091dbf90a0001c46",
+                "site_4cae56e9aa6b5bf13d5a",
+                "site_5043d5386a232f68a17e",
+                "site_52ca781939b6b90d1943",
+                "site_553075f76149519776cb",
+                "site_5546072286a1cdfa3dc7",
+                "site_56a78333d22cc3c5afcf",
+                "site_579ecc24d0722e9317fa",
+                "site_58a8d36b1a6eac8bd6f1",
+                "site_5ae5c32b813acf5ad3b5",
+                "site_5bc7882d1cd61bda052f",
+                "site_5cc280fa7648a12dacd8",
+                "site_5d4b873a3b3e42a27189",
+                "site_5e38660bac763f6f2370",
+                "site_5e5c360019357f1fed68",
+                "site_5eb77350677ef238dd3d",
+                "site_5fd515dadb0c70512da4",
+                "site_60f58e2a0d26a3a87c80",
+                "site_618c780c6efa1ff5a884",
+                "site_64471d339e9e776b5381",
+                "site_65b7c0c118603020816f",
+                "site_66ec1ba8b7a9f0028ce2",
+                "site_67e135ab97fd9b15f2e3",
+                "site_688e476a55e014d9fa97",
+                "site_691abe79e5e891fa5e0d",
+                "site_69cb5727f1c214f58422",
+                "site_69d6d3231b0e4f5b5564",
+                "site_6d3302d963013218a456",
+                "site_6e4448b7500c74ae1aca",
+                "site_6e8894304d60b0f3b768",
+                "site_765964e57f815d4e365a",
+                "site_76a8ac5e5f8c39b432aa",
+                "site_77c625c597e3adcab7c4",
+                "site_77f18b60f8629346948c",
+                "site_789a408c0765beded504",
+                "site_79b473f9f8bbcec5748d",
+                "site_7e830250a8586b43551a",
+                "site_7eec9b13241d17233499",
+                "site_7f75d52117bf98f33e62",
+                "site_84b36ea2e113f6de6557",
+                "site_88b72d46e17770cfdcc3",
+                "site_89b21eb49c68aad33d59",
+                "site_8b624b649b8a81b4f811",
+                "site_8c4c79aedaec01ec7bda",
+                "site_943ac5cdf11e6dca8df4",
+                "site_9540d829e29b163727e5",
+                "site_954ea890c3e88bafe30f",
+                "site_97235ee9998d4a8e7b88",
+                "site_97f527ceb1ae904d2e5b",
+                "site_9a449327a9c9dee80525",
+                "site_9f92da161f3e9345fe83",
+                "site_a20f278dd1224dcf6269",
+                "site_a442d3f49afbbade0f3f",
+                "site_a62c08a3978170dd0ca1",
+                "site_a6afce034f1c93101d5b",
+                "site_a909c65f106527817dc7",
+                "site_aa42004fd6f6976c8f32",
+                "site_aac12be718a4bec122a7",
+                "site_ac8d90ecee97e2c96134",
+                "site_acdd86f0ea0b4ca0e81b",
+                "site_ace8c4fdb43288144cf2",
+                "site_b2320ed219581e212770",
+                "site_b45ec62b03402bd2bb9d",
+                "site_b541ed15ba9f346ea6bb",
+                "site_b67c50f86f7de64e8e0c",
+                "site_b80a2b24c2e80462c8b5",
+                "site_bc8d27dca20491e95089",
+                "site_befe3a1d3028a303e348",
+                "site_bff0225fc82d3afdb2a8",
+                "site_c0d50912f992a43da2d3",
+                "site_c5e5afef18015dde3521",
+                "site_c6970fd8bdc06d3d09f4",
+                "site_ca1522d157ac695d2a21",
+                "site_ca94d858e89a4bcbce00",
+                "site_d23043e54f67476b4fcd",
+                "site_d39533c58b6ace93928e",
+                "site_d46fc0c172600cab6144",
+                "site_d7f72aafc60a2ae79992",
+                "site_dbe8dd3c7840c0b6eaa3",
+                "site_de9b1ae13310201d31d9",
+                "site_e1183756024d9cb1536f",
+                "site_e11b9214d1eb375b26e9",
+                "site_e1b355ae4373ee5cd374",
+                "site_e3cedaeae98c4b222f2a",
+                "site_e3e9bbbc01e0b0ea05a4",
+                "site_e4a2c5d048daebac83a2",
+                "site_e4c902d5cd55f39ec0ac",
+                "site_e67ff99fbc5d2272ae18",
+                "site_e6ac9f9547879d1dec1d",
+                "site_e99281960ff4060db7e6",
+                "site_eb63cd929fbf960135ea",
+                "site_eb876d21dfe77745efba",
+                "site_ec0885964fd52bbc4183",
+                "site_ed585210feaa820884f4",
+                "site_ee9d504bd369dbb6e0b5",
+                "site_ef08b3be1fd95570ff5c",
+                "site_f151d1dcf525917e8445",
+                "site_f24650ce1873af92e085",
+                "site_f32d18134585565d12c3",
+                "site_f79c58551f1c3d71f7e4",
+                "site_f7d83e3012d0d2c00ae3",
+                "site_f94a9f7b298344cec081",
+                "site_fa6e2415e3ab420becc4",
+                "site_fad2057e6b33d902c52e",
+                "site_fcf614c0f5084594e33c",
+                "site_fd288a12867230e3d9df",
+                "site_fe362d8ec046d95f8cd0",
+                "site_feb168d55b4208c54282",
+                "site_fef08a6350f55ecf0a98",
+                "site_ff9f737b0143e70faae9"
+              ]
+            },
+            "row": {
+              "candidate_id": "candidate_104bbab4968a374908a4",
+              "cowave_id": "cowave_21b99316466cd356589d",
+              "excluded_ids": "10116:Ulk1",
+              "excluded_kind": "gene",
+              "independent_validation": false,
+              "interval_concordance": 0.6,
+              "quantification_track": "parent_adjusted_A",
+              "series_id": "series_5fbe10ec151c613c0e74",
+              "signed_correlation": 0.314966695836053,
+              "site_key": "site_15426259a5511f9b5113",
+              "support_status": "computed",
+              "track": "motif_A"
+            }
+          },
+          {
+            "source": {
+              "key": {
+                "cowave_id": "cowave_35a8efa54eb20dd3b324"
+              },
+              "table": "temporal/group_excluded_cowave.csv"
+            },
+            "remaining_support": {
+              "site_keys": [
+                "site_01669cc1e3fcbf0cf25e",
+                "site_03b55d592da99468c62d",
+                "site_08ecd8e125aacc4ab6cc",
+                "site_0f2c9bdd844c8cb2f625",
+                "site_102c28de996cb1258640",
+                "site_10bda128642ccc94de57",
+                "site_125f106b8a478723d709",
+                "site_135fc3694339d0d0e2f9",
+                "site_17a9c210321578d0e7a3",
+                "site_1946fafc8282a5c9ff00",
+                "site_19bd6b1be1398d5ad2df",
+                "site_1aca27f81cce53694461",
+                "site_1b437bdfe6e451fb33cc",
+                "site_1d9cd05942f29e82e7fa",
+                "site_1e234b89c58f385ac7d5",
+                "site_22f8f65d682014f51abb",
+                "site_230219cdfb17636df2ad",
+                "site_23528b7bda261d3ce06c",
+                "site_23f3bfdc3195bb4fec9a",
+                "site_24de8d4102a3e6da05e2",
+                "site_2642f7b3fd2f453e7d6d",
+                "site_2a7016ece20a3872b08c",
+                "site_2d89834783c6cc428ba6",
+                "site_2de699870dc4f098f7a5",
+                "site_351ba8eb4c0126b2d267",
+                "site_35970ae0bd9e95258d06",
+                "site_361c2a8bd7796af65ab3",
+                "site_36a504faae6afd9583cc",
+                "site_375badc8771b9c734e1c",
+                "site_37b3e7c10b9ebedbf7ec",
+                "site_384f987aea644c0d18a2",
+                "site_385e461fe059bf6dbc8d",
+                "site_3b156e1b79f10e8cf958",
+                "site_3dc15f7855cc4fc20a59",
+                "site_3fac9b1e5238b7fee7c4",
+                "site_3fc62fc7a813a0a5ca43",
+                "site_41144fee45860eab7e0b",
+                "site_42a9f2250de6fee9d9a9",
+                "site_43a9eca987a7024a0a49",
+                "site_45bae223283ef639eef9",
+                "site_45cad1753590b505b90c",
+                "site_4bc4091dbf90a0001c46",
+                "site_4cae56e9aa6b5bf13d5a",
+                "site_5043d5386a232f68a17e",
+                "site_52ca781939b6b90d1943",
+                "site_553075f76149519776cb",
+                "site_5546072286a1cdfa3dc7",
+                "site_56a78333d22cc3c5afcf",
+                "site_579ecc24d0722e9317fa",
+                "site_58a8d36b1a6eac8bd6f1",
+                "site_5ae5c32b813acf5ad3b5",
+                "site_5bc7882d1cd61bda052f",
+                "site_5cc280fa7648a12dacd8",
+                "site_5d4b873a3b3e42a27189",
+                "site_5e38660bac763f6f2370",
+                "site_5e5c360019357f1fed68",
+                "site_5eb77350677ef238dd3d",
+                "site_5fd515dadb0c70512da4",
+                "site_60f58e2a0d26a3a87c80",
+                "site_618c780c6efa1ff5a884",
+                "site_64471d339e9e776b5381",
+                "site_65b7c0c118603020816f",
+                "site_66ec1ba8b7a9f0028ce2",
+                "site_67e135ab97fd9b15f2e3",
+                "site_688e476a55e014d9fa97",
+                "site_691abe79e5e891fa5e0d",
+                "site_69cb5727f1c214f58422",
+                "site_69d6d3231b0e4f5b5564",
+                "site_6d3302d963013218a456",
+                "site_6e4448b7500c74ae1aca",
+                "site_6e8894304d60b0f3b768",
+                "site_765964e57f815d4e365a",
+                "site_76a8ac5e5f8c39b432aa",
+                "site_77c625c597e3adcab7c4",
+                "site_77f18b60f8629346948c",
+                "site_789a408c0765beded504",
+                "site_79b473f9f8bbcec5748d",
+                "site_7e830250a8586b43551a",
+                "site_7eec9b13241d17233499",
+                "site_7f75d52117bf98f33e62",
+                "site_84b36ea2e113f6de6557",
+                "site_88b72d46e17770cfdcc3",
+                "site_89b21eb49c68aad33d59",
+                "site_8b624b649b8a81b4f811",
+                "site_8c4c79aedaec01ec7bda",
+                "site_943ac5cdf11e6dca8df4",
+                "site_9540d829e29b163727e5",
+                "site_954ea890c3e88bafe30f",
+                "site_97235ee9998d4a8e7b88",
+                "site_97f527ceb1ae904d2e5b",
+                "site_9a449327a9c9dee80525",
+                "site_9f92da161f3e9345fe83",
+                "site_a20f278dd1224dcf6269",
+                "site_a442d3f49afbbade0f3f",
+                "site_a62c08a3978170dd0ca1",
+                "site_a6afce034f1c93101d5b",
+                "site_a909c65f106527817dc7",
+                "site_aa42004fd6f6976c8f32",
+                "site_aac12be718a4bec122a7",
+                "site_ac8d90ecee97e2c96134",
+                "site_acdd86f0ea0b4ca0e81b",
+                "site_ace8c4fdb43288144cf2",
+                "site_b2320ed219581e212770",
+                "site_b45ec62b03402bd2bb9d",
+                "site_b541ed15ba9f346ea6bb",
+                "site_b67c50f86f7de64e8e0c",
+                "site_b80a2b24c2e80462c8b5",
+                "site_bc8d27dca20491e95089",
+                "site_befe3a1d3028a303e348",
+                "site_bff0225fc82d3afdb2a8",
+                "site_c0d50912f992a43da2d3",
+                "site_c5e5afef18015dde3521",
+                "site_c6970fd8bdc06d3d09f4",
+                "site_ca1522d157ac695d2a21",
+                "site_ca94d858e89a4bcbce00",
+                "site_d23043e54f67476b4fcd",
+                "site_d39533c58b6ace93928e",
+                "site_d46fc0c172600cab6144",
+                "site_d7f72aafc60a2ae79992",
+                "site_dbe8dd3c7840c0b6eaa3",
+                "site_de9b1ae13310201d31d9",
+                "site_e1183756024d9cb1536f",
+                "site_e11b9214d1eb375b26e9",
+                "site_e1b355ae4373ee5cd374",
+                "site_e3cedaeae98c4b222f2a",
+                "site_e3e9bbbc01e0b0ea05a4",
+                "site_e4a2c5d048daebac83a2",
+                "site_e4c902d5cd55f39ec0ac",
+                "site_e67ff99fbc5d2272ae18",
+                "site_e6ac9f9547879d1dec1d",
+                "site_e99281960ff4060db7e6",
+                "site_eb63cd929fbf960135ea",
+                "site_eb876d21dfe77745efba",
+                "site_ec0885964fd52bbc4183",
+                "site_ed585210feaa820884f4",
+                "site_ee9d504bd369dbb6e0b5",
+                "site_ef08b3be1fd95570ff5c",
+                "site_f151d1dcf525917e8445",
+                "site_f24650ce1873af92e085",
+                "site_f32d18134585565d12c3",
+                "site_f79c58551f1c3d71f7e4",
+                "site_f7d83e3012d0d2c00ae3",
+                "site_f94a9f7b298344cec081",
+                "site_fa6e2415e3ab420becc4",
+                "site_fad2057e6b33d902c52e",
+                "site_fcf614c0f5084594e33c",
+                "site_fd288a12867230e3d9df",
+                "site_fe362d8ec046d95f8cd0",
+                "site_feb168d55b4208c54282",
+                "site_fef08a6350f55ecf0a98",
+                "site_ff9f737b0143e70faae9"
+              ]
+            },
+            "row": {
+              "candidate_id": "candidate_104bbab4968a374908a4",
+              "cowave_id": "cowave_35a8efa54eb20dd3b324",
+              "excluded_ids": "measurement_36311518fa7180d12b24",
+              "excluded_kind": "measurement_group",
+              "independent_validation": false,
+              "interval_concordance": 0.6,
+              "quantification_track": "parent_adjusted_A",
+              "series_id": "series_5fbe10ec151c613c0e74",
+              "signed_correlation": 0.32296118688372744,
+              "site_key": "site_15426259a5511f9b5113",
+              "support_status": "computed",
+              "track": "motif_A"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -32,8 +32,11 @@ names=['quant/summary','quant/comparisons','science/inference_results',
 if hasattr(sys.modules['ptm_shared.astra_reader'],'phosx_time_views'):
     names += ['science/site_identity_audit','science/specificity_scores',
               'kinase/method_executions','kinase/method_scores','kinase/method_membership','kinase/kinase_candidate_edges']
+if hasattr(sys.modules['ptm_shared.astra_reader'],'TEMPORAL_SOURCE_TABLES'):
+    names += [name for name in sys.modules['ptm_shared.astra_reader'].TEMPORAL_SOURCE_TABLES if name+'.csv' in dictionary]
+names=list(dict.fromkeys(names))
 tables={name:pd.read_csv(root/(name+'.csv'),float_precision='round_trip',low_memory=False,
-    dtype={k:'str' for k,v in dictionary[name+'.csv']['dtypes'].items() if v=='str'}) for name in names}
+    dtype={k:'str' for k,v in dictionary[name+'.csv']['dtypes'].items() if v in {'str','object'}}) for name in names}
 design=json.loads((root/'study/study_design.json').read_text())
 snapshot=json.loads((root/'study/user_input_snapshot.json').read_text())
 reader=build_reader_tables(tables,design,snapshot)

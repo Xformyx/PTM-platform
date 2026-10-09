@@ -167,7 +167,7 @@ def test_v6_package_calls_existing_transport_and_revision_replays_without_scienc
     process=subprocess.run([sys.executable,'-I','-c',PROGRAM,str(target),str(tmp_path/'offline')],cwd='/tmp',env=env,capture_output=True,text=True)
     assert process.returncode==0,process.stdout+process.stderr
     result=json.loads((tmp_path/'offline/READER_REPLAY_VALIDATION.json').read_text())
-    assert result['passed'] and result['network_requests']==0 and len(result['files'])==15
+    assert result['passed'] and result['network_requests']==0 and len(result['files'])==18
     # Failed validation cannot publish a new current pointer.
     pointer=tmp_path/'revision/enrichment_free_current.json';before=pointer.read_bytes()
     with patch.object(lit,'collect',side_effect=ValueError('injected integrity failure')):

@@ -15,6 +15,8 @@ from .measured_feature_cards import (build_feature_observation_cards,
     build_quantitation_comparison_cards, select_finding_cards)
 from .research_questions import build_question_map
 from .reader_authoring import build_authoring_packet
+from .astra_reader_temporal import (attach_temporal, validate_temporal, write_temporal,
+                                    SOURCE_TABLES as TEMPORAL_SOURCE_TABLES)
 
 VERSION = 'astra_reader.v1'
 TABLE_KEYS = {'reader/cards': ['card_id'], 'reader/findings': ['finding_id'],
@@ -195,13 +197,17 @@ def build_reader_tables(tables, design, snapshot=None):
         'selection_reason': 'additional_parent_pattern_or_question', 'schema_version': VERSION} for c in selected]
     for c in packet['reader_cards']:
         c['finding_id'] = finding_ids.get(c['card_id'])
-    return {'reader/cards': pd.DataFrame([{'card_id':c['card_id'],'form_id':c['form_id'],
+    result = {'reader/cards': pd.DataFrame([{'card_id':c['card_id'],'form_id':c['form_id'],
         'consumer_state_id':c['consumer_state_id'], 'category':c['category'], 'selected':c['card_id'] in selected_ids,
         'card_json':encode(c), 'schema_version':VERSION} for c in all_cards],
         columns=['card_id','form_id','consumer_state_id','category','selected','card_json','schema_version']),
         'reader/findings': pd.DataFrame(findings, columns=['finding_id','card_id','form_id','consumer_state_id','question_ids_json','source_row_ids_json','selection_reason','schema_version']),
         'reader/coverage': coverage,
         'reader/packet': pd.DataFrame([{'packet_id':'reader','packet_json':encode(packet),'schema_version':VERSION}])}
+    combined = {**tables, **result}
+    attach_temporal(combined)
+    result['reader/packet'] = combined['reader/packet']
+    return result
 
 
 def validate_reader(tables):
@@ -243,6 +249,7 @@ def validate_reader(tables):
         if not set(q['evidence_ids']) <= set(cards) or not set(q['finding_ids']) <= set(findings.finding_id): raise ValueError('Reader question foreign key mismatch')
     for c in packet['reader_cards']:
         if c != cards.get(c['card_id']): raise ValueError('Reader packet/card mismatch')
+    validate_temporal(tables)
     return {'source_rows_checked':len(projected),'cards_checked':len(cards),'findings_checked':len(findings),'values_times_NA_masks_ids':'passed'}
 
 
@@ -413,6 +420,9 @@ def write_reader(directory, tables):
     if packet.get('literature'):
         lines.insert(2, '[선정 관측별 문헌 검색·비교·접근 제한](LITERATURE.md) · [문헌 단계 요약](literature_summary.json)')
     method_artifacts = write_phosx_time_views(directory, tables)
+    temporal_artifacts = write_temporal(directory, packet)
+    if temporal_artifacts:
+        lines.insert(2, '[저장된 시간 특징·인접 비교·기질 구성·제외 민감도](TEMPORAL_EVIDENCE.md) · [finding→원본 시간 근거](temporal_links.csv)')
     if method_artifacts:
         lines.insert(2, '[PhosX 시간별 입력 범위·실행 상태·assay 결과](PHOSX_TIME_COURSE.md)')
     rendered = ''.join(('\n' if i and line.startswith('|') and lines[i-1].startswith('|') else '\n\n') + line
@@ -420,5 +430,5 @@ def write_reader(directory, tables):
     (directory/'reader/READ_ME.md').write_text(rendered,encoding='utf-8')
     if packet.get("literature"):
         from .astra_literature import write
-        return ARTIFACTS + method_artifacts + write(directory,tables)
-    return ARTIFACTS + method_artifacts
+        return ARTIFACTS + method_artifacts + temporal_artifacts + write(directory,tables)
+    return ARTIFACTS + method_artifacts + temporal_artifacts

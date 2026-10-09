@@ -21,6 +21,99 @@ def read_tables(root):
             dtype={k:'str' for k,v in d['dtypes'].items() if v in {'str','object'}}) for name,d in dictionary.items()}
 
 
+def _copy_package(source, root):
+    """Copy only manifest-bound bytes into a new immutable revision directory."""
+    run_id='g0-'+uuid4().hex
+    directory=root/'enrichment_free_runs'/run_id
+    directory.mkdir(parents=True,exist_ok=False)
+    manifest=json.loads((source/'manifest.json').read_text())
+    for name in [*manifest['files'],'manifest.json']:
+        target=directory/name;target.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(source/name,target)
+    return run_id,directory
+
+
+def revise_temporal(source, output_dir, *, checkpoint=lambda:None):
+    """Reader-only revision of saved temporal rows, without literature collection.
+
+    The source and its successful pointer are never modified. Publication to the
+    caller's output root happens only after validation and atomic archive sealing.
+    """
+    from .astra_package import validate_package, write_tables, seal_archive, CODE_FILES
+    from . import astra_evidence_v6 as engine
+    from .astra_reader import write_reader, validate_reader
+    from .astra_reader_temporal import attach_temporal, VERSION
+    source=Path(source).resolve();root=Path(output_dir).resolve()
+    if root==source or source in root.parents:raise ValueError('Revision must not edit source package')
+    validate_package(source)
+    if json.loads((source/'reproducibility/replay_config.json').read_text())['engine_profile']!=engine.PROFILE:
+        raise ValueError('Temporal reader revision requires v6')
+    tables=read_tables(source)
+    if 'temporal/temporal_series' not in tables:raise ValueError('Saved temporal series required; no calculation will be attempted')
+    origin=json.loads((source/'provenance.json').read_text())
+    run_id,directory=_copy_package(source,root)
+    attach_temporal(tables);validate_reader(tables)
+    baseline=json.loads((source/'reproducibility/data_dictionary.json').read_text())
+    dictionary=deepcopy(baseline)
+    update=write_tables({'reader/packet':tables['reader/packet']},directory)
+    update['reader/packet.csv'].update(unique_key=baseline['reader/packet.csv']['unique_key'],row_grain=baseline['reader/packet.csv']['row_grain'])
+    dictionary.update(update);json_write(directory/'reproducibility/data_dictionary.json',dictionary)
+    artifacts=write_reader(directory,tables)
+    # No source table, card, selection, literature result or figure may change.
+    preserved=[name for name in baseline if name!='reader/packet.csv']
+    manifest=json.loads((source/'manifest.json').read_text())
+    preserved+= [name for name in manifest['files'] if name.startswith(('figures/','references/'))]
+    preserved+= ['reproducibility/replay_config.json']
+    for name in preserved:
+        if digest(source/name)!=digest(directory/name):raise ValueError('Reader revision changed preserved bytes: '+name)
+    code_files=sorted(set(CODE_FILES+engine.CODE_FILES))
+    codes={name:digest(Path(__file__).with_name(name)) for name in code_files}
+    (directory/'reproducibility/code/ptm_shared').mkdir(parents=True,exist_ok=True)
+    for name in code_files:shutil.copyfile(Path(__file__).with_name(name),directory/'reproducibility/code/ptm_shared'/name)
+    revision={'operation':'saved_temporal_reader_revision','version':VERSION,'run_id':run_id,
+        'parent_run_id':origin['run_id'],'parent_manifest_sha256':digest(source/'manifest.json'),
+        'scientific_recalculation':False,'finding_selection_repeated':False,'literature_queries':0,
+        'preserved_table_hashes':{name:digest(directory/name) for name in preserved},
+        'reader_artifacts':artifacts,'replay_scope':'saved_rows_to_reader; not_method_recalculation_or_independent_validation'}
+    json_write(directory/'reproducibility/temporal_reader_revision.json',revision)
+    provenance=deepcopy(origin);provenance.update(run_id=run_id,parent_package_run_id=origin['run_id'],
+        parent_manifest_sha256=revision['parent_manifest_sha256'],operation=revision['operation'],scientific_recalculation=False,
+        code_sha256=codes,origin_analysis_code_sha256=origin.get('origin_analysis_code_sha256',origin['code_sha256']),
+        stage_reuse={'scientific_tables':{'status':'reused_from_validated_package','run_id':origin['run_id']},
+                    'literature':{'status':'frozen_results_reused','run_id':origin['run_id']}})
+    provenance['reader_revision_sha256']=object_hash(revision)
+    provenance['provenance_id']=object_hash({k:v for k,v in provenance.items() if k!='provenance_id'})
+    json_write(directory/'provenance.json',provenance)
+    json_write(directory/'reproducibility/parent_reader_provenance.json',origin)
+    plan=json.loads((directory/'study/analysis_plan.json').read_text())
+    plan['reader_revision']={k:v for k,v in revision.items() if k!='preserved_table_hashes'}
+    plan['code_dependencies']['evidence'].update(codes)
+    json_write(directory/'study/analysis_plan.json',plan)
+    json_write(directory/'reproducibility/temporal_reader_stage.json',{
+        'stage':'saved_temporal_reader','status':'completed','version':VERSION,
+        'parent_run_id':origin['run_id'],'source_hashes':revision['preserved_table_hashes'],
+        'code_hashes':{k:codes[k] for k in ['astra_reader.py','astra_reader_temporal.py','astra_reader_revision.py']},
+        'scientific_stages':'reused; see preserved original stage ledger'})
+    (directory/'START_HERE_ASTRA.md').write_text((source/'START_HERE_ASTRA.md').read_text()+
+        '\n\nSaved temporal reader revision: [READ_ME](reader/READ_ME.md) → [temporal evidence](reader/TEMPORAL_EVIDENCE.md) → original row keys. Read the temporal authoring rules; no new scientific calculation or literature comparison was performed.\n',encoding='utf-8')
+    (directory/'evidence_report.html').write_text((source/'evidence_report.html').read_text()+
+        '\n<p><a href="reader/TEMPORAL_EVIDENCE.md">Saved temporal observations and sensitivity evidence</a></p>\n',encoding='utf-8')
+    checkpoint()
+    if codes!={name:digest(Path(__file__).with_name(name)) for name in code_files}:raise ValueError('Reader source changed during revision')
+    archive,files=seal_archive(directory,root,run_id,engine.VERSION,checkpoint)
+    result=deepcopy(json.loads((source/'platform_run.json').read_text())) if (source/'platform_run.json').is_file() else {}
+    result.update(run_id=run_id,provenance=provenance,analysis_plan=plan)
+    for value in result.get('artifacts',{}).values():
+        path=value['path'].replace(origin['run_id'],run_id);value.update(path=path,sha256=digest(root/path))
+    if not result.get('artifacts'):result['artifacts']={'astra':{'path':str(archive.relative_to(root)),'sha256':digest(archive)}}
+    result['artifacts']['temporal_reader']={'path':str((directory/'reader/TEMPORAL_EVIDENCE.md').relative_to(root)),
+                                           'sha256':digest(directory/'reader/TEMPORAL_EVIDENCE.md')}
+    result['publication_metrics']={'archive_bytes':archive.stat().st_size,'manifest_files':len(files),'scientific_recalculation':False}
+    json_write(directory/'platform_run.json',result)
+    pending=root/('.astra_current_'+run_id+'.json');json_write(pending,result);checkpoint();pending.replace(root/'enrichment_free_current.json')
+    return result
+
+
 def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=None,
                       literature_pin=None, refresh_reason=None, checkpoint=lambda:None):
     from .astra_package import validate_package, write_tables, seal_archive, StageLedger, stage
@@ -57,13 +150,8 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
         raise ValueError('Selection refresh reason requires an explicit literature pin')
     tables=read_tables(source)
     if 'reader/packet' not in tables:raise ValueError('Completed reader adapter/package required')
-    origin=json.loads((source/'provenance.json').read_text());run_id='g0-'+uuid4().hex
-    directory=root/'enrichment_free_runs'/run_id
-    directory.mkdir(parents=True,exist_ok=False)
-    source_manifest=json.loads((source/'manifest.json').read_text())
-    for name in [*source_manifest['files'],'manifest.json']:
-        target=directory/name;target.parent.mkdir(parents=True,exist_ok=True)
-        shutil.copyfile(source/name,target)
+    origin=json.loads((source/'provenance.json').read_text())
+    run_id,directory=_copy_package(source,root)
     if selection_revision:
         # New permitted binaries must be captured separately, never guessed from a path.
         for doc in config['literature'].get('documents',[]):
