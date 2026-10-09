@@ -75,8 +75,11 @@ def registry(scientific,readiness):
     if len(executions):
         for method in methods:
             if method['method_id']=='PhosX':
-                method.update(status='executed' if executions.status.eq('executed').all() else 'partial',
+                requested=executions.loc[executions.status.ne('not_requested')]
+                method.update(status='executed' if len(requested) and requested.status.eq('executed').all() else 'partial',
                     reason=None,execution_ids=executions.execution_id.tolist(),official_implementation=True,
+                    executed_contrast_ids=executions.loc[executions.status.eq('executed'),'contrast_id'].tolist(),
+                    not_requested_contrast_ids=executions.loc[executions.status.eq('not_requested'),'contrast_id'].tolist(),
                     result_table='kinase/method_scores.csv',membership_table='kinase/method_membership.csv')
     return {'schema_version':'method_registry.v2','methods':methods,
         'calibration':'not_implied_by_method_specific_pq','actual_sufficient_input_required':True}

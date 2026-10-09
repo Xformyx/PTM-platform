@@ -373,7 +373,12 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
     if engine and engine.PROFILE=='astra_analysis.v6':
         from .astra_literature import collect, apply
         with stage('finding_literature',metrics,checkpoint,progress):
-            finding_pin=collect(scientific,snapshot,literature,settings=config,cache_root=root/'.astra_stage_cache')
+            # Explicit reuse is checked by apply against the selected finding
+            # order, source rows, study and literature selection. A resource-only
+            # analysis must not silently repeat retrieval or LLM comparison.
+            finding_pin=config.get('finding_literature_pin')
+            if finding_pin is None:
+                finding_pin=collect(scientific,snapshot,literature,settings=config,cache_root=root/'.astra_stage_cache')
             readiness['literature']=apply(scientific,finding_pin,snapshot,literature)
             readiness['reader']['literature_comparison']=readiness['literature']['status']
             plan['fingerprints']['literature']=finding_pin['request_sha256']

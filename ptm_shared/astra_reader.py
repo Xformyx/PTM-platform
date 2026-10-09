@@ -269,6 +269,12 @@ def write_reader(directory, tables):
         '전체 [emergence](../evidence/emergence_evidence.csv), [protein](../quant/protein_contrasts.csv), '
         '[kinase 판정](../science/inference_results.csv)은 별도 원본 표를 확인하세요. '
         '카드에서 보류된 복수 precursor·종 모호성·parent 결측 항목이 이 자료에서 사라진 것은 아닙니다.',
+        '방법 실행은 [method registry](../methods/method_registry.json)와 [실행 범위](../kinase/method_executions.csv), '
+        '[specificity 자원](../science/resource_registry.json)을 확인하세요. '
+        '[서열 점수](../science/specificity_scores.csv) → [기질 기여도](../kinase/substrate_contributions.csv) → '
+        '[native membership](../kinase/method_membership.csv) → [방법 결과](../kinase/method_scores.csv)는 별도 근거입니다. '
+        'PSSM percentile은 정답 확률이 아니며 method p/q는 생물학적 반복의 p/q가 아닙니다. '
+        '서열 적합성으로 미측정 localization이나 개별 kinase 활성·인과를 확정하지 마세요.',
         '선정: 기존 select_finding_cards의 quality/parent/pattern diversity 및 stable ID 기준, 최대 15개. '
         '질문 연결은 선정 이후 수행하며 경로 기대를 점수에 사용하지 않습니다.', '## 저장된 연구 질문']
     for q in packet['research_question_evidence_map']['questions']:

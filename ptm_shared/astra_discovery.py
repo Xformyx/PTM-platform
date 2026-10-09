@@ -188,7 +188,7 @@ def discover(tables, design, fasta_path, context, sources):
                           'background_policy':'unique_gene_sequence_center; equal_gene_weight','anchoring':'named_ptm_group_exactly_at_center; terminal_padding_preserved'}
 
 
-def score_candidates(tables,edges,design,*,science=False,localization=None):
+def score_candidates(tables,edges,design,*,science=False,localization=None,specificity_contrasts=None):
     contributions=[];profiles=[];sensitivity=[]
     strict=tables['strict_parent_paired'].set_index(['form_id','contrast_id']).strict_parent_A.to_dict()
     comparisons=tables['comparisons']; estimator=ContrastEstimator(design)
@@ -209,6 +209,8 @@ def score_candidates(tables,edges,design,*,science=False,localization=None):
             for track,value_col in tracks.items():
                 rows=joined.loc[~joined.restriction_reasons.str.contains('mapping_ineligible|inseparable_multisite|substrate_gene_unresolved')].copy() if track=='unadjusted_only_U' else joined.loc[joined.footprint_eligible.astype(bool)&joined.included.astype(bool)].copy()
                 rows=rows.loc[rows.edge_type.eq('sequence_motif_candidate') if track=='motif_A' else rows.edge_type.eq('experimental_specificity_prediction') if track=='specificity_A' else rows.edge_type.isin(['curated_exact_site_native','curated_site_orthology'])]
+                outside_scope=track=='specificity_A' and specificity_contrasts is not None and contrast['contrast_id'] not in specificity_contrasts
+                if outside_scope:rows=rows.iloc[:0]
                 if track=='localized_A':
                     if localization is None:
                         rows=rows.loc[pd.to_numeric(rows.localization_probability,errors='coerce').ge(.75)&~rows.restriction_reasons.str.contains('multi_accession')]
@@ -246,7 +248,7 @@ def score_candidates(tables,edges,design,*,science=False,localization=None):
                     'track':track,'activity_magnitude':score,'n_sites':len(site_rows),'n_genes':len(genes),
                     'n_measurement_groups':len({m for r in site_rows for m in r['measurement_group_id'].split(';')}),
                     'positive_genes':positive,'negative_genes':negative,'direction_consistency':max(positive,negative)/len(genes) if genes else np.nan,
-                    'coverage_adequate':adequate,'activity_status':'descriptive_footprint' if adequate else 'low_coverage' if genes else 'not_evaluable',
+                    'coverage_adequate':adequate,'activity_status':'not_requested' if outside_scope else 'descriptive_footprint' if adequate else 'low_coverage' if genes else 'not_evaluable',
                     'membership_hash':stable_id('members',member_ids),'identifiability_group':stable_id('identical_support',[contrast['contrast_id'],track,member_ids]),
                     'priority_tier':'curated_supported' if track not in {'motif_A','specificity_A'} and adequate else 'exploratory','statistic_type':'gene_balanced_effect_not_kinase_activity_test'})
                 if track not in {'curated_A','motif_A','specificity_A'} or not site_rows:continue

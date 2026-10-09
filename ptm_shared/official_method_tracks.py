@@ -16,6 +16,15 @@ MEMBER_COLUMNS=['method_membership_id','candidate_id','contrast_id','method_id',
 EXEC_COLUMNS=['execution_id','method_id','contrast_id','status','reason','parameters','runtime_seconds','input_hash','output_hash','log']
 
 
+def contrast_scope(context, available):
+    """Optional native-method scope, never inferred from the observed scores."""
+    requested=context.get('science',{}).get('official_methods',{}).get('PhosX',{}).get('contrast_ids')
+    if requested is None:return None
+    if not isinstance(requested,list) or not requested or len(requested)!=len(set(requested)) or not set(requested)<=set(available):
+        raise ValueError('invalid_PhosX_contrast_scope')
+    return requested
+
+
 def execute_tracks(scientific,inputs,context,resource):
     empty=lambda:(pd.DataFrame(columns=METHOD_COLUMNS+['native_score']),pd.DataFrame(columns=MEMBER_COLUMNS),pd.DataFrame(columns=EXEC_COLUMNS))
     path=inputs.get('_LOCAL_SPECIFICITY',inputs.get('SPECIFICITY'))
@@ -26,13 +35,28 @@ def execute_tracks(scientific,inputs,context,resource):
     comparisons=scientific['quant/comparisons'];ids=scientific['science/site_identity_audit'];scores=scientific['science/specificity_scores']
     edges=scientific['kinase/kinase_candidate_edges'];by_score=edges.loc[edges.edge_type.eq('experimental_specificity_prediction')].set_index('specificity_id').candidate_id.to_dict()
     candidate_by_label={}
-    for r in scores.itertuples():candidate_by_label[r.kinase_accession]=by_score.get(r.specificity_id)
+    for r in scores.itertuples():
+        candidate=by_score.get(r.specificity_id)
+        # Unsupported residue/priming rows have no edge. Such rows must not
+        # erase an earlier scored assay-label -> candidate binding.
+        if candidate is not None:candidate_by_label[r.kinase_accession]=candidate
     sequence_map=scores.loc[scores.status.eq('scored')].drop_duplicates(['form_id','site_id']).set_index(['form_id','site_id']).sequence_window.to_dict()
     eligible=ids.loc[ids.site_attribution_eligible.astype(bool)].copy()
+    # A shared measurement group can contain both an S/T and an unsupported Y
+    # form. Only forms actually scored by this resource may supply its A rank;
+    # an unscored form must not shift the median of a scored sequence.
+    eligible=eligible.loc[[key in sequence_map for key in zip(eligible.form_id,eligible.site_id)]]
     values=[];members=[];executions=[];settings=context.get('science',{}).get('official_methods',{}).get('PhosX',{})
     residues=set(manifest['supported_center_residues']);kind='Y' if residues=={'Y'} else 'ST'
+    scope=contrast_scope(context,comparisons.contrast_id.unique())
     # Input site labels are never mapped to human by gene capitalization.
-    for contrast,g in comparisons.loc[comparisons.included & comparisons.A.notna()].groupby('contrast_id',sort=True):
+    for contrast,all_rows in comparisons.groupby('contrast_id',sort=True):
+        if scope is not None and contrast not in scope:
+            executions.append({'execution_id':stable_id('native_method',['PhosX',contrast,'not_requested',scope]),
+                'method_id':'PhosX_native_functions','contrast_id':contrast,'status':'not_requested',
+                'reason':'outside_explicit_contrast_scope','parameters':json.dumps({'contrast_ids':scope},sort_keys=True)})
+            continue
+        g=all_rows.loc[all_rows.included & all_rows.A.notna()]
         matched=eligible.merge(g[['form_id','A']],on='form_id');rows=[]
         for group,block in matched.groupby('measurement_group_id',sort=True):
             keys={(r.form_id,r.site_id) for r in block.itertuples()};windows={sequence_map[k] for k in keys if k in sequence_map}
@@ -46,7 +70,11 @@ def execute_tracks(scientific,inputs,context,resource):
         # Equal windows from different measured groups remain separate observations;
         # group exclusion/sensitivity is provided in the parent evidence layer.
         frame=pd.DataFrame(rows,columns=['measurement_group_id','form_ids','site_ids','sequence','A'])
-        if not len(frame):continue
+        if not len(frame):
+            executions.append({'execution_id':stable_id('native_method',['PhosX',contrast,'no_eligible_input']),
+                'method_id':'PhosX_native_functions','contrast_id':contrast,'status':'not_evaluable',
+                'reason':'no_unique_mapped_nonzero_A_measurement_groups'})
+            continue
         frame=frame.sort_values(['A','measurement_group_id'],ascending=[False,True]).reset_index(drop=True)
         with tempfile.TemporaryDirectory(prefix='ptm-native-phosx-') as work:
             work=Path(work);ranked=work/'ranked.tsv';frame[['sequence','A']].to_csv(ranked,sep='\t',index=False,header=False)

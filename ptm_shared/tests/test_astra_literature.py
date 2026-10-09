@@ -137,6 +137,19 @@ def test_v6_package_calls_existing_transport_and_revision_replays_without_scienc
     root=tmp_path/'out/enrichment_free_runs'/run['run_id'];validate_package(root)
     initial=pd.read_csv(root/'reader/findings.csv')
     assert run['analysis_readiness']['literature']['anchored_proposals']>0
+    # Resource-only v6 execution may explicitly reuse an integrity-checked pin;
+    # it must never retry an LLM comparison simply because prior review is pending.
+    config['finding_literature_pin']=json.loads((root/'references/finding_literature_pin.json').read_text())
+    with patch.object(lit,'collect',side_effect=AssertionError('frozen literature must not run retrieval')):
+        reused=engine.run('round08-synthetic',config,tmp_path/'frozen')
+    reused_root=tmp_path/'frozen/enrichment_free_runs'/reused['run_id']
+    assert (reused_root/'references/finding_literature_pin.json').read_bytes()==(root/'references/finding_literature_pin.json').read_bytes()
+    pointer=tmp_path/'frozen/enrichment_free_current.json';saved=pointer.read_bytes()
+    config['finding_literature_pin']['sha256']='0'*64
+    with patch.object(lit,'collect',side_effect=AssertionError('no fallback retrieval')),pytest.raises(ValueError,match='pin hash'):
+        engine.run('round08-synthetic',config,tmp_path/'frozen')
+    assert pointer.read_bytes()==saved
+    config.pop('finding_literature_pin')
     # A package revision reuses all scientific tables and frozen finding IDs.
     with patch('ptm_shared.astra_package.compute_science',side_effect=AssertionError('science forbidden')), \
          patch('ptm_shared.astra_package.resolve_sources',side_effect=AssertionError('source refresh forbidden')), \

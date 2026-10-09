@@ -23,7 +23,7 @@ def resource(tmp_path):
     with h5py.File(matrix,'w') as f:
         for n in range(7):
             weights=np.ones((len(POSITIONS_LIST),len(AA_LIST)))
-            weights[0,:]=1.8-n*.21
+            weights[0,:]=1.96-n*.21
             f.create_dataset('K'+str(n),data=weights)
     pd.DataFrame({f'K{n}':np.linspace(.1,2.,1001) for n in range(7)}).to_hdf(background,key='pssm_scores')
     meta={'adapter':'phosx_official.v1','resource_id':'synthetic_test_only','resource_version':'1',
@@ -65,9 +65,26 @@ def test_native_method_reaches_package_and_offline_replay(config,resource,tmp_pa
     config['specificity_manifest_path']=str(resource)
     context=config['experimental_context'];context['quantitation_export_mode']='astra_analysis.v6'
     context['science']['official_methods']={'PhosX':{'permutations':100,'seed':1729}}
+    scoped=redistribution=='prohibited'
+    if scoped:
+        contrast=context['study_design']['contrasts'][0]['contrast_id']
+        context['science']['official_methods']['PhosX']['contrast_ids']=[contrast]
+        # This deliberately conflicting generic gate must not replace official membership.
+        context['science']['specificity_membership']={'minimum_percentile':100,'top_rank':1}
     result=run(1,config,tmp_path/'out');root=tmp_path/'out/enrichment_free_runs'/result['run_id']
     executions=pd.read_csv(root/'kinase/method_executions.csv')
-    assert len(executions) and executions.status.eq('executed').all()
+    assert len(executions) and executions.status.eq('executed').any()
+    if scoped:
+        assert executions.loc[executions.status.eq('executed'),'contrast_id'].tolist()==[contrast]
+        assert executions.loc[executions.contrast_id.ne(contrast),'status'].eq('not_requested').all()
+        contributions=pd.read_csv(root/'kinase/substrate_contributions.csv')
+        assert set(contributions.loc[contributions.track.eq('specificity_A'),'contrast_id'])<={contrast}
+        scores=pd.read_csv(root/'science/specificity_scores.csv')
+        assert scores.membership_selected.any()  # generic 100-percentile gate would remove these
+        registry=json.loads((root/'methods/method_registry.json').read_text())
+        method=next(m for m in registry['methods'] if m['method_id']=='PhosX')
+        assert method['status']=='executed' and method['executed_contrast_ids']==[contrast]
+    else:assert executions.status.eq('executed').all()
     assert len(pd.read_csv(root/'kinase/method_membership.csv'))
     assert pd.read_csv(root/'kinase/method_scores.csv').method_id.eq('PhosX_native_functions').any()
     if redistribution=='prohibited':
@@ -75,3 +92,53 @@ def test_native_method_reaches_package_and_offline_replay(config,resource,tmp_pa
         with pytest.raises(ValueError,match='Conditional replay'):replay_package(root,tmp_path/'missing_resource')
         replay_package(root,tmp_path/'replay',specificity_manifest=resource)
     else:replay_package(root,tmp_path/'replay')
+
+
+@pytest.mark.parametrize('scope',[[],['unknown'],['c','c'],'c'])
+def test_invalid_explicit_scope_is_not_silently_ignored(scope):
+    from ptm_shared.official_method_tracks import contrast_scope
+    with pytest.raises(ValueError,match='contrast_scope'):
+        contrast_scope({'science':{'official_methods':{'PhosX':{'contrast_ids':scope}}}},['c'])
+
+
+def test_ineligible_last_score_does_not_erase_native_candidate(config,resource,tmp_path,monkeypatch):
+    from ptm_shared import astra_evidence_v6 as engine
+    original=engine.score_sites
+    def with_unavailable_tail(*args,**kwargs):
+        scores,state=original(*args,**kwargs)
+        tail=scores.loc[scores.status.eq('scored')].drop_duplicates('kinase_accession').copy()
+        tail['specificity_id']=tail.specificity_id+'-unsupported'
+        tail['status']='not_evaluable';tail['score']=np.nan;tail['percentile']=np.nan
+        tail['membership_selected']=False;tail['selection_reason']='unsupported_center_residue'
+        return pd.concat([scores,tail],ignore_index=True),state
+    monkeypatch.setattr(engine,'score_sites',with_unavailable_tail)
+    config['specificity_manifest_path']=str(resource)
+    context=config['experimental_context'];context['quantitation_export_mode']='astra_analysis.v6'
+    context['science']['official_methods']={'PhosX':{'permutations':100,'contrast_ids':[context['study_design']['contrasts'][0]['contrast_id']]}}
+    result=engine.run(1,config,tmp_path/'out');root=tmp_path/'out/enrichment_free_runs'/result['run_id']
+    results=pd.read_csv(root/'kinase/method_scores.csv')
+    assert len(results.loc[results.method_id.eq('PhosX_native_functions')])==7
+
+
+def test_unscored_tyr_form_cannot_shift_st_measurement_group_rank(resource,monkeypatch):
+    from types import SimpleNamespace
+    from ptm_shared.official_method_tracks import execute_tracks
+    tables={
+        'quant/comparisons':pd.DataFrame([
+            {'form_id':'st','contrast_id':'c','included':True,'A':-1.},
+            {'form_id':'tyr','contrast_id':'c','included':True,'A':9.}]),
+        'science/site_identity_audit':pd.DataFrame([
+            {'form_id':f,'site_id':f+'-site','measurement_group_id':'shared','site_attribution_eligible':True}
+            for f in ['st','tyr']]),
+        'science/specificity_scores':pd.DataFrame([
+            {'form_id':'st','site_id':'st-site','specificity_id':'score-st','kinase_accession':'K0','status':'scored','sequence_window':'AAAAASAAAA'},
+            {'form_id':'tyr','site_id':'tyr-site','specificity_id':'score-y','kinase_accession':'K0','status':'not_evaluable','sequence_window':'AAAAAYAAAA'}]),
+        'kinase/kinase_candidate_edges':pd.DataFrame([
+            {'specificity_id':'score-st','edge_type':'experimental_specificity_prediction','candidate_id':'candidate'}])}
+    def capture(command,**kwargs):
+        ranked=Path(command[command.index('--input')+1])
+        assert ranked.read_text()=='AAAAASAAAA\t-1.0\n'
+        return SimpleNamespace(returncode=1,stdout='',stderr='fixture stops before native execution')
+    monkeypatch.setattr('ptm_shared.official_method_tracks.subprocess.run',capture)
+    _,_,executions=execute_tracks(tables,{'_LOCAL_SPECIFICITY':resource},{},{'status':'official_pssm_scored'})
+    assert executions.status.tolist()==['failed']

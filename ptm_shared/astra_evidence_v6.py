@@ -89,12 +89,29 @@ def prepare_evidence(tables,inputs,design,context):
             positive=pd.to_numeric(pr[injection['input_column']],errors='coerce').gt(0)
             expected.update({(fid,injection['injection_id']):int(n) for fid,n in pr.loc[positive].groupby('_form_id').size().items()})
     localized=by_contrast(obs,children,ids,tables['comparisons'],science.get('localization_policy'),expected)
-    try:scores,resource=score_sites(ids,reference['entries'],inputs.get('_LOCAL_SPECIFICITY',inputs.get('SPECIFICITY')),official=True)
+    from .official_method_tracks import contrast_scope
+    scope=contrast_scope(context,[c['contrast_id'] for c in design['contrasts']])
+    score_input=ids
+    scope_audit=None
+    if scope is not None:
+        comp=tables['comparisons'];forms=set(comp.loc[comp.contrast_id.isin(scope)&comp.included&comp.A.notna(),'form_id'])
+        # A scoped activity check uses the already established site attribution
+        # gate. All ambiguous identities remain in the identity audit, without
+        # materializing a site x enzyme product for ineligible measurements.
+        score_input=ids.loc[ids.site_attribution_eligible & ids.form_id.isin(forms)]
+        scope_audit={'contrast_ids':scope,'identity_rows':len(ids),'scorer_input_rows':len(score_input),
+            'site_attribution_ineligible':int((~ids.site_attribution_eligible).sum()),
+            'eligible_identity_without_joint_A_in_scope':int((ids.site_attribution_eligible&~ids.form_id.isin(forms)).sum()),
+            'exclusion_row_table':'science/site_identity_audit.csv',
+            'quantitative_gate_table':'quant/comparisons.csv',
+            'localization_gate':'not_required_for_exploratory_sequence_specificity; measured_localization_unchanged'}
+    try:scores,resource=score_sites(score_input,reference['entries'],inputs.get('_LOCAL_SPECIFICITY',inputs.get('SPECIFICITY')),official=True)
     except (ValueError,KeyError,OSError) as error:
         from .kinase_specificity import COLUMNS as SCORE_COLUMNS
         scores=pd.DataFrame(columns=SCORE_COLUMNS)
         resource={'status':'resource_unavailable','reason':'invalid_or_missing_specificity_resource','error_type':type(error).__name__,
                   'quantification_preserved':True,'official_parity_status':'not_run'}
+    if scope_audit is not None:resource['input_scope']=scope_audit
     if 'SPECIFICITY_RESTRICTED' in inputs:
         resource.update(raw_resource_packaged=False,replay_scope='requires_identical_external_resource',
                         local_scoring_performed='_LOCAL_SPECIFICITY' in inputs)
@@ -130,7 +147,9 @@ def discover(tables,design,fasta_path,context,sources):
 
 def score_candidates(tables,edges,design,context):
     from .astra_discovery import score_candidates as score
-    result=score(tables,edges,design,science=True,localization=context['_canonical_evidence']['localization_by_contrast'])
+    from .official_method_tracks import contrast_scope
+    result=score(tables,edges,design,science=True,localization=context['_canonical_evidence']['localization_by_contrast'],
+        specificity_contrasts=contrast_scope(context,[c['contrast_id'] for c in design['contrasts']]))
     # Evidence IDs survive the same serialization as the numerical contribution.
     edge_index=edges.set_index('edge_id').to_dict('index')
     localized=context['_canonical_evidence']['localization_by_contrast']
@@ -339,4 +358,12 @@ def report_addendum(scientific,readiness):
     for r in selected.itertuples():lines.append(f'- quant/comparisons.csv: form_id={r.form_id}; contrast_id={r.contrast_id}; U_joint={r.U_joint:.6g}, P_joint={r.P_joint:.6g}, A={r.A:.6g}. Inspect joint masks, strict-parent and normalization sensitivity before interpretation.')
     if readiness['specificity'].get('raw_resource_packaged') is False:
         lines.append('Full numerical replay is conditional: the original permitted local specificity resource with the recorded hash must be supplied via --specificity-manifest. Raw restricted matrices are excluded from this archive.')
+    native=scientific.get('kinase/method_executions',pd.DataFrame())
+    if len(native):
+        scores=scientific['kinase/method_scores'];method=scores.loc[scores.method_id.eq('PhosX_native_functions')]
+        lines.append('Official PhosX resource: '+str(readiness['specificity'].get('resource_id'))+'. '+
+            'Executed contrasts: '+', '.join(native.loc[native.status.eq('executed'),'contrast_id'])+'. '+
+            'Other contrasts are not implied to have executed. '+
+            f'Native method results: {len(method)}; evaluable enrichment results: {int(method.status.eq("computed_method_enrichment").sum())}. '+
+            'Inspect kinase/method_membership.csv for exact measurement groups and A ranks, science/specificity_scores.csv for selected/unselected sequences, and kinase/substrate_contributions.csv for descriptive footprint inputs. Upstream activation evidence was not executed.')
     return '\n'.join(lines)+'\n'
