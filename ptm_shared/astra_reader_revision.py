@@ -21,7 +21,8 @@ def read_tables(root):
             dtype={k:'str' for k,v in d['dtypes'].items() if v in {'str','object'}}) for name,d in dictionary.items()}
 
 
-def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=None, checkpoint=lambda:None):
+def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=None,
+                      literature_pin=None, refresh_reason=None, checkpoint=lambda:None):
     from .astra_package import validate_package, write_tables, seal_archive, StageLedger, stage
     from . import astra_evidence_v6 as engine
     from .astra_reader import write_reader
@@ -30,6 +31,30 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
     validate_package(source)
     config=json.loads((source/'reproducibility/replay_config.json').read_text())
     if config['engine_profile']!=engine.PROFILE:raise ValueError('Reader literature revision requires v6')
+    selection_revision=None
+    if literature_pin is not None:
+        if not isinstance(refresh_reason,str) or not refresh_reason.strip():
+            raise ValueError('Explicit literature selection refresh requires a reason')
+        if literature_pin.get('schema_version')!='selected_literature_pin.v1':
+            raise ValueError('Use a literature selection pin from prepare_astra_inputs')
+        ids=[c['id'] for c in literature_pin['collections']]
+        if len(ids)!=len(set(ids)):raise ValueError('Duplicate literature collection identity')
+        requested=literature_pin.get('requested_ids')
+        if requested is not None and set(ids)-set(requested):
+            raise ValueError('Literature collection outside explicit selection')
+        selection_revision={'schema_version':'literature_selection_revision.v1','reason':refresh_reason,
+            'previous_selection':deepcopy(config['literature']),
+            'previous_pin_sha256':object_hash(config['literature']),
+            'effective_pin_sha256':object_hash(literature_pin),
+            'selection_provenance':deepcopy(literature_pin.get('selection_provenance',{})),
+            'previous_snapshot':deepcopy(config['snapshot'])}
+        config['literature']=deepcopy(literature_pin)
+        config['snapshot']['original']['rag_collections']=deepcopy(requested)
+        for context in (config['context'],config['snapshot']['original'].get('analysis_context',{})):
+            context.setdefault('literature_context',{})['selected_collection_ids']=deepcopy(requested)
+        config['literature_selection_revision']=selection_revision
+    elif refresh_reason is not None:
+        raise ValueError('Selection refresh reason requires an explicit literature pin')
     tables=read_tables(source)
     if 'reader/packet' not in tables:raise ValueError('Completed reader adapter/package required')
     origin=json.loads((source/'provenance.json').read_text());run_id='g0-'+uuid4().hex
@@ -39,6 +64,13 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
     for name in [*source_manifest['files'],'manifest.json']:
         target=directory/name;target.parent.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(source/name,target)
+    if selection_revision:
+        # New permitted binaries must be captured separately, never guessed from a path.
+        for doc in config['literature'].get('documents',[]):
+            if doc.get('content_status')=='full_text_included':
+                p=(directory/doc['package_file']).resolve()
+                if not p.is_relative_to(directory) or not p.is_file() or digest(p)!=doc.get('sha256'):
+                    raise ValueError('New literature binary must already exist in the validated package; use metadata/excerpts otherwise')
     code_files=sorted(set(engine.CODE_FILES))
     from .astra_package import CODE_FILES
     code_files=sorted(set(code_files+CODE_FILES))
@@ -56,6 +88,21 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
         metrics.plan['fingerprints']['literature']=pin['request_sha256']
     with stage('assemble_evidence_package',metrics,checkpoint,lambda _:None):
         changed={name:tables[name] for name in ['reader/packet',*literature_stage.TABLE_KEYS]}
+        if selection_revision:
+            from .astra_inputs import transfer_contract
+            fields,transfer,brief=transfer_contract(config['snapshot'],config['design'],config['context'],config['literature'])
+            for field in fields:
+                if field['source_field_path'].startswith('/rag_collections') or '/literature_context/' in field['source_field_path']:
+                    field.update(source_kind='explicit_literature_revision',reason=refresh_reason)
+            # Replay uses the same serializer; annotation of revision provenance is separate.
+            changed['study/input_field_manifest']=pd.DataFrame(transfer_contract(config['snapshot'],config['design'],config['context'],config['literature'])[0])
+            json_write(directory/'study/literature_selection_revision.json',{**selection_revision,'field_provenance':fields})
+            json_write(directory/'study/user_input_snapshot.json',config['snapshot'])
+            json_write(directory/'study/study_context.json',config['context'])
+            json_write(directory/'study/input_transfer_validation.json',transfer)
+            json_write(directory/'references/literature_pin.json',config['literature'])
+            json_write(directory/'reproducibility/replay_config.json',config)
+            (directory/'study/STUDY_BRIEF.md').write_text(brief,encoding='utf-8')
         dictionary=json.loads((directory/'reproducibility/data_dictionary.json').read_text())
         dictionary.update(write_tables(changed,directory))
         json_write(directory/'reproducibility/data_dictionary.json',dictionary)
@@ -68,7 +115,8 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
         html=(source/'evidence_report.html').read_text()+'\n<p><a href="reader/LITERATURE.md">Finding literature retrieval and comparison status</a></p>\n'
         (directory/'evidence_report.html').write_text(html,encoding='utf-8')
         comparison=json.loads((directory/'references/literature_comparison_packet.json').read_text())
-        comparison.update(comparison_status='see_reader_literature',finding_evidence='reader/LITERATURE.md')
+        comparison.update(comparison_status='see_reader_literature',finding_evidence='reader/LITERATURE.md',
+                          selected_literature=config['literature'],experimental_context=config['context'])
         json_write(directory/'references/literature_comparison_packet.json',comparison)
         json_write(directory/'reproducibility/origin_analysis_provenance.json',origin)
         # Preserve original scientific-code pins; new hashes identify the reader revision code.
@@ -78,6 +126,9 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
             literature_result_pin_sha256=pin['sha256'],code_sha256=code_hashes,
             origin_analysis_code_sha256=origin.get('origin_analysis_code_sha256',origin['code_sha256']),
             operation='reader_literature_revision',scientific_recalculation=False)
+        provenance.update(literature_pin_hash=object_hash(config['literature']),
+                          input_context_hash=object_hash(config['snapshot']))
+        if selection_revision:provenance['literature_selection_revision']={k:v for k,v in selection_revision.items() if k!='previous_snapshot'}
         provenance['stage_fingerprints']['literature']=pin['request_sha256']
         provenance['stage_reuse']={'scientific_tables':{'status':'reused_from_validated_package','run_id':origin['run_id']},'literature':pin['cache']}
         provenance['provenance_id']=object_hash({k:v for k,v in provenance.items() if k!='provenance_id'})
@@ -90,7 +141,7 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
         baseline=json.loads((source/'reproducibility/data_dictionary.json').read_text())
         preserved=[]
         for name in baseline:
-            if name=='reader/packet.csv' or name[:-4] in literature_stage.TABLE_KEYS:continue
+            if name=='reader/packet.csv' or name[:-4] in literature_stage.TABLE_KEYS or (selection_revision and name=='study/input_field_manifest.csv'):continue
             if digest(source/name)!=digest(directory/name):raise ValueError('Scientific/card table changed: '+name)
             preserved.append(name)
         json_write(directory/'reproducibility/literature_revision.json',{'origin_run_id':origin['run_id'],'run_id':run_id,
@@ -105,6 +156,8 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
         archive,files=seal_archive(directory,root,run_id,engine.VERSION,checkpoint)
         result=deepcopy(json.loads((source/'platform_run.json').read_text())) if (source/'platform_run.json').is_file() else {}
         result.update(run_id=run_id,provenance=provenance,analysis_readiness=readiness,analysis_plan=plan)
+        result['literature_pin']=deepcopy(config['literature'])
+        if 'study_preview' in result:result['study_preview']['snapshot']=deepcopy(config['snapshot'])
         for key,value in result.get('artifacts',{}).items():
             path=value['path'].replace(origin['run_id'],run_id)
             value.update(path=path,sha256=digest(root/path))

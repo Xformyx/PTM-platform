@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { designSamples, designErrors, mergeAnalysisContext, withPersistedExportMode } from '../src/lib/analysisContext.ts';
+import { designSamples, designErrors, mergeAnalysisContext, withPersistedExportMode, persistedLiteratureSelection } from '../src/lib/analysisContext.ts';
+
+test('rerun keeps empty, explicit and all-active literature selections distinct', () => {
+  for (const ids of [[], [7], null, undefined]) {
+    const state = persistedLiteratureSelection(ids);
+    const payload = state.useAllCollections ? null : state.selectedCollectionIds;
+    assert.deepEqual(payload, ids ?? null);
+    if (Array.isArray(ids)) assert.notEqual(state.selectedCollectionIds, ids);
+  }
+});
 
 test('copy and rerun text edits retain complete structured context', () => {
   const context = { sample_manifest: { samples: [{ sample_id: 'c', condition: 'Control', biological_unit: 'material' }] },

@@ -1,4 +1,8 @@
 export type AnalysisContext = Record<string, unknown>;
+/** An explicitly empty selection must not become all active collections on rerun. */
+export function persistedLiteratureSelection(ids: number[] | null | undefined) {
+  return { useAllCollections: ids == null, selectedCollectionIds: [...(ids ?? [])] };
+}
 export type DesignSample = { sample_id: string; condition: string; group?: string; replicate?: string | number; [key:string]:unknown };
 export type ManifestSample = DesignSample & {
   biological_unit: string;

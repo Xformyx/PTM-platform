@@ -179,3 +179,60 @@ def test_existing_indexer_doc_id_keeps_permission_and_read_scope(reader):
     lit.apply(tables,pin,snapshot,selected)
     assert len(tables['reader/literature_comparisons'])==6
     assert lit._document_id({'doc_id':8,'document_id':9}) is None
+
+
+def test_explicit_selection_revision_preserves_default_and_replay(config,tmp_path):
+    from ptm_shared import astra_evidence_v6 as engine
+    from ptm_shared.astra_reader_revision import revise_literature
+    from scripts.replay_astra_reader import PROGRAM
+    import subprocess,sys,os
+    config['experimental_context']['quantitation_export_mode']='astra_analysis.v6'
+    config['literature_pin']={'schema_version':'selected_literature_pin.v1','selection':'explicit','requested_ids':[], 'collections':[], 'documents':[]}
+    run=engine.run('selection-test',config,tmp_path/'base')
+    base=tmp_path/'base/enrichment_free_runs'/run['run_id']
+    original=(base/'references/literature_pin.json').read_bytes()
+    default=revise_literature(base,tmp_path/'default')
+    assert (tmp_path/'default/enrichment_free_runs'/default['run_id']/'references/literature_pin.json').read_bytes()==original
+    pin={**selection(),'schema_version':'selected_literature_pin.v1','selection_provenance':{'source_environment':'fixture-origin','destination_environment':'fixture-local'}}
+    with pytest.raises(ValueError,match='requires a reason'):revise_literature(base,tmp_path/'invalid',literature_pin=pin)
+    with pytest.raises(ValueError,match='requires an explicit'):revise_literature(base,tmp_path/'invalid',refresh_reason='missing pin')
+    rag=Retriever()
+    with patch('ptm_shared.finding_literature.time.sleep'):
+        revised=revise_literature(base,tmp_path/'updated',literature_pin=pin,refresh_reason='explicit local mapping',retriever=rag)
+    target=tmp_path/'updated/enrichment_free_runs'/revised['run_id']
+    assert rag.calls  # no reuse of the old empty-selection result
+    replay_config=json.loads((target/'reproducibility/replay_config.json').read_text())
+    assert replay_config['literature']==pin and replay_config['snapshot']['original']['rag_collections']==[1]
+    assert revised['provenance']['literature_pin_hash']==lit.object_hash(pin)
+    assert revised['provenance']['literature_selection_revision']['previous_selection']['requested_ids']==[]
+    assert json.loads((target/'study/study_context.json').read_text())['literature_context']['selected_collection_ids']==[1]
+    for p in base.rglob('*.csv'):
+        rel=p.relative_to(base)
+        if str(rel) in {'reader/packet.csv','study/input_field_manifest.csv',*(k+'.csv' for k in lit.TABLE_KEYS)}:continue
+        assert p.read_bytes()==(target/rel).read_bytes(),str(rel)
+    env={k:v for k,v in os.environ.items() if k!='PYTHONPATH'}
+    p=subprocess.run([sys.executable,'-I','-c',PROGRAM,str(target),str(tmp_path/'offline-new-selection')],cwd='/tmp',env=env,capture_output=True,text=True)
+    assert p.returncode==0,p.stdout+p.stderr
+    assert (base/'references/literature_pin.json').read_bytes()==original
+    pointer=tmp_path/'updated/enrichment_free_current.json';previous=pointer.read_bytes()
+    with patch.object(lit,'collect',side_effect=RuntimeError('injected search boundary failure')):
+        with pytest.raises(RuntimeError):revise_literature(base,tmp_path/'updated',literature_pin=pin,refresh_reason='retry')
+    assert pointer.read_bytes()==previous
+
+
+def test_lossless_prompt_design_reference_and_execution_audit(reader):
+    import hashlib
+    tables,_,snapshot=reader
+    canonical=json.loads(tables['reader/packet'].iloc[0].packet_json)['canonical_study_design']
+    snapshot['original']['analysis_context']['study_design']=copy.deepcopy(canonical)
+    for equal in [True,False]:
+        if not equal:snapshot['original']['analysis_context']['study_design']['audit_note']='distinct record'
+        with patch('ptm_shared.finding_literature.time.sleep'):
+            pin=lit.collect(tables,snapshot,selection(),retriever=Retriever(),llm=Model())
+        for record in pin['retrieval']['records'].values():
+            raw=record['resolved_prompt'];payload=json.loads(raw[raw.index('{'):])
+            assert ('study_design' not in payload['study'])==equal
+            assert payload['study']['canonical_study']==canonical
+            assert payload['observation']==record['search_input']['observation']
+            assert record['comparison_execution']['status']=='completed'
+            assert record['comparison_execution']['output_sha256']==hashlib.sha256(record['comparison_generation']['provider_raw_text'].encode()).hexdigest()

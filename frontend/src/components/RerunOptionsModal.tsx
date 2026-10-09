@@ -19,7 +19,7 @@ import QuickAnalysisCustomFields from "./QuickAnalysisOptions";
 import { cn } from "@/lib/utils";
 import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 import SampleDesignFields from "./SampleDesignFields";
-import { designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode } from "@/lib/analysisContext";
+import { designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode, persistedLiteratureSelection } from "@/lib/analysisContext";
 
 const CLOUD_PROVIDERS = ["gemini", "openai", "anthropic"] as const;
 
@@ -201,14 +201,9 @@ export default function RerunOptionsModal({
   useEffect(() => {
     if (open && order) {
       // Restore RAG collection selection from order
-      const existingRagCols = order.rag_collections;
-      if (existingRagCols && Array.isArray(existingRagCols) && existingRagCols.length > 0) {
-        setUseAllCollections(false);
-        setSelectedCollectionIds(existingRagCols);
-      } else {
-        setUseAllCollections(true);
-        setSelectedCollectionIds([]);
-      }
+      const selection = persistedLiteratureSelection(order.rag_collections);
+      setUseAllCollections(selection.useAllCollections);
+      setSelectedCollectionIds(selection.selectedCollectionIds);
       const ctx = withPersistedExportMode((order.analysis_context || {}) as Record<string, unknown>);
       setStructuredContext(ctx);
       const str = (v: unknown) => (v != null && typeof v === "string" ? v : "");
