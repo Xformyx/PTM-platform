@@ -19,6 +19,8 @@ import traceback
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+import redis as _redis
+
 # [OPT-A3] Top-level imports for frequently used modules.
 # Avoids repeated importlib overhead on every task invocation.
 # Do not `import pandas as pd` again inside run_preprocessing. A nested
@@ -42,6 +44,10 @@ logger = logging.getLogger("ptm-workers.preprocessing")
 
 INPUT_DIR = os.getenv("INPUT_DIR", "/data/inputs")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/data/outputs")
+_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
+# Same window as workers/celery_app.py visibility_timeout. A research_full
+# refresh can run for hours; the lock must still be visible to a redelivery.
+PREPROCESSING_LOCK_SECONDS = 43200
 
 
 def _make_progress_callback(order_id: int, stage: str, step: str, base_pct: float, range_pct: float):
@@ -202,6 +208,24 @@ def run_preprocessing(self, order_id: int, config: dict):
     if is_stale_generation(order_id, config.get("run_generation")):
         logger.info(f"[Order {order_id}] Preprocessing skipped — stale run_generation")
         return {"order_id": order_id, "status": "skipped", "reason": "stale_generation"}
+
+    lock_key = f"preprocessing_lock:{order_id}"
+    lock_client = _redis.from_url(_BROKER_URL, decode_responses=True)
+    lock_token = str(getattr(getattr(self, "request", None), "id", None) or f"order-{order_id}")
+
+    def _release_own_lock() -> None:
+        try:
+            if lock_client.get(lock_key) == lock_token:
+                lock_client.delete(lock_key)
+        except Exception:
+            pass
+
+    if not lock_client.set(lock_key, lock_token, nx=True, ex=PREPROCESSING_LOCK_SECONDS):
+        logger.warning(
+            f"[Order {order_id}] Preprocessing already running (lock exists). "
+            f"Skipping duplicate execution."
+        )
+        return {"order_id": order_id, "status": "skipped", "reason": "duplicate"}
 
     start_time = time.time()
     order_code = config.get("order_code", f"order-{order_id}")
@@ -1040,6 +1064,7 @@ def run_preprocessing(self, order_id: int, config: dict):
         )
         raise
     finally:
+        _release_own_lock()
         try:
             if "mcp" in dir():
                 mcp.close()

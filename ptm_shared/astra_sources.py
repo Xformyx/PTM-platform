@@ -133,6 +133,21 @@ def _write_atomic(path, value):
     tmp.replace(path)
 
 
+def read_source_cache(path):
+    """Return one cache record, or None when the file is gone at the read.
+
+    구현 대상: docs/collaboration/astra_package_operations_KO.md «Reference와 cache»
+    사전등록: 2026-10-10. Order 89에서 두 전처리가 같은 source_cache를 읽는 동안
+    FileNotFoundError가 전처리를 끊은 것을 본 뒤. 탐색적.
+    해석 한계: None은 그 조회가 cache_file_missing이라는 뜻이다. 공급원 응답이 아니다.
+    주장 금지: 없는 cache를 빈 network나 identifier 없음으로 적지 않는다.
+    """
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return None
+
+
 class SourceClient:
     def __init__(self, root, fixtures=None, budget_seconds=None, max_requests=None, checkpoint=lambda: None, refresh=False, research_full=False):
         self.refresh=refresh
@@ -165,7 +180,11 @@ class SourceClient:
                 'status': None, 'cache_hit': False, 'response_sha256': None, 'payload': None,
                 'original_resources': [], 'reason': None}
         if cache.exists():
-            candidate = json.loads(cache.read_text())
+            candidate = read_source_cache(cache)
+            if candidate is None:
+                base.update(status='access_unavailable', reason='cache_file_missing')
+                self.records.append(base)
+                return base
             if candidate['status'] in SUCCESS and time.time() - cache.stat().st_mtime < 7 * 86400:
                 raw = candidate.get('raw_response', '').encode()
                 if hashlib.sha256(raw).hexdigest() == candidate.get('response_sha256'):

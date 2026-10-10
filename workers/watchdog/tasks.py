@@ -141,6 +141,18 @@ def _clear_stale_locks(order_id: int) -> int:
     return cleared
 
 
+def live_task_keeps_execution_lock(has_celery_task):
+    """A Celery task that is still running keeps its stage lock.
+
+    구현 대상: docs/collaboration/astra_package_operations_KO.md «Reference와 cache»
+    사전등록: 2026-10-10. Order 89에서 진행 로그가 없던 전처리가 살아 있는데
+    lock이 지워진 뒤 두 번째 전처리가 같은 source_cache를 연 것을 본 뒤. 탐색적.
+    해석 한계: lock을 유지할 뿐 그 작업이 성공했다는 뜻이 아니다.
+    주장 금지: 잠금으로 kinase 조회 범위나 완료를 말하지 않는다.
+    """
+    return bool(has_celery_task)
+
+
 def _handle_stalled_order(order: dict, reason: str):
     """Take action on a stalled order: notify, optionally restart or halt."""
     order_id = order["id"]
@@ -148,8 +160,6 @@ def _handle_stalled_order(order: dict, reason: str):
     restart_count = order["watchdog_restart_count"]
     auto_restart = get_bool("WATCHDOG_AUTO_RESTART", False)
     max_restarts = get_int("WATCHDOG_MAX_RESTARTS", 2)
-
-    _clear_stale_locks(order_id)
 
     logger.warning(
         f"[Watchdog] Order {order_id} ({order['order_code']}) stalled at "
@@ -297,9 +307,12 @@ def check_stalled_orders(self):
                     f"No active Celery task found and no log activity for "
                     f"{int(minutes_since_log)} minutes"
                 )
+                _clear_stale_locks(order_id)
                 _handle_stalled_order(order, reason)
 
             elif has_celery_task and minutes_since_log >= no_progress_stall:
+                if not live_task_keeps_execution_lock(has_celery_task):
+                    _clear_stale_locks(order_id)
                 _pct_info = (
                     f", progress_pct stuck at {_cur_pct.get(order_id, 0):.1f}%"
                     if _pct_unchanged else ""

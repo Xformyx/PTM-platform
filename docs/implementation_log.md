@@ -3497,3 +3497,14 @@
 - **해석 한계:** 이후 배치가 호출돼도 배치 사이 연결은 요청하지 않는다. STRING 결과를 site-resolved curated kinase edge로 올리지 않는다. 주문은 재실행하지 않았다.
 - **결정성:** 새 seed·solver 없음. 새 임계 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_astra_source_queries.py ptm_shared/tests/test_astra_package.py`.
 
+### [2026-10-10] Astra 전처리 — 사라진 cache는 그 조회로 남고, 살아있는 전처리는 잠금을 유지
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_sources.py` `read_source_cache`, `workers/preprocessing/tasks.py` preprocessing lock, `workers/watchdog/tasks.py` `live_task_keeps_execution_lock`
+- **구현 대상 설계:** `docs/collaboration/astra_package_operations_KO.md` «Reference와 cache»
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). Order 89 `Insulin_Signaling_V3_261003_Codex_Astra_bundle_6`에서 두 전처리가 같은 `source_cache`를 읽다 `FileNotFoundError`로 전체가 끊긴 것을 본 뒤.
+- **내용:** cache 파일이 읽는 순간에 없으면 그 조회만 `access_unavailable`/`cache_file_missing`으로 남긴다. 빈 성공으로 저장하지 않고 전처리를 예외로 끊지 않는다. 전처리 lock은 Celery 작업이 살아 있으면 지우지 않으며, lock이 있으면 두 번째 전처리는 시작하지 않는다. lock 유지 시간은 기존 visibility timeout 12시간과 같다. 완료된 pin은 바꾸지 않았다.
+- **논문에서의 용도:** 사용 안 함 (공급원 조회 절차의 탐색적 수정)
+- **해석 한계:** `cache_file_missing`은 공급원 응답이 아니다. STRING 404나 iPTMnet schema 실패를 성공으로 바꾸지 않는다. 주문은 재실행하지 않았다.
+- **결정성:** 새 seed·solver 없음. 새 측정 임계 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_astra_package.py ptm_shared/tests/test_astra_source_queries.py`.
+

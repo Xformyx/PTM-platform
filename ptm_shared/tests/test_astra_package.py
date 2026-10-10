@@ -111,6 +111,24 @@ def test_valid_empty_provider_cache(tmp_path):
     assert again['status']=='no_hit' and again['cache_hit']
 
 
+def test_a_cache_file_that_vanishes_at_read_is_that_query_only(tmp_path, monkeypatch):
+    client=SourceClient(tmp_path,{'P':{'payload':[{'kept':True}]}})
+    record=client.query('P',{'taxon':'9606'},'https://fixture.invalid')
+    client.accept(record,[{'kept':True}])
+    cached_path=next((tmp_path/'source_cache').glob('*.json'))
+    cached_before=cached_path.read_bytes()
+
+    def missing(self, *args, **kwargs):
+        raise FileNotFoundError(self)
+
+    monkeypatch.setattr(Path, 'read_text', missing)
+    again=SourceClient(tmp_path,{'P':{'payload':[{'should_not_run':True}]}}).query(
+        'P',{'taxon':'9606'},'https://fixture.invalid')
+    assert again['status']=='access_unavailable' and again['reason']=='cache_file_missing'
+    assert again['payload'] is None and again['cache_hit'] is False
+    assert cached_path.read_bytes()==cached_before
+
+
 def test_real_orchestrator_offline_replay_and_interruption(configuration,tmp_path):
     out=tmp_path/'output'
     result=run_astra_analysis(42,configuration,out)
