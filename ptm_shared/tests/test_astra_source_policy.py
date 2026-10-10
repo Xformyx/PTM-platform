@@ -9,7 +9,7 @@ import pytest
 from ptm_shared.astra_sources import (SourceClient,resolve_sources,pin_sources,read_source_pin,
     source_execution_record,requested_acquisition_policy,SourceRefreshIncomplete)
 from ptm_shared.astra_evidence_v6 import run,resolve_plan
-from ptm_shared.astra_package import replay_package
+from ptm_shared.astra_package import replay_package, partial_refresh_preserves_existing_package
 from ptm_shared.tests.test_astra_science import config
 
 
@@ -99,3 +99,10 @@ def test_package_reuse_refresh_failure_and_archive_replay(config,tmp_path):
     assert record['status']=='partial' and any(q['status']=='timeout' for q in record['incomplete_queries'])
     stages=json.loads((failed[0]/'stage_checkpoint.json').read_text())['stages']
     assert next(r for r in stages if r['stage']=='resolve_annotation')['status']=='failed'
+
+
+def test_partial_refresh_without_a_completed_package_does_not_block():
+    assert partial_refresh_preserves_existing_package(True, 'partial', True)
+    assert not partial_refresh_preserves_existing_package(True, 'partial', False)
+    assert not partial_refresh_preserves_existing_package(False, 'partial', True)
+    assert not partial_refresh_preserves_existing_package(True, 'completed', False)

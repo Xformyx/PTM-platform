@@ -3508,3 +3508,14 @@
 - **해석 한계:** `cache_file_missing`은 공급원 응답이 아니다. STRING 404나 iPTMnet schema 실패를 성공으로 바꾸지 않는다. 주문은 재실행하지 않았다.
 - **결정성:** 새 seed·solver 없음. 새 측정 임계 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_astra_package.py ptm_shared/tests/test_astra_source_queries.py`.
 
+### [2026-10-10] Astra 갱신 — 완료 패키지가 없을 때는 부분 조회도 패키지로 남김
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_package.py` `partial_refresh_preserves_existing_package`
+- **구현 대상 설계:** `docs/collaboration/astra_package_operations_KO.md` «Reference와 cache»
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). Order 89가 완료 패키지 없이 `Reference refresh partial`로 다시 실패한 것을 본 뒤.
+- **내용:** 참조 갱신이 부분 완료여도, 그 주문에 `enrichment_free_current.json`이 없으면 실행을 멈추지 않고 미완료 조회를 ledger에 남긴 채 패키지를 만든다. 완료 패키지가 있으면 그 파일은 바꾸지 않고 갱신을 멈춘다. STRING HTTP 404와 iPTMnet schema 실패를 성공으로 바꾸지 않았다. 주문은 재실행하지 않았다.
+- **논문에서의 용도:** 사용 안 함 (공급원 조회 절차의 탐색적 수정)
+- **해석 한계:** 패키지가 나와도 미완료 조회는 채워지지 않는다. STRING·iPTMnet 결과를 site-resolved curated kinase edge로 올리지 않는다.
+- **결정성:** 새 seed·solver 없음. 새 측정 임계 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_astra_source_policy.py`.
+

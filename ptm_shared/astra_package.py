@@ -273,6 +273,19 @@ def start_here(snapshot,counts,readiness):
         'Replay: install reproducibility/requirements.txt in an isolated environment, then python replay.py --output <new-directory>. Supplied measurement inputs and permitted pinned source records are included. Check reproducibility/replay_config.json for required external restricted resources before claiming self-contained replay; replay makes no network calls.'])+'\n'
 
 
+def partial_refresh_preserves_existing_package(refresh, execution_status, package_exists):
+    """A partial refresh stops only when this order already has a completed package.
+
+    구현 대상: docs/collaboration/astra_package_operations_KO.md «Reference와 cache»
+    사전등록: 2026-10-10. Order 89는 완료 패키지가 없는데 research_full 부분 완료가
+    전처리를 실패로 끝낸 것을 본 뒤. 탐색적.
+    해석 한계: 완료 패키지가 없으면 미완료 조회를 제한으로 남기고 패키지를 만든다.
+    실패한 조회를 성공으로 바꾸지 않는다.
+    주장 금지: 패키지가 나왔다고 미완료 STRING·iPTMnet 조회가 채워졌다고 하지 않는다.
+    """
+    return bool(refresh) and execution_status == 'partial' and bool(package_exists)
+
+
 def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progress=lambda message:None,*,engine=None):
     package_version=engine.VERSION if engine else VERSION
     profile=engine.PROFILE if engine else PROFILE
@@ -351,7 +364,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         json_write(directory/'references/source_execution.json',source_execution)
         json_write(directory/'references/source_pin.json',sources)
         json_write(directory/'reproducibility/stage_reuse.json',{'quant':quant_reuse,'normalization_sensitivity':alt_reuse})
-        if context.get('refresh_references') and source_execution['status']=='partial':
+        if partial_refresh_preserves_existing_package(context.get('refresh_references'), source_execution['status'], (root/'enrichment_free_current.json').is_file()):
             raise SourceRefreshIncomplete('Reference refresh partial; previous completed package preserved. See references/source_execution.json')
     evidence_reuse={}
     def execute(name,fn):
