@@ -1,0 +1,546 @@
+{
+  "passed": true,
+  "scope": "isolated_local_UI_API_worker_download",
+  "expected_profile": "astra_analysis.v6",
+  "archive": "/Users/josephk/Projects/PTM-platform/codex-inputs/round11-20261010/A/astra_analysis_package_g3-583a813dfdb6423eb848e44b0c56016c.zip",
+  "contract": {
+    "run_id": "g3-583a813dfdb6423eb848e44b0c56016c",
+    "context": "astra_analysis.v6",
+    "plan": "astra_analysis.v6",
+    "provenance": "astra_analysis.v6",
+    "schema": "astra_analysis_package.v6.experimental",
+    "replay": "astra_analysis.v6",
+    "input_sha256": {
+      "inputs/PR.tsv": "7160e863ddaf5236d22c5dc95fd3b066355341e8b2b130f11ef12e5a46a52ba4",
+      "inputs/PG.tsv": "57c874a46f57608a64a779c4ef8ddecd07273cc0603aa228b8fbd662cbfca745",
+      "inputs/reference.fasta": "61b5d367511111d46377c78cfcfc1a09bacb0c1632c9960282520de732823c83"
+    },
+    "source_pin_sha256": "f439a47aeef059bf1292b2c185cb79cc34252493a0f2234846612b50eb097f3f",
+    "recorded_source_pin_sha256": "7560c13a6b430363744157d74ad160a83e0939ec0754cedce20d7c0fe9dcbd8e",
+    "source_acquisition_policy": null,
+    "required_v6_files": {
+      "science/localization_by_contrast.csv": true,
+      "science/inference_results.csv": true,
+      "study/input_lineage.csv": true,
+      "methods/method_registry.json": true
+    },
+    "archive_sha256": "335425f42c6d11cc1aa4e92112a172931317e68c3896984c0b53427ae0534b61",
+    "execution_profile": {
+      "api_v6_flag_enabled": true,
+      "dispatch_profile": "astra_analysis.v6",
+      "effective_profile": "astra_analysis.v6",
+      "executed_profile": "astra_analysis.v6",
+      "expected_profile": "astra_analysis.v6",
+      "requested_profile": "astra_analysis.v5",
+      "selection_policy": "current_astra_context.v1",
+      "status": "matched"
+    },
+    "reader_rows": {
+      "reader_adapter/form_contrasts.csv": 16944,
+      "reader/findings.csv": 15,
+      "reader/coverage.csv": 16944
+    }
+  },
+  "reader_counts": {
+    "reader_adapter/form_contrasts.csv": 16944,
+    "reader/findings.csv": 15,
+    "reader/cards.csv": 14658,
+    "reader/coverage.csv": 16944
+  },
+  "quant": [
+    {
+      "table": "quant/annotation_edges.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/comparisons.csv",
+      "rows": 16944,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/detection.csv",
+      "rows": 16944,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/emergent_kinase_evidence.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/form_evidence_status.csv",
+      "rows": 16944,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_injection_omissions.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_membership.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_profiles.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_sensitivity.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/primary_A_input.csv",
+      "rows": 13704,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/protein_contrasts.csv",
+      "rows": 57150,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/runlevel.csv",
+      "rows": 59304,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/site_mapping.csv",
+      "rows": 11614,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_parent_complete.csv",
+      "rows": 13704,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_parent_paired.csv",
+      "rows": 13704,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_parent_peptide_masks.csv",
+      "rows": 445712,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_selected_sequences.csv",
+      "rows": 111311,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_unmodified_proteins.csv",
+      "rows": 54456,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_unmodified_sequences.csv",
+      "rows": 667866,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/summary.csv",
+      "rows": 2824,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/temporal_protein_summary.csv",
+      "rows": 18601,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/validation_panel.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    }
+  ],
+  "same_design_pin_baseline": "g0-02484ac7623548fe970d9f88f57ea2e1",
+  "fixed_quant": [
+    {
+      "table": "quant/annotation_edges.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/comparisons.csv",
+      "rows": 16944,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/detection.csv",
+      "rows": 16944,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/emergent_kinase_evidence.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/form_evidence_status.csv",
+      "rows": 16944,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_injection_omissions.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_membership.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_profiles.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/kinase_sensitivity.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/primary_A_input.csv",
+      "rows": 13704,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/protein_contrasts.csv",
+      "rows": 57150,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/runlevel.csv",
+      "rows": 59304,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/site_mapping.csv",
+      "rows": 11614,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_parent_complete.csv",
+      "rows": 13704,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_parent_paired.csv",
+      "rows": 13704,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_parent_peptide_masks.csv",
+      "rows": 445712,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_selected_sequences.csv",
+      "rows": 111311,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_unmodified_proteins.csv",
+      "rows": 54456,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/strict_unmodified_sequences.csv",
+      "rows": 667866,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/summary.csv",
+      "rows": 2824,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/temporal_protein_summary.csv",
+      "rows": 18601,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    },
+    {
+      "table": "quant/validation_panel.csv",
+      "rows": 0,
+      "ids_text_na_equal": true,
+      "numeric_equal_atol_rtol_1e_10": true,
+      "byte_equal": true
+    }
+  ],
+  "stage_reuse": {
+    "discover_regulators": {
+      "fingerprint": "f68b29a2311311c6cfdc966825e9e082dd70c8971cb096919f7e6ccbbb3d5736",
+      "stage": "discover_regulators",
+      "status": "reused"
+    },
+    "identity_localization": {
+      "fingerprint": "f68b29a2311311c6cfdc966825e9e082dd70c8971cb096919f7e6ccbbb3d5736",
+      "stage": "identity_localization",
+      "status": "reused"
+    },
+    "integrate_temporal_layers": {
+      "fingerprint": "eb1b93dc735f2fbea78f1fc8aa82a6038c285472f0e8db026b8d0cdab108a861",
+      "stage": "integrate_temporal_layers",
+      "status": "reused"
+    },
+    "normalization_sensitivity": {
+      "fingerprint": "quant_v6_66ce0aceb9d95ad1f53c",
+      "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+      "status": "reused"
+    },
+    "quant": {
+      "fingerprint": "quant_v6_59024921d6b79f54630d",
+      "origin_analysis_run_id": "g2-de5039ca5d9841d8a5c3bb617d4d2b63",
+      "status": "reused"
+    },
+    "score_regulator_footprints": {
+      "fingerprint": "f68b29a2311311c6cfdc966825e9e082dd70c8971cb096919f7e6ccbbb3d5736",
+      "stage": "score_regulator_footprints",
+      "status": "reused"
+    }
+  },
+  "execution": {
+    "api_v6_flag_enabled": true,
+    "dispatch_profile": "astra_analysis.v6",
+    "effective_profile": "astra_analysis.v6",
+    "executed_profile": "astra_analysis.v6",
+    "expected_profile": "astra_analysis.v6",
+    "requested_profile": "astra_analysis.v5",
+    "selection_policy": "current_astra_context.v1",
+    "status": "matched"
+  },
+  "production_order89_verified": false,
+  "round": "11-A",
+  "base_main": "0ca09c1",
+  "fixed_design_pin_baseline": "g0-02484ac7623548fe970d9f88f57ea2e1",
+  "fixed_quant_byte_identical": {
+    "temporal_protein_summary.csv": true,
+    "summary.csv": true,
+    "strict_parent_peptide_masks.csv": true,
+    "kinase_sensitivity.csv": true,
+    "kinase_membership.csv": true,
+    "protein_contrasts.csv": true,
+    "detection.csv": true,
+    "site_mapping.csv": true,
+    "emergent_kinase_evidence.csv": true,
+    "kinase_profiles.csv": true,
+    "primary_A_input.csv": true,
+    "form_evidence_status.csv": true,
+    "kinase_injection_omissions.csv": true,
+    "strict_unmodified_proteins.csv": true,
+    "annotation_edges.csv": true,
+    "comparisons.csv": true,
+    "strict_parent_paired.csv": true,
+    "runlevel.csv": true,
+    "strict_selected_sequences.csv": true,
+    "validation_panel.csv": true,
+    "strict_unmodified_sequences.csv": true,
+    "strict_parent_complete.csv": true
+  },
+  "source_pin_bytes_identical": true,
+  "canonical_design_identical": true,
+  "reader_replay": {
+    "passed": true,
+    "scope": "reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables",
+    "scientific_requantification": false,
+    "network_requests": 0,
+    "repository_code_used": false,
+    "run_id": "g3-583a813dfdb6423eb848e44b0c56016c",
+    "files": [
+      {
+        "file": "reader/READ_ME.md",
+        "sha256": "2fad929398629cbd90c8acf6efb095ab8221b68a4f4ade0e5d396b4110324046",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/authoring_packet.json",
+        "sha256": "652f40b9546e0bcf830616fe1ad3d21b8fbe3853f84f3792bc080be18488ef3f",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/coverage_summary.json",
+        "sha256": "17ed2c1ba4bd85f4925259de71932212cba71f63dd7f478411eadce1902dd675",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/question_map.json",
+        "sha256": "0a74b2c6523f85861363d57c96c18a5f82980c526e5776541e3a362d4ec34a12",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/selection_audit.json",
+        "sha256": "c74f12b94ab6aadb8269668fd4491ec6c1d163d3f5e2b498a0a1245ff744be25",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/TEMPORAL_EVIDENCE.md",
+        "sha256": "14c7da487bc8e7306159bfd094c3655434f9ee303b85c37a26dd06347810d6d9",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/temporal_evidence.json",
+        "sha256": "91955efc820f567fd9143ae0ae4882ac40bad8dc01f7a6760efc492da9f9a116",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/temporal_links.csv",
+        "sha256": "5ff8cf7f1b3ef4e51c1c1c3d060e131e6e9be83c08af54edd7e79ecd33607b13",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/LITERATURE.md",
+        "sha256": "7992472e9c41c7f92e998403f80608a24aa9e46ef88c535889ee7e41ca8b2868",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_summary.json",
+        "sha256": "1258f6463f363eb5f0064404d6f6bd846900a48f2445ce76750d155ace133505",
+        "byte_equal": true
+      },
+      {
+        "file": "references/finding_literature_pin.json",
+        "sha256": "e46fc13cfaf69ee0e44c45ab5e470fe00c818162e080e715a6985897acdc1c7f",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/cards.csv",
+        "sha256": "6c596a74f9c4e7f65e83bcfcd03c7dd05511961a058414f50d3e98ab032fd360",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/findings.csv",
+        "sha256": "1b0e7103f1130ab82717a87cc62161a8d04191e08dc974d8f17ab9d8f62ec369",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/coverage.csv",
+        "sha256": "f9fbcafc3657f2e6b5e3d9c872ef66f0b15719f5d9908de864280ee363cb9e4f",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/packet.csv",
+        "sha256": "1fe5c6e1abe6359c4ece18cdefb27dcf3f7140522fee280589c8f99e62bbae58",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_search.csv",
+        "sha256": "e7800014d7b0f88f9614e77cfbaaf90a0dd279d87e64056fe785a1d9edf4ecca",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_sources.csv",
+        "sha256": "5281700a555da1bc7050ab641e82db9d539bad09fd96cd56e6beadb5b4719763",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_comparisons.csv",
+        "sha256": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+        "byte_equal": true
+      }
+    ],
+    "validation": {
+      "source_rows_checked": 16944,
+      "cards_checked": 14658,
+      "findings_checked": 15,
+      "values_times_NA_masks_ids": "passed"
+    }
+  },
+  "tests": {
+    "python_unique_passed": 29,
+    "frontend_passed": 5
+  },
+  "operational_status": "isolated_local_only; production flag/worker/Order89 DB not verified"
+}

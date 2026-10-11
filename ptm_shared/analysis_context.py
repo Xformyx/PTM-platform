@@ -10,11 +10,39 @@ def current_astra_context(context):
     explicit legacy purposes and every supplied design/science setting intact.
     """
     result = deepcopy(context or {})
+    requested = result.get('quantitation_export_mode')
     if result.get('quantitation_export_mode') == 'astra_analysis.v4':
         result['quantitation_export_mode'] = 'astra_analysis.v5'
     if result.get('quantitation_export_mode')=='astra_analysis.v5' and os.getenv('PTM_ASTRA_EVIDENCE_V6')=='1':
         result['quantitation_export_mode']='astra_analysis.v6'
+    if str(requested).startswith('astra_analysis.'):
+        previous = result.get('astra_execution') or {}
+        # The resolver is called more than once on create/start. Keep the first
+        # request, but never let a stale contract hide a newly changed profile.
+        if previous.get('effective_profile') != requested:
+            previous = {}
+        result['astra_execution'] = {
+            'requested_profile': previous.get('requested_profile', requested),
+            'effective_profile': result['quantitation_export_mode'],
+            'selection_policy': 'current_astra_context.v1',
+            'api_v6_flag_enabled': os.getenv('PTM_ASTRA_EVIDENCE_V6') == '1',
+        }
     return result
+
+
+def verify_execution_profile(context, executed_profile):
+    """Check request intent before publishing, never derive it from the result.
+
+    Recorded archives without a selection record use their recorded request.
+    This does not upgrade legacy runs or consult the replay worker's flag.
+    """
+    record = deepcopy(context.get('astra_execution') or {})
+    requested = context.get('quantitation_export_mode')
+    expected = record.get('effective_profile', requested)
+    if expected != requested or executed_profile != expected:
+        raise ValueError(f'astra_profile_mismatch: expected={expected}, dispatch={requested}, executed={executed_profile}')
+    return {**record, 'expected_profile': expected, 'dispatch_profile': requested,
+            'executed_profile': executed_profile, 'status': 'matched'}
 
 
 def merge_analysis_context(existing, patch):

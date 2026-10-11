@@ -114,6 +114,19 @@ def test_stale_pin_source_tamper_selection_and_row_join_fail_closed(reader):
     with pytest.raises(ValueError,match='input mismatch|order'):lit.apply(tables,pin,snapshot,selected)
 
 
+def test_live_order_condition_key_order_matches_archived_replay(reader):
+    tables,_,snapshot=reader
+    snapshot['original']['analysis_context']['pre_treatment']={'name':'recorded starvation','unit':'h','duration':12}
+    selected={'collections':[]}
+    pin=lit.collect(tables,snapshot,selected)
+    archived=json.loads(json.dumps(snapshot,sort_keys=True))
+    lit.apply(tables,pin,archived,selected)
+    changed=copy.deepcopy(archived)
+    changed['original']['analysis_context']['pre_treatment']['duration']=6
+    with pytest.raises(ValueError,match='input mismatch'):
+        lit.apply(tables,pin,changed,selected)
+
+
 def test_v6_package_calls_existing_transport_and_revision_replays_without_science(config,tmp_path):
     from ptm_shared import astra_evidence_v6 as engine
     from ptm_shared.astra_reader_revision import revise_literature

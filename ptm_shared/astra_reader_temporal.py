@@ -54,6 +54,10 @@ def _parts(value):
 
 def source_row(value):
     row = clean(value)
+    # The canonical CSV writer encodes empty cells as missing. Apply that same
+    # convention before first publication, not only when reading an archive.
+    # This affects absent ID lists/reasons, never zero or measured values.
+    row = {key: None if value == '' else value for key, value in row.items()}
     # Nullable boolean columns are object/string when read using the archived
     # dictionary, but bool/NA under pandas inference. Keep one typed meaning.
     for name in ('parent_pattern_agreement', 'normalization_pattern_agreement'):
@@ -175,7 +179,7 @@ def project_temporal(tables, packet):
         members = tables.get(CONTRIBUTION, pd.DataFrame())
         selected = members.loc[members.form_ids.map(lambda value: form in _parts(value)) & members.contrast_id.isin(ordered)] if len(members) else members
         for (candidate, track), group in selected.groupby(['candidate_id', 'track'], sort=True) if len(selected) else []:
-            cm = [clean(r) for r in group.to_dict('records')]
+            cm = [source_row(r) for r in group.to_dict('records')]
             evidence = {'candidate_id': candidate, 'series_id': sid, 'track': track,
                         'contributions': [bind(fid, CONTRIBUTION, r, 'candidate_contribution') for r in sorted(cm, key=lambda r: (ordered.index(r['contrast_id']), r['contribution_id']))],
                         'profiles': [], 'fixed_membership': [], 'exclusions': []}

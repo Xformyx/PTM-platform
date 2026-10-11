@@ -49,6 +49,9 @@ def package_contract(data):
                 'science/localization_by_contrast.csv', 'science/inference_results.csv',
                 'study/input_lineage.csv', 'methods/method_registry.json')},
             'archive_sha256': sha(data),
+            'execution_profile': read('provenance.json').get('execution_profile'),
+            'reader_rows': {name: len(pd.read_csv(z.open(name))) for name in (
+                'reader_adapter/form_contrasts.csv', 'reader/findings.csv', 'reader/coverage.csv') if name in z.namelist()},
         }
 
 
@@ -132,7 +135,11 @@ def main():
         with zipfile.ZipFile(args.archive) as z:
             saved = json.loads(z.read('reproducibility/replay_config.json'))
             original = saved['snapshot']['original']; context = saved['context']
-            pin = sha(z.read('references/source_pin.json'))
+            source_bytes = z.read('references/source_pin.json')
+            source = json.loads(source_bytes)
+            # Export adds the registry hash to its JSON wrapper. Its file hash
+            # is therefore not the original content-addressed registry ID.
+            pin = source.get('pin_sha256') or sha(source_bytes)
             # Stored upload paths belong to the old order. Re-upload included
             # attachments with their original bytes through the normal API.
             context.pop('research_attachment_records', None)

@@ -38,7 +38,9 @@ def inputs(tables, snapshot, literature):
     arms = study['canonical_study'].get('arms', [])
     study['recorded_treatments'] = [a for a in arms if a.get('treatments')]
     study['treatment'] = study.get('treatment') or '; '.join(t['name'] for a in arms for t in a.get('treatments', []))
-    study['recorded_conditions_query'] = json.dumps({k:study[k] for k in ('recorded_treatments','pre_treatment','special_conditions') if k in study}, ensure_ascii=False)
+    # This text is both a query and a hashed input. JSON files sort object keys;
+    # preserve semantic identity across live Order objects and archived replay.
+    study['recorded_conditions_query'] = json.dumps({k:study[k] for k in ('recorded_treatments','pre_treatment','special_conditions') if k in study}, ensure_ascii=False, sort_keys=True)
     for c in cards:
         c['literature_input'] = {k:c.get(k) for k in ('finding_id','card_id','form_id','taxon_ids','feature_identity',
             'feature_label','source_bindings','trajectory','interpretation_limits','opposite_signed_observations')}

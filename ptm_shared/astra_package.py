@@ -32,7 +32,7 @@ from .generic_kinase import fasta_taxonomy
 
 VERSION='astra_analysis_package.v4'
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
-    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
+    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py']))
 EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['candidate_id','contrast_id','track'],
     'substrate_contributions':['contribution_id'],'candidate_sensitivity':['candidate_id','contrast_id','track','omission_kind','omitted_id'],
@@ -289,6 +289,8 @@ def partial_refresh_preserves_existing_package(refresh, execution_status, packag
 def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progress=lambda message:None,*,engine=None):
     package_version=engine.VERSION if engine else VERSION
     profile=engine.PROFILE if engine else PROFILE
+    from .analysis_context import verify_execution_profile
+    execution = verify_execution_profile(config['experimental_context'], profile)
     code_files=sorted(set(CODE_FILES+(engine.CODE_FILES if engine else [])))
     code_capture={name:digest(Path(__file__).parent/name) for name in code_files}
     plan_resolver=engine.resolve_plan if engine else resolve_plan
@@ -402,6 +404,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         scientific['study/input_field_manifest']=pd.DataFrame(fields)
         validation=validate_science(scientific,design);dictionary=write_tables(scientific,directory)
         provenance={'schema_version':package_version,'order_id':order_id,'order_code':config['order_code'],'run_id':run_id,'analysis_profile':profile,
+            'execution_profile':execution,
             'input_hashes':hashes,'design_hash':object_hash(design),'input_context_hash':object_hash(snapshot),'literature_pin_hash':object_hash(literature),
             'source_pin_sha256':sources['pin_sha256'],'source_execution':source_execution,'stage_fingerprints':plan['fingerprints'],'normalization':norm,
             'stage_reuse':{'quant':quant_reuse,'normalization_sensitivity':alt_reuse,**evidence_reuse},'context_revision_id':object_hash(snapshot),

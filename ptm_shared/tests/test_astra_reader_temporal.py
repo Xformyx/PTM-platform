@@ -184,3 +184,17 @@ def test_immutable_revision_failure_keeps_pointer_and_source(saved, tmp_path):
         with pytest.raises(RuntimeError,match='write failure'): revise_temporal(source,output)
     assert pointer.read_text() == 'previous_success'
     assert all(digest(source/name)==entry['sha256'] for name,entry in manifest.items())
+
+
+def test_fresh_projection_and_csv_missing_cells_match(saved, tmp_path):
+    from ptm_shared.astra_package import write_tables
+    # Fresh native outputs use empty strings for absent specificity evidence;
+    # stored CSV represents them as NA. Both must yield the same reader rows.
+    saved[temporal.CONTRIBUTION]['specificity_ids'] = ''
+    temporal.attach_temporal(saved)
+    dictionary = write_tables(saved, tmp_path)
+    loaded = {name[:-4]: pd.read_csv(tmp_path/name, float_precision='round_trip')
+              for name in dictionary}
+    temporal.validate_temporal(loaded)
+    assert temporal.source_row({'value': 0., 'included': False, 'reason': '', 'id': '001'}) == {
+        'value': 0., 'included': False, 'reason': None, 'id': '001'}
