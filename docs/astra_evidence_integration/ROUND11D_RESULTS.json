@@ -1,0 +1,1128 @@
+{
+  "status": "local_delivery_verified; final_acceptance_incomplete_production_and_astra_unverified; auxiliary_AI_failed",
+  "validated_release": "a1b876d0e310bd39495b0e57e9bc374427fb58d0 + round11D reviewed reader/cache-proof fixes; exact package code hashes verified",
+  "UI": {
+    "expected_profile": "astra_analysis.v6",
+    "contract": {
+      "run_id": "g8-35a51d79d6d64b3fb94bfc9327da5af3",
+      "context": "astra_analysis.v6",
+      "plan": "astra_analysis.v6",
+      "provenance": "astra_analysis.v6",
+      "schema": "astra_analysis_package.v6.experimental",
+      "replay": "astra_analysis.v6",
+      "input_sha256": {
+        "inputs/PR.tsv": "7160e863ddaf5236d22c5dc95fd3b066355341e8b2b130f11ef12e5a46a52ba4",
+        "inputs/PG.tsv": "57c874a46f57608a64a779c4ef8ddecd07273cc0603aa228b8fbd662cbfca745",
+        "inputs/reference.fasta": "61b5d367511111d46377c78cfcfc1a09bacb0c1632c9960282520de732823c83"
+      },
+      "source_pin_sha256": "f49b30786ce34ddf219aa5d868623d7eff93277752c7571c68869a55b9ef9b33",
+      "recorded_source_pin_sha256": "2566fabd9cab0bab1ebeedf55326652ae7808467c9715b00a3a29a1dd91f6160",
+      "source_acquisition_policy": {
+        "mode": "research_full"
+      },
+      "required_v6_files": {
+        "science/localization_by_contrast.csv": true,
+        "science/inference_results.csv": true,
+        "study/input_lineage.csv": true,
+        "methods/method_registry.json": true
+      },
+      "archive_sha256": "9b49ddb1911384b09e42425caea8536c738c4b7704b56855cfd6fdbf0635bb28",
+      "execution_profile": {
+        "api_v6_flag_enabled": true,
+        "dispatch_profile": "astra_analysis.v6",
+        "effective_profile": "astra_analysis.v6",
+        "executed_profile": "astra_analysis.v6",
+        "expected_profile": "astra_analysis.v6",
+        "requested_profile": "astra_analysis.v5",
+        "selection_policy": "current_astra_context.v1",
+        "status": "matched"
+      },
+      "reader_rows": {
+        "reader_adapter/form_contrasts.csv": 16944,
+        "reader/findings.csv": 15,
+        "reader/coverage.csv": 16944
+      }
+    },
+    "archive": "/Users/josephk/Projects/PTM-platform/codex-inputs/round11-20261010/D/astra_analysis_package_g8-35a51d79d6d64b3fb94bfc9327da5af3.zip",
+    "extracted": "/Users/josephk/Projects/PTM-platform/codex-inputs/round11-20261010/D/downloaded-g8-35a51d79d6d64b3fb94bfc9327da5af3",
+    "UI_download_matches_API_pointer": true,
+    "UI_instructions_match_archive": true,
+    "readiness_counts_checked": true,
+    "page_errors": [],
+    "local_order_id": 73,
+    "production_order89_accessed": false
+  },
+  "preservation": {
+    "run_id": "g8-35a51d79d6d64b3fb94bfc9327da5af3",
+    "same_input_design_source_scope": true,
+    "unchanged_table_bytes": {
+      "evidence/censoring_bounds.csv": true,
+      "evidence/coverage_funnel.csv": true,
+      "evidence/emergence_evidence.csv": true,
+      "evidence/feature_evidence_ledger.csv": true,
+      "evidence/normalization_offsets.csv": true,
+      "evidence/parent_adjustment_impact.csv": true,
+      "evidence/technical_dispersion.csv": true,
+      "evidence/technical_injection_omissions.csv": true,
+      "kinase/candidate_sensitivity.csv": true,
+      "kinase/kea3_results.csv": true,
+      "kinase/kinase_candidate_edges.csv": true,
+      "kinase/kinase_candidate_summary.csv": true,
+      "kinase/kinase_protein_context.csv": true,
+      "kinase/kinase_self_site_context.csv": true,
+      "kinase/kinase_technical_omissions.csv": true,
+      "kinase/kinase_temporal_profiles.csv": true,
+      "kinase/method_executions.csv": true,
+      "kinase/method_membership.csv": true,
+      "kinase/method_scores.csv": true,
+      "kinase/substrate_contributions.csv": true,
+      "quant/annotation_edges.csv": true,
+      "quant/comparisons.csv": true,
+      "quant/detection.csv": true,
+      "quant/emergent_kinase_evidence.csv": true,
+      "quant/form_evidence_status.csv": true,
+      "quant/kinase_injection_omissions.csv": true,
+      "quant/kinase_membership.csv": true,
+      "quant/kinase_profiles.csv": true,
+      "quant/kinase_sensitivity.csv": true,
+      "quant/primary_A_input.csv": true,
+      "quant/protein_contrasts.csv": true,
+      "quant/runlevel.csv": true,
+      "quant/site_mapping.csv": true,
+      "quant/strict_parent_complete.csv": true,
+      "quant/strict_parent_paired.csv": true,
+      "quant/strict_parent_peptide_masks.csv": true,
+      "quant/strict_selected_sequences.csv": true,
+      "quant/strict_unmodified_proteins.csv": true,
+      "quant/strict_unmodified_sequences.csv": true,
+      "quant/summary.csv": true,
+      "quant/temporal_protein_summary.csv": true,
+      "quant/validation_panel.csv": true,
+      "reader/cards.csv": true,
+      "reader/coverage.csv": true,
+      "reader/findings.csv": true,
+      "reader/literature_comparisons.csv": true,
+      "reader/literature_search.csv": true,
+      "reader/literature_sources.csv": true,
+      "reader_adapter/form_contrasts.csv": true,
+      "reader_adapter/form_identity.csv": true,
+      "reader_adapter/precursor_membership.csv": true,
+      "reader_adapter/study_metadata.csv": true,
+      "references/source_query_ledger.csv": true,
+      "science/calibrated_calls.csv": true,
+      "science/calibration_provenance.csv": true,
+      "science/evidence_dependency_groups.csv": true,
+      "science/group_excluded_anchors.csv": true,
+      "science/inference_results.csv": true,
+      "science/kinase_calls.csv": true,
+      "science/localization_by_contrast.csv": true,
+      "science/measurement_observations.csv": true,
+      "science/observation_sites.csv": true,
+      "science/perturbation_validation.csv": true,
+      "science/reference_inventory.csv": true,
+      "science/replicate_uncertainty.csv": true,
+      "science/site_identity_audit.csv": true,
+      "science/site_report_observations.csv": true,
+      "science/specificity_scores.csv": true,
+      "study/input_field_manifest.csv": true,
+      "temporal/cross_layer_links.csv": true,
+      "temporal/group_excluded_cowave.csv": true,
+      "temporal/interval_contrasts.csv": true,
+      "temporal/kinase_fixed_membership.csv": true,
+      "temporal/kinase_temporal_features.csv": true,
+      "temporal/protein_temporal_features.csv": true,
+      "temporal/ptm_temporal_features.csv": true,
+      "temporal/target_excluded_anchors.csv": true,
+      "temporal/temporal_series.csv": true
+    },
+    "unchanged_pins": {
+      "references/source_pin.json": true,
+      "references/literature_pin.json": true,
+      "references/finding_literature_pin.json": true
+    },
+    "stage_reuse": {
+      "augment_evidence": {
+        "fingerprint": "e3684a70e492beb065c2a0f54d1095ca0a7835e2fee0f76c0b9a90bcf02105db",
+        "stage": "augment_evidence",
+        "status": "reused"
+      },
+      "discover_regulators": {
+        "fingerprint": "0699dcd24ee1e82fb3ef7cb9a0d38ac7e6fe2b247c8e1e126451928def27d85b",
+        "stage": "discover_regulators",
+        "status": "reused"
+      },
+      "finding_literature": {
+        "current_model_calls": 0,
+        "current_queries": 0,
+        "execution_code_sha256": "97fce7a19529cb1dfe8b45d79a05b2de7f2c9d4a0b8d6d8d3f9f12812bd79326",
+        "pin_sha256": "904baece848c067fa3745f01d9a2e3df58293c007fdce2185f1b4e7495c2f916",
+        "scope": "prior_published_search_and_comparison; semantic_review_status_unchanged",
+        "status": "frozen_results_reused"
+      },
+      "identity_localization": {
+        "fingerprint": "0699dcd24ee1e82fb3ef7cb9a0d38ac7e6fe2b247c8e1e126451928def27d85b",
+        "stage": "identity_localization",
+        "status": "reused"
+      },
+      "integrate_temporal_layers": {
+        "fingerprint": "30d6359304a675566a5474538d3ecf01356330651cef4afb16143b193ed37cfb",
+        "stage": "integrate_temporal_layers",
+        "status": "reused"
+      },
+      "normalization_sensitivity": {
+        "fingerprint": "quant_v6_db38591e52984a4ae732",
+        "origin_analysis_run_id": "g1-d15a6db9544d4b0780bd958f0ef574ed",
+        "status": "reused"
+      },
+      "quant": {
+        "fingerprint": "quant_v6_ea2f4c2720fbeb9f5704",
+        "origin_analysis_run_id": "g1-d15a6db9544d4b0780bd958f0ef574ed",
+        "status": "reused"
+      },
+      "quantitative_evidence": {
+        "fingerprint": "3de36393913ee14b8a68ca6325d2fb88ce7664f5fbfe4d082a4bca5a2e1147e6",
+        "stage": "quantitative_evidence",
+        "status": "reused"
+      },
+      "score_regulator_footprints": {
+        "fingerprint": "0699dcd24ee1e82fb3ef7cb9a0d38ac7e6fe2b247c8e1e126451928def27d85b",
+        "stage": "score_regulator_footprints",
+        "status": "reused"
+      }
+    },
+    "native_runtime": [
+      {
+        "contrast_id": "contrast_4147ebd64e7ecf80",
+        "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/357 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 180/357 [00:01<00:01, 123.93it/s]\n     Scoring phosphosites     :  76%|██████▊  | 270/357 [00:02<00:00, 99.40it/s]\n     Scoring phosphosites     : 100%|████████| 357/357 [00:02<00:00, 136.84it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  29%|▊  | 2900/10000 [00:00<00:00, 28157.25it/s]\n    Performing permutations   :  29%|▊  | 2900/10000 [00:14<00:00, 28157.25it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:19, 262.04it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:31<00:12, 202.96it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:44<00:12, 202.96it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 183.30it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 212.97it/s]\n   Computing activity scores  : DONE\n\n",
+        "method": "PhosX",
+        "original_runtime_seconds": 68.21788362506777,
+        "reuse_scope": "content_checked_scientific_augmentation",
+        "runtime_seconds": 0.0,
+        "status": "reused"
+      },
+      {
+        "contrast_id": "contrast_aea4869f398c5584",
+        "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/353 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 178/353 [00:01<00:01, 127.78it/s]\n     Scoring phosphosites     :  76%|██████  | 267/353 [00:02<00:00, 102.48it/s]\n     Scoring phosphosites     : 100%|████████| 353/353 [00:02<00:00, 141.07it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  29%|▊  | 2899/10000 [00:00<00:00, 27193.16it/s]\n    Performing permutations   :  29%|▊  | 2899/10000 [00:15<00:00, 27193.16it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:18, 269.15it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:30<00:11, 208.35it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:45<00:11, 208.35it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 188.15it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 218.61it/s]\n   Computing activity scores  : DONE\n\n",
+        "method": "PhosX",
+        "original_runtime_seconds": 66.27262374991551,
+        "reuse_scope": "content_checked_scientific_augmentation",
+        "runtime_seconds": 0.0,
+        "status": "reused"
+      },
+      {
+        "contrast_id": "contrast_c15817d77868a59a",
+        "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/354 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 178/354 [00:01<00:01, 124.95it/s]\n     Scoring phosphosites     :  75%|██████  | 267/354 [00:02<00:00, 100.52it/s]\n     Scoring phosphosites     : 100%|████████| 354/354 [00:02<00:00, 138.69it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  29%|▊  | 2899/10000 [00:00<00:00, 27099.83it/s]\n    Performing permutations   :  29%|▊  | 2899/10000 [00:15<00:00, 27099.83it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:18, 264.23it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:31<00:12, 204.63it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:45<00:12, 204.63it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 185.18it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 215.03it/s]\n   Computing activity scores  : DONE\n\n",
+        "method": "PhosX",
+        "original_runtime_seconds": 67.42445074999705,
+        "reuse_scope": "content_checked_scientific_augmentation",
+        "runtime_seconds": 0.0,
+        "status": "reused"
+      },
+      {
+        "contrast_id": "contrast_d6757f4b8563521f",
+        "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/351 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 176/351 [00:01<00:01, 127.38it/s]\n     Scoring phosphosites     :  75%|██████  | 264/351 [00:02<00:00, 101.99it/s]\n     Scoring phosphosites     : 100%|████████| 351/351 [00:02<00:00, 141.22it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  36%|█  | 3599/10000 [00:00<00:00, 34183.12it/s]\n    Performing permutations   :  36%|█  | 3599/10000 [00:15<00:00, 34183.12it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:19, 257.94it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:30<00:12, 204.65it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:45<00:12, 204.65it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 187.02it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 220.87it/s]\n   Computing activity scores  : DONE\n\n",
+        "method": "PhosX",
+        "original_runtime_seconds": 65.69754458381794,
+        "reuse_scope": "content_checked_scientific_augmentation",
+        "runtime_seconds": 0.0,
+        "status": "reused"
+      },
+      {
+        "contrast_id": "contrast_eb2f813f825c4ccb",
+        "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/357 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 180/357 [00:01<00:01, 128.41it/s]\n     Scoring phosphosites     :  76%|██████  | 270/357 [00:02<00:00, 103.37it/s]\n     Scoring phosphosites     : 100%|████████| 357/357 [00:02<00:00, 142.21it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  29%|▊  | 2900/10000 [00:00<00:00, 27305.20it/s]\n    Performing permutations   :  29%|▊  | 2900/10000 [00:15<00:00, 27305.20it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:18, 266.13it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:30<00:12, 206.27it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:45<00:12, 206.27it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 186.30it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 216.43it/s]\n   Computing activity scores  : DONE\n\n",
+        "method": "PhosX",
+        "original_runtime_seconds": 67.06918783299625,
+        "reuse_scope": "content_checked_scientific_augmentation",
+        "runtime_seconds": 0.0,
+        "status": "reused"
+      },
+      {
+        "contrast_id": "contrast_fd5240cdb335e779",
+        "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/348 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 174/348 [00:01<00:01, 123.84it/s]\n     Scoring phosphosites     :  75%|██████  | 261/348 [00:02<00:00, 100.89it/s]\n     Scoring phosphosites     : 100%|█████████| 348/348 [00:03<00:00, 92.10it/s]\n     Scoring phosphosites     : 100%|█████████| 348/348 [00:03<00:00, 97.37it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  36%|█  | 3598/10000 [00:00<00:00, 32845.24it/s]\n    Performing permutations   :  36%|█  | 3598/10000 [00:15<00:00, 32845.24it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:19, 258.61it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:30<00:12, 205.11it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 187.77it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 221.65it/s]\n   Computing activity scores  : DONE\n\n",
+        "method": "PhosX",
+        "original_runtime_seconds": 65.5164917500224,
+        "reuse_scope": "content_checked_scientific_augmentation",
+        "runtime_seconds": 0.0,
+        "status": "reused"
+      }
+    ],
+    "literature_status": "compared_no_supported_relationship",
+    "links": [
+      {
+        "from": "START_HERE_ASTRA.md",
+        "target": "study/STUDY_BRIEF.md",
+        "exists": true
+      },
+      {
+        "from": "START_HERE_ASTRA.md",
+        "target": "reader/READ_ME.md#저장된-연구-질문",
+        "exists": true
+      },
+      {
+        "from": "START_HERE_ASTRA.md",
+        "target": "evidence/readiness.json",
+        "exists": true
+      },
+      {
+        "from": "START_HERE_ASTRA.md",
+        "target": "reader/READ_ME.md",
+        "exists": true
+      },
+      {
+        "from": "START_HERE_ASTRA.md",
+        "target": "reader/TEMPORAL_EVIDENCE.md",
+        "exists": true
+      },
+      {
+        "from": "START_HERE_ASTRA.md",
+        "target": "reader/PHOSX_TIME_COURSE.md",
+        "exists": true
+      },
+      {
+        "from": "START_HERE_ASTRA.md",
+        "target": "reader/LITERATURE.md",
+        "exists": true
+      },
+      {
+        "from": "START_HERE_ASTRA.md",
+        "target": "references/source_query_ledger.csv",
+        "exists": true
+      },
+      {
+        "from": "START_HERE_ASTRA.md",
+        "target": "reader/LITERATURE.md",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../study/STUDY_BRIEF.md",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../study/user_input_snapshot.json",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "coverage.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "authoring_packet.json",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../evidence/readiness.json",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../evidence/emergence_evidence.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/protein_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../science/inference_results.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "PHOSX_TIME_COURSE.md",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "TEMPORAL_EVIDENCE.md",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "temporal_links.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "LITERATURE.md",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "literature_summary.json",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../methods/method_registry.json",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../kinase/method_executions.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../science/resource_registry.json",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../science/specificity_scores.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../kinase/substrate_contributions.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../kinase/method_membership.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../kinase/method_scores.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "cards.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/READ_ME.md",
+        "target": "../reader_adapter/form_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/PHOSX_TIME_COURSE.md",
+        "target": "phosx_time_summary.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/PHOSX_TIME_COURSE.md",
+        "target": "phosx_assay_time_results.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/PHOSX_TIME_COURSE.md",
+        "target": "../kinase/method_scores.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/PHOSX_TIME_COURSE.md",
+        "target": "../kinase/method_membership.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/PHOSX_TIME_COURSE.md",
+        "target": "../kinase/method_executions.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/PHOSX_TIME_COURSE.md",
+        "target": "../science/resource_registry.json",
+        "exists": true
+      },
+      {
+        "from": "reader/PHOSX_TIME_COURSE.md",
+        "target": "../methods/native_execution_runtime.json",
+        "exists": true
+      },
+      {
+        "from": "reader/PHOSX_TIME_COURSE.md",
+        "target": "../provenance.json",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "READ_ME.md",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "temporal_evidence.json",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "temporal_links.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "authoring_packet.json",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../temporal/temporal_series.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../temporal/ptm_temporal_features.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../temporal/protein_temporal_features.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../temporal/kinase_temporal_features.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../temporal/interval_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../temporal/kinase_fixed_membership.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../temporal/target_excluded_anchors.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../temporal/group_excluded_cowave.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../kinase/kinase_temporal_profiles.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../kinase/substrate_contributions.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../quant/summary.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../quant/comparisons.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../quant/protein_contrasts.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "../quant/strict_unmodified_proteins.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "PHOSX_TIME_COURSE.md",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "PHOSX_TIME_COURSE.md",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "PHOSX_TIME_COURSE.md",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "PHOSX_TIME_COURSE.md",
+        "exists": true
+      },
+      {
+        "from": "reader/TEMPORAL_EVIDENCE.md",
+        "target": "PHOSX_TIME_COURSE.md",
+        "exists": true
+      },
+      {
+        "from": "reader/LITERATURE.md",
+        "target": "READ_ME.md",
+        "exists": true
+      },
+      {
+        "from": "reader/LITERATURE.md",
+        "target": "literature_search.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/LITERATURE.md",
+        "target": "literature_sources.csv",
+        "exists": true
+      },
+      {
+        "from": "reader/LITERATURE.md",
+        "target": "literature_comparisons.csv",
+        "exists": true
+      }
+    ],
+    "actual_scientific_execution_this_run": false,
+    "actual_RAG_LLM_calls_this_run": 0,
+    "source_refresh_this_run": false
+  },
+  "reader_replay": {
+    "passed": true,
+    "scope": "reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables",
+    "scientific_requantification": false,
+    "network_requests": 0,
+    "repository_code_used": false,
+    "run_id": "g8-35a51d79d6d64b3fb94bfc9327da5af3",
+    "files": [
+      {
+        "file": "reader/READ_ME.md",
+        "sha256": "553cc753738ce668761c7837a30ae62832f1a5e2caf434811d53b67e34f88489",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/authoring_packet.json",
+        "sha256": "e9931008ef58fbb561431fbee1ce60f8858cdcd4dbdb0e03658a42e46542328c",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/coverage_summary.json",
+        "sha256": "7662883573ec6208d8792e2f7373a12e1992e475bba980d78c5641be7ae100eb",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/question_map.json",
+        "sha256": "5d2a02e6baf8ce2bc1f821d81ae48fb2ff562e02fbacaf2187fecfb8936d3bf6",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/selection_audit.json",
+        "sha256": "1469f665d67bd9db155637555b5db36e0d78a429ae0c83a7984a39c63202746c",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/PHOSX_TIME_COURSE.md",
+        "sha256": "78fcc42991057b899c7b71a4874f563f0d0b0a97a546339135e14f5332b825a3",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/phosx_time_summary.csv",
+        "sha256": "a991537b0b58f7b29c785fd36e8951e19c2c7dcc377eb4ad05efae575f772e35",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/phosx_assay_time_results.csv",
+        "sha256": "c0db87b3715e4a17e21034255410f3068037623963619fb02ec120e8c7ad0e96",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/TEMPORAL_EVIDENCE.md",
+        "sha256": "8734e86952011ccc43aea2979fe4621920fb49d38ec0443a6850999d06189627",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/temporal_evidence.json",
+        "sha256": "dad0966e8d4420074520ea0a6ad10ebe9cf0953f6058bf699e8e910495c2b223",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/temporal_links.csv",
+        "sha256": "20c6ba4bedf1ca9d13fb4053284286ec75ef612b354f293e3f53e36d418b38ba",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/LITERATURE.md",
+        "sha256": "73cfb3fae2d46b1ff8284e21d7a51cde7e4c0316dd3b4b407486151dd25e868d",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_summary.json",
+        "sha256": "556714a47c7da0766e2c03774aebe9a5d3259177a754d52737e29b78adc624be",
+        "byte_equal": true
+      },
+      {
+        "file": "references/finding_literature_pin.json",
+        "sha256": "edb00758085d75787ffb2edb793a1b48b837ff9da66dd8a207e5a44500cef0f8",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/cards.csv",
+        "sha256": "9781f89686720e14fd661022ffe1a6e14a45ea4307a4307339e3771b328d2dee",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/findings.csv",
+        "sha256": "fa49cfe8dc760a5ea15f261329d9c961ea0d48f47f572fab99704aaf5d737d25",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/coverage.csv",
+        "sha256": "46eca8b2e4f2c0b166d10efbf51ff73d0015207cdead7de3742e762ca9155922",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/packet.csv",
+        "sha256": "e8bad414102dd5058571e4b4f1353b31ff2e8a4a5cba103d21f01667c724ba9e",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_search.csv",
+        "sha256": "1d91712156d8c19c65ad07812677c7b77e4288a2159d8b4d72bb3922933b6c1b",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_sources.csv",
+        "sha256": "6d1e76070edee3919355c3a85e3563c61cf3eaf9f19b05d87ff88759839806fc",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/literature_comparisons.csv",
+        "sha256": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+        "byte_equal": true
+      }
+    ],
+    "validation": {
+      "source_rows_checked": 16944,
+      "cards_checked": 14658,
+      "findings_checked": 15,
+      "values_times_NA_masks_ids": "passed"
+    }
+  },
+  "coverage": {
+    "adapter_eligible_forms": 2159,
+    "adapter_eligible_rows": 12499,
+    "all_source_rows_retained": true,
+    "card_forms": 2159,
+    "card_grid_rows": 12954,
+    "card_missing_timepoints": 455,
+    "card_numeric_rows": 12499,
+    "card_possible_denominator": "existing_precursor_card_contract; per form/arm/reference/pairing",
+    "comparison_cards": 12499,
+    "forms_with_withheld_rows": 665,
+    "fully_withheld_forms": 665,
+    "independent_validation": "not_performed",
+    "literature_comparison": "compared_no_supported_relationship",
+    "observation_cards": 2159,
+    "reason_counts_can_overlap": true,
+    "schema_version": "astra_reader.v1",
+    "selected_findings": 15,
+    "selected_forms": 15,
+    "selected_grid_rows": 90,
+    "selection_before_question_routing": true,
+    "total_form_contrasts": 16944,
+    "total_forms": 2824,
+    "unselected_source_rows_retained": 16854,
+    "withheld_reason_counts": {
+      "gene_display_ambiguous_or_unavailable": 60,
+      "mixed_or_unknown_taxon_not_representable": 12,
+      "multiple_precursors_not_representable": 1266,
+      "precursor_identity_unavailable": 1266,
+      "quant_comparison_excluded": 2785,
+      "raw_only_excluded_finite_contrast": 1032
+    },
+    "withheld_rows": 3990
+  },
+  "question_statuses": [
+    {
+      "question_id": "BQ-001",
+      "answer_status": "partially_answerable",
+      "finding_ids": [
+        "finding_a0f138f34e259e65da05",
+        "finding_e9961a39b1192935b7b4",
+        "finding_d439daac7ed70c17907e",
+        "finding_85e82f2c754a7e5f6c15",
+        "finding_14ae32c53211dbe34c1a",
+        "finding_e68a84b5597284e7585d",
+        "finding_696636ad85310f1393ed",
+        "finding_e729d948655bb383bf90",
+        "finding_bd2193bf35d16ee950fd",
+        "finding_1011f501dabce788a13c",
+        "finding_ddd27caf48112aa8be08",
+        "finding_c3aed5d4ce7c30b2df7b",
+        "finding_852f4b96ec652776a5b8",
+        "finding_5ca13dd04345bb1bfb67",
+        "finding_99977f2c761f656ee19e"
+      ]
+    }
+  ],
+  "synthetic_regressions_reused": [
+    "test_package_reuse_refresh_failure_and_archive_replay",
+    "test_partial_refresh_without_a_completed_package_does_not_block",
+    "test_wrong_engine_fails_before_input_or_pointer_access"
+  ],
+  "scientific_method_replay_this_round": "not_repeated; identical cached outputs, 11-B 180min parity reused",
+  "source_acquisition_this_round": false,
+  "new_kinase_calls_claimed": false,
+  "independent_scientific_performance_claimed": false,
+  "actual_astra_session": false,
+  "production_deployed": false,
+  "production_flag_changed": false,
+  "local_run_stage_seconds": 150.22946358285844,
+  "actual_astra_blocker": "No callable authenticated new Astra session available",
+  "production_blocker": "No authenticated runtime/DB/deployment access; public version marker cannot establish process flags or worker version",
+  "package_code_matches_checkout": {
+    "analysis_context.py": true,
+    "annotation_registry.py": true,
+    "annotation_species.py": true,
+    "astra_card_inputs.py": true,
+    "astra_discovery.py": true,
+    "astra_evidence.py": true,
+    "astra_evidence_v6.py": true,
+    "astra_figures.py": true,
+    "astra_inputs.py": true,
+    "astra_literature.py": true,
+    "astra_package.py": true,
+    "astra_plan.py": true,
+    "astra_reader.py": true,
+    "astra_reader_revision.py": true,
+    "astra_reader_temporal.py": true,
+    "astra_science.py": true,
+    "astra_sources.py": true,
+    "astra_temporal.py": true,
+    "contrast_quantification.py": true,
+    "de_novo_representation.py": true,
+    "diann_evidence.py": true,
+    "directed_temporal_relationship.py": true,
+    "evidence_contracts.py": true,
+    "evidence_methods.py": true,
+    "evidence_stage_cache.py": true,
+    "evidence_temporal.py": true,
+    "feature_identity.py": true,
+    "finding_literature.py": true,
+    "generic_kinase.py": true,
+    "generic_workflow.py": true,
+    "inference_policy.py": true,
+    "kea3_evidence.py": true,
+    "kinase_family_registry.json": true,
+    "kinase_specificity.py": true,
+    "kinase_trajectory_evidence.py": true,
+    "literature_cards.py": true,
+    "localization_evidence.py": true,
+    "measured_feature_cards.py": true,
+    "motif_candidate_calibration.py": true,
+    "motif_library.json": true,
+    "normalization_provenance.py": true,
+    "official_method_tracks.py": true,
+    "official_specificity.py": true,
+    "perturbation_validation.py": true,
+    "phosx_activity_adapter.py": true,
+    "probabilistic_cowave.py": true,
+    "quantitative_fields.py": true,
+    "reader_authoring.py": true,
+    "reader_observations.py": true,
+    "report_compatible_kinase.py": true,
+    "report_compatible_quantification.py": true,
+    "research_questions.py": true,
+    "science_inference.py": true,
+    "science_reference.py": true,
+    "source_acquisition.py": true,
+    "species_registry.py": true,
+    "study_design.py": true,
+    "study_design.schema.json": true,
+    "study_design.v4.schema.json": true,
+    "study_metadata.py": true,
+    "study_presets.py": true,
+    "study_temporal_context.py": true,
+    "study_temporal_context_resolution.py": true,
+    "substrate_temporal_dynamics.py": true
+  },
+  "final_figures_vs_C": {
+    "U_P_A_examples_source.csv": true,
+    "parent_correction.svg": true,
+    "substrate_contrast_heatmap.svg": true,
+    "emerging_detection.png": true,
+    "protein_trajectories_source.csv": true,
+    "emerging_detection_rows.csv": true,
+    "U_P_A_examples.svg": true,
+    "protein_trajectories_selection.csv": true,
+    "coverage_source.csv": true,
+    "protein_trajectories.svg": true,
+    "technical_dispersion_source.csv": true,
+    "substrate_contrast_heatmap_source.csv": true,
+    "emerging_detection.svg": true,
+    "substrate_contrast_heatmap_display.json": true,
+    "substrate_contrast_heatmap.png": true,
+    "protein_trajectories_points.csv": true,
+    "emerging_detection_source.csv": true,
+    "cross_layer_timing_source.csv": true,
+    "kinase_footprints_selection.csv": true,
+    "kinase_footprints.svg": true,
+    "emerging_detection_display.json": true,
+    "cross_layer_timing.svg": true,
+    "kinase_footprints_source.csv": true,
+    "emerging_detection_columns.csv": true,
+    "parent_correction_source.csv": true,
+    "coverage.svg": true,
+    "technical_dispersion.svg": true,
+    "substrate_contrast_heatmap_rows.csv": true,
+    "figure_legends.json": true,
+    "substrate_contrast_heatmap_columns.csv": true,
+    "kinase_footprints_points.csv": true
+  },
+  "cancelled_intermediate_run": {
+    "cancelled_run": "g7-17522599f7594f839d4aa0578617cb2c",
+    "successful_pointer_after_cancel": "g6-31c24418139f4a8f8ef16782764d9e28",
+    "archive_sha256": "7e4548288e90b08f1c1772c7eecd59469f3aa253b42495eb2a5362ece7e66357",
+    "literature_stage": "entered_retry_then_cancelled; calls_not_counted_as_success",
+    "cause": "reused pin original execution code absent from intermediate archive",
+    "fix": "preserve exact pinned original code; verify hash before reuse"
+  },
+  "auxiliary_AI": {
+    "source_run_id": "g6-31c24418139f4a8f8ef16782764d9e28",
+    "actual_astra": false,
+    "status": "failed",
+    "all_numeric_claims": 18,
+    "numeric_values_matched": 2,
+    "missing_representative_values": 9,
+    "broken_paths": 2,
+    "semantic_audit": "failed",
+    "report": "ROUND11D_AUX_REPORT.json",
+    "audit": "ROUND11D_AUX_CLAIM_AUDIT.json",
+    "final_reader_model_retest": "not_performed"
+  },
+  "changed_boundary_tests": {
+    "unique_passed": 5,
+    "initial_new_fixture_setup_failure_corrected": 1
+  },
+  "original_execution_proof": {
+    "file": "references/finding_literature_execution.py",
+    "sha256": "97fce7a19529cb1dfe8b45d79a05b2de7f2c9d4a0b8d6d8d3f9f12812bd79326",
+    "matches_pin_code_hash": true
+  }
+}

@@ -289,6 +289,9 @@ def apply(tables, pin, snapshot, literature):
                           'summary':summary,'pin':pin,'reference_cards':_literature_cards(result.get('references',[])),
                           'finding_records':records,'source_table':'reader/literature_sources.csv', 'comparison_table':'reader/literature_comparisons.csv'}
     summary['status']=packet['literature_comparison_status']
+    packet['authoring_rules']['literature_execution_authority']={
+        'path':'reader/literature_search.csv','status':summary['status'],
+        'rule':'Raw card literature flags/limits record the earlier card-build stage. Use each finding record for actual search/comparison execution; never turn completed comparison with no supported relation into not_performed. Independent validation remains not_performed.'}
     packet['coverage_inventory']['literature_comparison']=summary['status']
     packet['mode']='citation_complete' if packet['literature']['reference_cards'] else 'data_only'
     for q in packet['research_question_evidence_map']['questions']:

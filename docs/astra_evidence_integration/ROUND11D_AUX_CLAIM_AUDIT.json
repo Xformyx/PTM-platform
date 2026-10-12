@@ -1,0 +1,461 @@
+{
+  "actual_astra_session": false,
+  "all_structured_quantitative_claims": 18,
+  "checks": [
+    {
+      "claim": {
+        "claim_id": "claim_001",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_aea4869f398c5584",
+        "field": "U_joint",
+        "value": 0.2115484760626209,
+        "unit": "log2 fold change"
+      },
+      "expected": "0.21154847606262095",
+      "passed": true,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_aea4869f398c5584"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_002",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_4147ebd64e7ecf80",
+        "field": "U_joint",
+        "value": -0.8694886897556842,
+        "unit": "log2 fold change"
+      },
+      "expected": "-0.2603200580411009",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_4147ebd64e7ecf80"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_003",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_eb2f813f825c4ccb",
+        "field": "U_joint",
+        "value": 0.4025676324053258,
+        "unit": "log2 fold change"
+      },
+      "expected": "0.07245389778037747",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_eb2f813f825c4ccb"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_004",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_c15817d77868a59a",
+        "field": "U_joint",
+        "value": -0.2878222159390731,
+        "unit": "log2 fold change"
+      },
+      "expected": "0.25108583198140977",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_c15817d77868a59a"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_005",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_fd5240cdb335e779",
+        "field": "U_joint",
+        "value": -0.4307457595664949,
+        "unit": "log2 fold change"
+      },
+      "expected": "0.427224973032299",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_fd5240cdb335e779"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_006",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_d6757f4b8563521f",
+        "field": "U_joint",
+        "value": -0.3224011481780628,
+        "unit": "log2 fold change"
+      },
+      "expected": "0.11120409784139085",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_d6757f4b8563521f"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_007",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_aea4869f398c5584",
+        "field": "P_joint",
+        "value": -0.1054750945872236,
+        "unit": "log2 fold change"
+      },
+      "expected": "-0.1054750945872236",
+      "passed": true,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_aea4869f398c5584"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_008",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_4147ebd64e7ecf80",
+        "field": "P_joint",
+        "value": -0.693205381026516,
+        "unit": "log2 fold change"
+      },
+      "expected": "-0.13122956954205378",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_4147ebd64e7ecf80"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_009",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_eb2f813f825c4ccb",
+        "field": "P_joint",
+        "value": 0.1687226423249406,
+        "unit": "log2 fold change"
+      },
+      "expected": "-0.011611873068364531",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_eb2f813f825c4ccb"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_010",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_c15817d77868a59a",
+        "field": "P_joint",
+        "value": -0.3172989181414216,
+        "unit": "log2 fold change"
+      },
+      "expected": "-0.028515836266866046",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_c15817d77868a59a"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_011",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_fd5240cdb335e779",
+        "field": "P_joint",
+        "value": -0.3367357065392689,
+        "unit": "log2 fold change"
+      },
+      "expected": "-0.06916126177311455",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_fd5240cdb335e779"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_012",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_d6757f4b8563521f",
+        "field": "P_joint",
+        "value": -0.5531157243977383,
+        "unit": "log2 fold change"
+      },
+      "expected": "-0.012541304508797424",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_d6757f4b8563521f"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_013",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_aea4869f398c5584",
+        "field": "A",
+        "value": 0.0930498789518783,
+        "unit": "log2 fold change"
+      },
+      "expected": "0.3170235706498499",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_aea4869f398c5584"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_014",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_4147ebd64e7ecf80",
+        "field": "A",
+        "value": -0.1762833087291693,
+        "unit": "log2 fold change"
+      },
+      "expected": "-0.12909048849904714",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_4147ebd64e7ecf80"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_015",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_eb2f813f825c4ccb",
+        "field": "A",
+        "value": 0.2338449900803851,
+        "unit": "log2 fold change"
+      },
+      "expected": "0.08406577084874378",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_eb2f813f825c4ccb"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_016",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_c15817d77868a59a",
+        "field": "A",
+        "value": 0.0294767022023474,
+        "unit": "log2 fold change"
+      },
+      "expected": "0.2796016682482758",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_c15817d77868a59a"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_017",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_fd5240cdb335e779",
+        "field": "A",
+        "value": -0.0940100530272296,
+        "unit": "log2 fold change"
+      },
+      "expected": "0.4963862348054118",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_fd5240cdb335e779"
+      }
+    },
+    {
+      "claim": {
+        "claim_id": "claim_018",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_d6757f4b8563521f",
+        "field": "A",
+        "value": 0.2307145762196707,
+        "unit": "log2 fold change"
+      },
+      "expected": "0.1237454023501865",
+      "passed": false,
+      "matched_rows": 1,
+      "row_key_schema_valid": false,
+      "audited_key": {
+        "form_id": "form_77aa7fcf6b0f78ec",
+        "contrast_id": "contrast_d6757f4b8563521f"
+      }
+    }
+  ],
+  "relative_links": [
+    {
+      "path": "START_HERE_ASTRA.md",
+      "exists": true
+    },
+    {
+      "path": "reader/READ_ME.md",
+      "exists": true
+    },
+    {
+      "path": "reader/LITERATURE.md",
+      "exists": true
+    },
+    {
+      "path": "temporal/PTM_TIME_COURSE.md",
+      "exists": false
+    },
+    {
+      "path": "temporal/TEMPORAL_EVIDENCE.md",
+      "exists": false
+    }
+  ],
+  "representative_9_values_present": false,
+  "numerical_pass": false,
+  "semantic_review": "all_generated_sections_reviewed; failed",
+  "scope": "bounded package-only local Qwen response, not full autonomous Astra consumption",
+  "semantic_checks": [
+    {
+      "claim": "Rat hIR model and 0–180 min design",
+      "status": "supported_as_recorded_design",
+      "source": "study/user_input_snapshot.json; study/study_design.json",
+      "limit": "not a newly measured transgene identity"
+    },
+    {
+      "claim": "Parent adjustment can accurately infer upstream kinase activity",
+      "status": "unsupported_overclaim",
+      "source": "science/inference_results.csv; reader authoring_rules; no calibration or independent validation"
+    },
+    {
+      "claim": "transient-intermediate/late-maximal/partial-observation/early-maximal patterns",
+      "status": "present_in_saved_observations_but_missing_row_anchors_in_report",
+      "source": "reader/READ_ME.md; temporal/ptm_temporal_features.csv"
+    },
+    {
+      "claim": "PhosX time responses are U_joint/P_joint/A",
+      "status": "incorrect_method_and_quantity_conflation",
+      "source": "reader/PHOSX_TIME_COURSE.md; kinase/method_scores.csv; quant/comparisons.csv"
+    },
+    {
+      "claim": "Literature comparison was not performed",
+      "status": "incorrect_execution_claim",
+      "source": "reader/literature_summary.json: comparison_executed_findings=15, anchored_proposals=0",
+      "identified_reader_issue": "historical card-build limit repeated in READ_ME; display corrected without changing original cards/pin"
+    },
+    {
+      "claim": "Same experiment is not kinase activity or causal validation",
+      "status": "supported_limit_but_contradicts_earlier_activation_claim",
+      "source": "reader/READ_ME.md"
+    },
+    {
+      "claim": "U_joint/P_joint/A share masks; U_all/P_all separate",
+      "status": "supported",
+      "source": "reader/authoring_packet.json quantitation_estimator_contract and cards source_bindings"
+    },
+    {
+      "claim": "Technical injections/substrates are not biological replication",
+      "status": "supported",
+      "source": "study/study_design.json replication_declaration"
+    },
+    {
+      "claim": "Sequence mapping is not measured localization",
+      "status": "supported",
+      "source": "evidence/readiness.json measurement_evidence"
+    },
+    {
+      "claim": "Same-experiment parent protein is not independent validation",
+      "status": "supported",
+      "source": "reader/authoring_packet.json interpretation_limits"
+    },
+    {
+      "claim": "Magnitude alone does not establish occupancy/causality/directness",
+      "status": "supported",
+      "source": "reader/authoring_packet.json authoring_rules"
+    },
+    {
+      "claim": "18 quantitative statements use row_key object as requested",
+      "status": "schema_failed_all_18_strings",
+      "audit_policy": "exact form_hex;contrast_hex strings resolved only for audit; original report left unchanged"
+    },
+    {
+      "claim": "Representative DOCK7/SIK3/RBM26 U/P/A claims included",
+      "status": "missing_all_9_required_values",
+      "source": "consumer representative_rows.json; quant/comparisons.csv"
+    },
+    {
+      "claim": "All five cited relative files exist",
+      "status": "failed_two_fabricated_paths",
+      "paths": [
+        "temporal/PTM_TIME_COURSE.md",
+        "temporal/TEMPORAL_EVIDENCE.md"
+      ],
+      "actual_path": "reader/TEMPORAL_EVIDENCE.md"
+    }
+  ],
+  "numeric_values_matched": 2,
+  "numeric_values_total": 18,
+  "overall_acceptance": "failed",
+  "original_report_unmodified": true,
+  "source_run_id": "g6-31c24418139f4a8f8ef16782764d9e28",
+  "final_reader_retest": "not_performed; actual Astra session unavailable; numerical/model failures not claimed fixed",
+  "model": {
+    "provider": "ollama",
+    "model": "ptm-round08b-qwen3-14b-40k:latest",
+    "prompt_sha256": "da9c58361778cd7754ffa27968a09091177dfde593a273f7c22eea5f407d3dec",
+    "input_bytes": 105032,
+    "requested_output_tokens": 4096,
+    "execution_metrics": [
+      {
+        "done_reason": "stop",
+        "total_duration": 286093955625,
+        "load_duration": 4579797000,
+        "prompt_eval_count": 38597,
+        "prompt_eval_duration": 175437664000,
+        "eval_count": 2286,
+        "eval_duration": 106022625000
+      }
+    ],
+    "source_scope": "bounded package-only excerpt, not autonomous ZIP navigation",
+    "actual_astra_session": false,
+    "initial_transport_call": "invalid response_format failed before model; not counted as a generated report"
+  }
+}

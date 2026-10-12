@@ -1,0 +1,165 @@
+{
+  "warning": "FAILED AUDIT — unmodified auxiliary local Qwen response; not a validated scientific report or Astra output",
+  "source_run_id": "g6-31c24418139f4a8f8ef16782764d9e28",
+  "report": {
+    "sections": [
+      {
+        "topic": "연구 질문, 실험 설계, U/P/A 정량, 주요 시간 반응, PhosX 결과, 실제 접근한 문헌과의 비교, 제한",
+        "text": "이 연구는 인슐린 신호 전달을 hIR 과발현 Rat 섬유아세포에서 0-180분의 시간 경로로 추적하며, 풍부화 없는 접근을 사용하여 초기 PTM 변이와 후기 비-PTM 단백질 역학을 동시에 프로파일링합니다. PTM 펩타이드 변화를 총 단백질 풍부도 변화에 정규화함으로써 인상적인 시간 업스트림 키나아제 활성을 정확히 추론할 수 있습니다. 주요 시간 반응은 transient-intermediate, late-maximal, partial-observation, early-maximal 등 다양한 패턴을 보입니다. PhosX 시간 반응은 각 시간 지점에서의 U_joint, P_joint, A 값이 제공됩니다. 문헌 비교는 수행되지 않았으며, 문헌 출처/조건 비교 가능성과 의미 해석은 검토가 필요합니다. 제한으로는 동일 실험의 관찰이며, 키나아제 활성 또는 인과 검증이 아닌 점, U_joint, P_joint 및 A가 기록된 joint masks를 사용하며, U_all/P_all은 별도입니다. 기술적 주입 및 기질 수는 독립 생물학적 복제가 아닙니다. 서열 매핑은 MS 위치화를 확립하지 않으며, per-contrast 위치화를 확인해야 합니다. 동일 실험 부모 단백질은 denominator/context 증거이며, 독립 검증이 아닙니다. 문헌 비교 및 독립 검증은 이 리더 단계에서 수행되지 않았습니다. 이들은 측정된 수치 대비입니다. 크기만으로 생물학적 우선순위, 메커니즘적 중요성, 직접 규제 강도, 점유율, 인과성을 확립하지 않습니다.",
+        "evidence_paths": [
+          "START_HERE_ASTRA.md",
+          "reader/READ_ME.md",
+          "reader/LITERATURE.md",
+          "temporal/PTM_TIME_COURSE.md",
+          "temporal/TEMPORAL_EVIDENCE.md"
+        ]
+      }
+    ],
+    "quantitative_claims": [
+      {
+        "claim_id": "claim_001",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_aea4869f398c5584",
+        "field": "U_joint",
+        "value": 0.2115484760626209,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_002",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_4147ebd64e7ecf80",
+        "field": "U_joint",
+        "value": -0.8694886897556842,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_003",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_eb2f813f825c4ccb",
+        "field": "U_joint",
+        "value": 0.4025676324053258,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_004",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_c15817d77868a59a",
+        "field": "U_joint",
+        "value": -0.2878222159390731,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_005",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_fd5240cdb335e779",
+        "field": "U_joint",
+        "value": -0.4307457595664949,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_006",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_d6757f4b8563521f",
+        "field": "U_joint",
+        "value": -0.3224011481780628,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_007",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_aea4869f398c5584",
+        "field": "P_joint",
+        "value": -0.1054750945872236,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_008",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_4147ebd64e7ecf80",
+        "field": "P_joint",
+        "value": -0.693205381026516,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_009",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_eb2f813f825c4ccb",
+        "field": "P_joint",
+        "value": 0.1687226423249406,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_010",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_c15817d77868a59a",
+        "field": "P_joint",
+        "value": -0.3172989181414216,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_011",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_fd5240cdb335e779",
+        "field": "P_joint",
+        "value": -0.3367357065392689,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_012",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_d6757f4b8563521f",
+        "field": "P_joint",
+        "value": -0.5531157243977383,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_013",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_aea4869f398c5584",
+        "field": "A",
+        "value": 0.0930498789518783,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_014",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_4147ebd64e7ecf80",
+        "field": "A",
+        "value": -0.1762833087291693,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_015",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_eb2f813f825c4ccb",
+        "field": "A",
+        "value": 0.2338449900803851,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_016",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_c15817d77868a59a",
+        "field": "A",
+        "value": 0.0294767022023474,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_017",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_fd5240cdb335e779",
+        "field": "A",
+        "value": -0.0940100530272296,
+        "unit": "log2 fold change"
+      },
+      {
+        "claim_id": "claim_018",
+        "table": "quant/comparisons.csv",
+        "row_key": "form_77aa7fcf6b0f78ec;contrast_d6757f4b8563521f",
+        "field": "A",
+        "value": 0.2307145762196707,
+        "unit": "log2 fold change"
+      }
+    ]
+  }
+}

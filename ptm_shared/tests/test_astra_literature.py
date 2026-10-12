@@ -334,3 +334,27 @@ def test_completed_empty_comparison_is_not_pending(reader):
     assert summary['comparison_executed_findings']==summary['selected_findings']
     assert summary['status']=='compared_no_supported_relationship'
     assert summary['semantically_verified_comparable_findings']==0
+
+
+def test_repeated_reader_revision_keeps_original_literature_execution_proof(reader,tmp_path):
+    from pathlib import Path
+    import hashlib
+    from ptm_shared.astra_package import finding_execution_code
+    tables,_,snapshot=reader
+    current=Path(lit.__file__).read_text()
+    old=current.replace("'compared_no_supported_relationship'", "'prior_reader_label'")
+    with patch('ptm_shared.finding_literature.FINDING_RETRIEVAL_BACKOFF_SECONDS',0):
+        pin=lit.collect(tables,snapshot,selection(),retriever=Retriever(),llm=Model())
+    pin['execution_contract']['code']['astra_literature.py']=hashlib.sha256(old.encode()).hexdigest()
+    pin['sha256']=lit.object_hash({k:v for k,v in pin.items() if k!='sha256'})
+    runs=tmp_path/'enrichment_free_runs';first=runs/('g1-'+'a'*32);second=runs/('g2-'+'b'*32)
+    source=first/'reproducibility/code/ptm_shared/astra_literature.py';source.parent.mkdir(parents=True);source.write_text(old)
+    updated=second/'reproducibility/code/ptm_shared/astra_literature.py';updated.parent.mkdir(parents=True);updated.write_text(current)
+    proof=finding_execution_code(tmp_path,pin,second.name);assert proof==old
+    transported=second/'references/finding_literature_execution.py';transported.parent.mkdir();transported.write_text(proof)
+    source.unlink() # the next reuse works from the second package alone
+    with patch.object(lit,'_runtime',side_effect=AssertionError('must not re-query on second reuse')):
+        again=lit.collect(tables,snapshot,selection(),frozen_pin=pin,frozen_code=finding_execution_code(tmp_path,pin,second.name))
+    assert again==pin
+    transported.write_text(proof+'# corrupted')
+    assert finding_execution_code(tmp_path,pin,second.name) is None

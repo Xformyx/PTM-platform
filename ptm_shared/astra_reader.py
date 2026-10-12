@@ -436,11 +436,15 @@ def write_reader(directory, tables):
             fmt=lambda value: 'NA' if value is None else str(value)
             lines.append('| '+' | '.join([fmt(b['time_min']),str(b['target_label'])+' vs '+str(b['reference_label']),
                 fmt(b['U_joint']),fmt(b['P_joint']),fmt(b['A']),f"{b['reference_joint_n']}/{b['target_joint_n']}",b['contrast_id']])+' |')
+        limits=list(c['interpretation_limits'])
+        if packet.get('literature'):
+            limits=[('Literature search/comparison status: '+packet['literature']['finding_records'][c['finding_id']]['status']+'; see reader/literature_search.csv. Independent validation not performed.')
+                if v=='Literature comparison and independent validation were not performed by this reader stage.' else v for v in limits]
         effects = sorted({comparisons[cid]['comparison_class'] for cid in c['parent_comparison_card_ids'] if cid in comparisons})
         opposite = c['opposite_signed_observations']
         lines.extend(['Parent 영향 (기존 기술적 분류, 유의성 검정 아님): '+', '.join(effects),
             '반대 방향 관측: '+opposite['status']+'. 실제 양/음의 A 행은 packet의 opposite_signed_observations에서 추적합니다.',
-            '제한: '+ ' '.join(c['interpretation_limits']),
+            '제한: '+ ' '.join(limits),
             '전체 joint masks·U_all/P_all·실제 precursor membership·좌표 및 localization ID는 [카드](cards.csv)의 source_bindings와 [adapter 원본](../reader_adapter/form_contrasts.csv)에 보존됩니다.'])
     if packet.get('literature'):
         lines.insert(7, '[선정 관측별 문헌 검색·비교·접근 제한](LITERATURE.md) · [문헌 단계 요약](literature_summary.json)')

@@ -48,6 +48,28 @@ EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['ca
     'kinase_technical_omissions':['candidate_id','contrast_id','track','omitted_injection_id']}
 
 
+def finding_execution_code(root, pin, preferred_run=None):
+    """Recover only the hash-bound original code of a reused literature result.
+
+    Old archives kept the pin but only copied current reader code. Search this
+    order's archives for the exact pinned bytes; new packages carry that proof.
+    No code found here is executed and no source pin is changed.
+    """
+    expected=(pin or {}).get('execution_contract',{}).get('code',{}).get('astra_literature.py')
+    if not expected:return None
+    runs=Path(root)/'enrichment_free_runs'
+    folders=[]
+    if preferred_run and re.fullmatch(r'g\d+-[0-9a-f]{32}',preferred_run):folders.append(runs/preferred_run)
+    folders.extend(p for p in sorted(runs.glob('g*-*')) if re.fullmatch(r'g\d+-[0-9a-f]{32}',p.name))
+    candidates=[Path(__file__).with_name('astra_literature.py')]
+    for folder in folders:
+        candidates.extend([folder/'references/finding_literature_execution.py',
+                           folder/'reproducibility/code/ptm_shared/astra_literature.py'])
+    for path in dict.fromkeys(candidates):
+        if path.is_file() and digest(path)==expected:return path.read_text()
+    return None
+
+
 def quant_cached(inputs,design,context,root,fingerprint,calculator=None):
     """Validated immutable stage cache, including failed-run successes; never a stale relabel."""
     cache=Path(root)/'.astra_stage_cache'/fingerprint;descriptor=cache/'stage.json'
@@ -462,10 +484,13 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                     if re.fullmatch(r'g\d+-[0-9a-f]{32}',prior_run):
                         path=root/'enrichment_free_runs'/prior_run/'references/finding_literature_pin.json'
                         if path.is_file():previous_pin=json.loads(path.read_text())
-                        code=path.parent.parent/'reproducibility/code/ptm_shared/astra_literature.py'
-                        if code.is_file():previous_code=code.read_text()
+                        previous_code=finding_execution_code(root,previous_pin,prior_run)
                 finding_pin=collect(scientific,snapshot,literature,settings=config,cache_root=root/'.astra_stage_cache',frozen_pin=previous_pin,frozen_code=previous_code)
             evidence_reuse['finding_literature']=config.get('_literature_reuse',{'status':'explicit_frozen_pin'})
+            original_code=finding_execution_code(root,finding_pin)
+            if original_code is not None:
+                (directory/'references/finding_literature_execution.py').write_text(original_code)
+                evidence_reuse['finding_literature']['execution_code_sha256']=hashlib.sha256(original_code.encode()).hexdigest()
             readiness['literature']=apply(scientific,finding_pin,snapshot,literature)
             readiness['reader']['literature_comparison']=readiness['literature']['status']
             plan['fingerprints']['literature']=finding_pin['request_sha256']
