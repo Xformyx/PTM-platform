@@ -259,7 +259,12 @@ export default function OrderCreate() {
     custom_reference: boolean;
     fasta_filename: string | null;
     message: string;
+    astra_reference_id?: string | null;
+    astra_reference_ready?: boolean;
+    astra_reference_filename?: string | null;
+    astra_reference_message?: string;
   } | null>(null);
+  const autoReferenceId = useRef("");
   const [secondaryFiles, setSecondaryFiles] = useState<{
     pr_matrix: File | null; pg_matrix: File | null;
   }>({ pr_matrix: null, pg_matrix: null });
@@ -272,6 +277,10 @@ export default function OrderCreate() {
       custom_reference: boolean;
       fasta_filename: string | null;
       message: string;
+      astra_reference_id?: string | null;
+      astra_reference_ready?: boolean;
+      astra_reference_filename?: string | null;
+      astra_reference_message?: string;
     }>(`/orders/reference-status?species=${encodeURIComponent(form.species)}`)
       .then((status) => {
         if (!cancelled) setReferenceStatus(status);
@@ -281,6 +290,34 @@ export default function OrderCreate() {
       });
     return () => { cancelled = true; };
   }, [form.species]);
+
+  const astraOrder = ["astra_analysis.v4", "astra_analysis.v5", "astra_analysis.v6"].includes(String(structuredContext.quantitation_export_mode));
+  const currentReferenceId = String((((structuredContext.science ?? {}) as Record<string, unknown>).reference as Record<string, unknown> | undefined)?.reference_id ?? "");
+  useEffect(() => {
+    const declared = referenceStatus?.astra_reference_id ?? "";
+    if (!astraOrder) return;
+    setStructuredContext((current) => {
+      const science = { ...((current.science ?? {}) as Record<string, unknown>) };
+      const reference = { ...((science.reference ?? {}) as Record<string, unknown>) };
+      const currentId = String(reference.reference_id ?? "").trim();
+      if (scienceFiles.fasta_file) {
+        if (currentId && currentId === autoReferenceId.current) {
+          delete reference.reference_id;
+          science.reference = reference;
+          autoReferenceId.current = "";
+          return { ...current, science };
+        }
+        return current;
+      }
+      if (!declared || (currentId && currentId !== autoReferenceId.current) || currentId === declared) {
+        if (currentId === declared) autoReferenceId.current = declared;
+        return current;
+      }
+      autoReferenceId.current = declared;
+      science.reference = { ...reference, reference_id: declared };
+      return { ...current, science };
+    });
+  }, [astraOrder, referenceStatus?.astra_reference_id, scienceFiles.fasta_file, currentReferenceId]);
 
   // Step 1: Sample Config
   const [sampleColumns, setSampleColumns] = useState<string[]>([]);
@@ -516,12 +553,23 @@ export default function OrderCreate() {
       setError("Sample configuration is required. Go back to Step 2 and configure samples.");
       return;
     }
-    if (form.species === "rat_hir" && referenceStatus?.ready === false && !scienceFiles.fasta_file) {
+    const submittedContext = withPersistedExportMode(mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions}));
+    const submittedAstra = ["astra_analysis.v4", "astra_analysis.v5", "astra_analysis.v6"].includes(String(submittedContext.quantitation_export_mode));
+    const submittedReferenceId = String((((submittedContext.science ?? {}) as Record<string, unknown>).reference as Record<string, unknown> | undefined)?.reference_id ?? "").trim();
+    if (submittedAstra && !scienceFiles.fasta_file) {
+      if (!submittedReferenceId) {
+        setError("분석 FASTA를 올리거나 등록 Reference를 선택하세요.");
+        return;
+      }
+      if (submittedReferenceId === referenceStatus?.astra_reference_id && referenceStatus?.astra_reference_ready === false) {
+        setError(referenceStatus.astra_reference_message || "등록 Reference가 설치되어 있지 않습니다. 분석 FASTA를 업로드하세요.");
+        return;
+      }
+    } else if (form.species === "rat_hir" && referenceStatus?.ready === false && !scienceFiles.fasta_file) {
       setError(referenceStatus.message);
       return;
     }
 
-    const submittedContext = withPersistedExportMode(mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions}));
     const designProblems = designErrors(submittedContext, designSamples(samples), designSamples(secondarySamples));
     if (designProblems.length) { setError(designProblems.join(" ")); return; }
 
@@ -750,27 +798,36 @@ export default function OrderCreate() {
                 <div className="rounded-lg border border-dashed border-muted-foreground/25 bg-muted/30 p-4">
                   <p className="text-sm font-medium">Reference FASTA</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))
-                      ? '새 Astra 주문은 분석에 사용한 FASTA를 업로드하거나 Sample Design에 등록 Reference ID를 입력하세요. 기존 주문의 재실행은 저장된 FASTA를 사용합니다.'
+                    {astraOrder
+                      ? "분석 FASTA를 올리지 않으면 이 종의 선언된 등록 Reference를 사용합니다. 다른 등록 ID를 적거나 분석 FASTA를 올리면 그 선택이 우선입니다."
                       : `Automatically resolved for ${form.species}.`}
                   </p>
+                  {astraOrder && referenceStatus?.astra_reference_ready === true && (
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-2">
+                      {referenceStatus.astra_reference_message}: <code>{referenceStatus.astra_reference_id}</code>
+                    </p>
+                  )}
+                  {astraOrder && referenceStatus && referenceStatus.astra_reference_ready === false && (
+                    <Alert variant="destructive" className="mt-3 py-2">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription className="text-xs">{referenceStatus.astra_reference_message}</AlertDescription>
+                    </Alert>
+                  )}
                   {form.species === "rat_hir" && (
-                    <>
-                      <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
-                        Custom rat reference: retain the human INSR entry with its accession, <code>GN=INSR</code>, and <code>OX=9606</code>. Rat remains the order-level annotation species.
-                      </p>
-                      {referenceStatus?.ready === false && (
-                        <Alert variant="destructive" className="mt-3 py-2">
-                          <AlertCircle className="h-4 w-4" />
-                          <AlertDescription className="text-xs">{referenceStatus.message}</AlertDescription>
-                        </Alert>
-                      )}
-                      {referenceStatus?.ready === true && (
-                        <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-2">
-                          Custom reference ready: <code>{referenceStatus.fasta_filename}</code>
-                        </p>
-                      )}
-                    </>
+                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
+                      Custom rat reference: retain the human INSR entry with its accession, <code>GN=INSR</code>, and <code>OX=9606</code>. Rat remains the order-level annotation species.
+                    </p>
+                  )}
+                  {!astraOrder && form.species === "rat_hir" && referenceStatus?.ready === false && (
+                    <Alert variant="destructive" className="mt-3 py-2">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription className="text-xs">{referenceStatus.message}</AlertDescription>
+                    </Alert>
+                  )}
+                  {!astraOrder && form.species === "rat_hir" && referenceStatus?.ready === true && (
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-2">
+                      Custom reference ready: <code>{referenceStatus.fasta_filename}</code>
+                    </p>
                   )}
                 </div>
 

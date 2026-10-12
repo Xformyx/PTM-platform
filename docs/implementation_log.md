@@ -3519,3 +3519,14 @@
 - **해석 한계:** 패키지가 나와도 미완료 조회는 채워지지 않는다. STRING·iPTMnet 결과를 site-resolved curated kinase edge로 올리지 않는다.
 - **결정성:** 새 seed·solver 없음. 새 측정 임계 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_astra_source_policy.py`.
 
+### [2026-10-12] Astra 새 주문 — 빈 Reference ID는 선언된 종별 등록본
+
+- **분류:** 구현
+- **대상:** `ptm_shared/species_sequence_reference.py`, `scripts/register_species_sequence_references.py`, `docs/astra_science_upgrade/operations_KO.md` «등록된 종별 sequence reference»
+- **구현 대상 설계:** 같은 절. 2026-10-12 선언. human, mouse, rat, rat_hir의 파일명을 등록 ID로 고정했다.
+- **사전등록 상태:** 결과 열람 전 확정. 주문 결과로 파일을 고른 것이 아니라, 이미 종 폴더에 있던 FASTA의 파일명을 실행 전에 선언했다.
+- **내용:** Astra 새 주문에서 Reference ID가 비어 있고 분석 FASTA가 없으면 선언된 ID의 manifest를 쓴다. 명시 ID는 바꾸지 않는다. 분석 FASTA를 올리면 그 파일이 우선이며 종 등록 ID로 표시하지 않는다. 설치는 선언된 파일명만 hard link하고 sha256을 고정한다. 다른 sha256이 있으면 덮어쓰지 않는다. 종 폴더를 정렬해 첫 파일을 고르지 않는다. `rat_hir`은 rat 등록본이 아니다.
+- **논문에서의 용도:** methods (참조 서열의 신원). 결과 비교에는 쓰지 않는다.
+- **해석 한계:** 등록은 서열 파일의 신원이다. kinase 귀속 정확도가 올라갔다고 하지 않는다. manifest가 없는 기계에서는 분석 FASTA 업로드가 필요하다.
+- **결정성:** 새 seed·solver 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_species_sequence_reference.py`.
+

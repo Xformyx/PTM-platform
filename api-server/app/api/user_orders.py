@@ -535,15 +535,15 @@ async def _create_order_from_user_impl(
     registered_mapping=None
     from ptm_shared.analysis_context import current_astra_context
     config_data['analysis_context']=current_astra_context(config_data.get('analysis_context'))
-    if not uploaded_fasta:
-        context=config_data.get('analysis_context') or {}
-        if context.get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'}:
-            from ptm_shared.science_reference import bind_registered_reference
-            try:
-                resolved_reference_fasta,context,registered_mapping=bind_registered_reference(settings.REFERENCE_DIR,context)
-                config_data['analysis_context']=context
-            except ValueError as error:raise HTTPException(status_code=422,detail={'code':getattr(error,'code','reference_invalid'),'message':str(error)}) from error
-        else:resolved_reference_fasta = resolve_reference_fasta(settings.REFERENCE_DIR, species_context.label)
+    context=config_data.get('analysis_context') or {}
+    if context.get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'}:
+        from ptm_shared.species_sequence_reference import prepare_astra_reference
+        try:
+            resolved_reference_fasta,context,registered_mapping=prepare_astra_reference(settings.REFERENCE_DIR,context,species_context.label,uploaded_fasta)
+            config_data['analysis_context']=context
+        except ValueError as error:raise HTTPException(status_code=422,detail={'code':getattr(error,'code','reference_invalid'),'message':getattr(error,'detail',None) or str(error)}) from error
+    elif not uploaded_fasta:
+        resolved_reference_fasta = resolve_reference_fasta(settings.REFERENCE_DIR, species_context.label)
     if not uploaded_fasta and not resolved_reference_fasta:
         raise HTTPException(status_code=422, detail=missing_reference_detail(settings.REFERENCE_DIR, species_context))
 

@@ -56,7 +56,11 @@ function formatApiDetail(
     });
     return parts.filter(Boolean).join('; ') || `Request failed: ${status}`;
   }
-  if (d && typeof d === 'object') return JSON.stringify(d);
+  if (d && typeof d === 'object') {
+    const message = (d as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message;
+    return JSON.stringify(d);
+  }
   return `Request failed: ${status} ${statusText}`;
 }
 
