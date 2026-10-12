@@ -71,6 +71,16 @@ def project_reader_display_identity(
     주장 금지: 이 라벨로 localization 확실성, occupancy, 또는 kinase 귀속을 주장하지 않는다.
     """
     unit = str(reader_measurement_unit or "").strip()
+    if unit == "quantified_ptm_form":
+        gene = _text(row, ("gene",))
+        positions = _text(row, ("candidate_residue_annotation",))
+        if not gene: return _text(row, ("form_id",)) or "Unresolved quantified form"
+        sites = positions.split(';') if positions else []
+        site_label = ';'.join(sites[:4]) + (f' +{len(sites)-4} candidates' if len(sites)>4 else '')
+        label = gene + (f' / candidate {site_label}' if site_label else ' / site unresolved')
+        if row.get('mapping_status') == 'multiple mappings': label += ' [multiple mappings]'
+        if len(row.get('taxa', [])) > 1: label += ' [taxa '+','.join(row['taxa'])+']'
+        return f"{label} {disambiguator}" if disambiguator else label
     if unit in {"kinase_candidate", "protein_group_abundance"}:
         if unit == "kinase_candidate":
             label = _text(row, ("candidate_gene", "candidate_name", "candidate_accession")) or "Unnamed candidate"

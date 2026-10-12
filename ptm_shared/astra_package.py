@@ -282,9 +282,13 @@ from .astra_figures import figure_packet
 
 def start_here(snapshot,counts,readiness):
     original=snapshot['original']
+    method_path='reader/PHOSX_TIME_COURSE.md' if readiness.get('native_method_runtime') else 'kinase/method_executions.csv'
     return '\n\n'.join(['# START HERE — Astra analysis package',f"Project: {original.get('project_name')} | Order: {original.get('order_code')}",
-        ('First read [reader/READ_ME.md](reader/READ_ME.md) for selected observations, exact row links, question coverage and withheld evidence. Then read [study/STUDY_BRIEF.md](study/STUDY_BRIEF.md) and the recorded design/source/statistics.' if readiness.get('reader') else
-         'Read study/STUDY_BRIEF.md, user_input_snapshot.json, study_design.json, analysis_plan.json, references/source_pin.json and methods/statistics_inventory.json first.'),
+        (f'1. Read the original questions and design in [STUDY_BRIEF](study/STUDY_BRIEF.md), [question coverage](reader/READ_ME.md#저장된-연구-질문) and [actual readiness](evidence/readiness.json).\n\n2. Read [selected observations and withheld coverage](reader/READ_ME.md).\n\n3. Follow the saved [temporal](reader/TEMPORAL_EVIDENCE.md), [PhosX]({method_path}) and [literature](reader/LITERATURE.md) evidence.\n\n4. Trace individual claims to source row keys. Consult [source queries](references/source_query_ledger.csv) and the large source pin only when a specific claim requires them.' if readiness.get('reader') else
+         'First read [STUDY_BRIEF](study/STUDY_BRIEF.md), [design](study/study_design.json) and [readiness](evidence/readiness.json). Consult individual source queries and the large source pin only when needed.'),
+        'Stage status: '+json.dumps({'calculation':readiness.get('completion_status'),'reference':readiness.get('source_execution',{}).get('status'),'incomplete_reference_queries':len(readiness.get('source_execution',{}).get('incomplete_queries',[])),
+            'literature':readiness.get('literature',{}).get('status'),'site_attribution':readiness.get('strict_attribution',{}).get('status')},ensure_ascii=False)+
+            '. research_full is a policy, not collection completion. Partial references, missing localization and uncalibrated calls remain separate limits.',
         'Use the complete biological question, report_options.research_questions, special conditions and selected literature. Do not ask again for information already supplied. Expectations are not measurements.',
         'Primary quantitative evidence: quant/primary_A_input.csv. Check actual masks and rows when a summary conflicts; record the conflict.',
         json.dumps(counts,ensure_ascii=False),'Profile rows are candidate × contrast × track, not discovered or activated kinase counts.',

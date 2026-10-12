@@ -5,14 +5,18 @@ import { Button } from '@/components/ui/button';
 type Evidence = {
   run_id:string;
   schema_version?:string;
-  source_execution?:{message:string;requested_policy:string;effective_pin_policy:string;pin_reused:boolean;refresh_requested:boolean;previous_pin_sha256:string|null;used_pin_sha256:string|null};
+  source_execution?:{status?:string;incomplete_queries?:unknown[];message:string;requested_policy:string;effective_pin_policy:string;pin_reused:boolean;refresh_requested:boolean;previous_pin_sha256:string|null;used_pin_sha256:string|null};
   study_preview?:{brief:string;transfer_validation:{unexpected_missing:number}};
   counts:Record<string,number>;
   provenance:{provenance_id:string; normalization:{normalization_policy:string}; estimator_versions:Record<string,string>};
-  analysis_readiness?:{strict_attribution?:string|{status:string;reason?:string};kinase?:{status:string;reason?:string};source_caution?:string[]};
+  analysis_readiness?:{completion_status?:string;reader?:{selected_findings:number};
+    measurement_evidence?:{status:string;reason?:string};
+    native_method_runtime?:Array<{status:string;contrast_id:string}>;
+    literature?:{status:string;selected_findings:number;comparison_executed_findings:number;source_chunks_read:number;semantically_verified_comparable_findings:number};
+    strict_attribution?:string|{status:string;reason?:string};kinase?:{status:string;reason?:string};source_caution?:string[]};
   primary_profiles:Array<{entity:string;track?:string;time_min:number;contrast_id?:string;target_label?:string;reference_label?:string;gene_balanced_mean:number|null;descriptive_pattern:string;n_sites_or_units:number;n_substrate_genes:number}>;
 };
-const countLabels:Record<string,string> = {mapped_forms:'Mapped forms',parent_eligible:'Forms with eligible parent',repeated_comparisons:'Comparisons with repeated joint observations',candidate_entities:'Candidate entities (kinases / families / motif classes)',candidate_edges:'Candidate relation rows',kinase_profile_rows:'Profile rows (candidate × contrast × track)',protein_groups:'Protein groups',forms:'PTM forms',primary_comparisons:'Eligible form comparisons',kinase_profiles_v1:'Profile rows (entity × mode × time)',kinase_profiles:'Profile rows (entity × mode × contrast)'};
+const countLabels:Record<string,string> = {mapped_forms:'Mapped forms',parent_eligible:'Forms with eligible parent',repeated_comparisons:'Comparisons with repeated joint observations',candidate_entities:'Candidate entities (kinases / families / motif classes / assay labels)',candidate_edges:'Candidate relation rows',kinase_profile_rows:'Profile rows (candidate × contrast × track)',protein_groups:'Protein groups',forms:'PTM forms',primary_comparisons:'Eligible form comparisons',kinase_profiles_v1:'Profile rows (entity × mode × time)',kinase_profiles:'Profile rows (entity × mode × contrast)'};
 
 export default function PrimaryAEvidence({orderId,status}:{orderId:number;status:string}) {
   const [data,setData] = useState<Evidence|null>(null);
@@ -40,7 +44,15 @@ export default function PrimaryAEvidence({orderId,status}:{orderId:number;status
     <p className="text-sm">Parent-adjusted form responses, U/P comparison modes, paired parent sensitivity, emergence and protein time courses. The Astra bundle includes kinase footprints when compatible annotation analysis was performed.</p>
     {error && <p role="alert" className="text-sm text-muted-foreground">{error}</p>}
     {data && <>
-      {['astra_analysis_package.v5.experimental','astra_analysis_package.v6.experimental'].includes(data.schema_version??'')&&<p className="rounded border p-3 text-sm">Experimental evidence: 후보 근거와 확정 판단을 구분합니다. 독립 calibration 전 확정 call은 보류되며, 실제 자원 검증과 생물학적 정확도 향상은 별도 검증 대상입니다.</p>}
+      <div className="rounded border p-3 text-sm space-y-1" aria-label="AI delivery readiness">
+        <p className="font-medium">AI 분석 자료 준비됨 · 실제 수행 범위와 제한을 함께 전달합니다.</p>
+        <p>참조 근거: {(data.source_execution?.status==='partial'||Boolean(data.source_execution?.incomplete_queries?.length))?'일부 수집 미완료':data.source_execution?.status??'기록 확인 필요'}. 수집 정책 이름은 완료 상태가 아닙니다.</p>
+        {data.analysis_readiness?.reader&&<p>주요 관측 {data.analysis_readiness.reader.selected_findings}개와 전체 선정·보류 근거가 포함됩니다.</p>}
+        <p>실행별 localization: {data.analysis_readiness?.measurement_evidence?.status==='missing_input'?'입력 없음 — 정량·서열 매핑과 구분':data.analysis_readiness?.measurement_evidence?.status??'측정 audit 확인 필요'}.</p>
+        {data.analysis_readiness?.native_method_runtime&&<p>PhosX: {data.analysis_readiness.native_method_runtime.filter(r=>['executed','reused'].includes(r.status)).length}개 contrast의 실행 또는 검증된 결과 재사용. 방법 점수는 확정 활성 판정이 아닙니다.</p>}
+        {data.analysis_readiness?.literature&&<p>문헌: 선정 {data.analysis_readiness.literature.selected_findings}개 중 비교 실행 {data.analysis_readiness.literature.comparison_executed_findings}개, 읽은 본문 구간 {data.analysis_readiness.literature.source_chunks_read}개. 의미 검토가 확인된 비교 {data.analysis_readiness.literature.semantically_verified_comparable_findings}개 — 검색·비교 실행과 검증 완료는 다릅니다.</p>}
+      </div>
+      {['astra_analysis_package.v5.experimental' ,'astra_analysis_package.v6.experimental'].includes(data.schema_version??'')&&<p className="rounded border p-3 text-sm">Experimental evidence: 후보 근거와 확정 판단을 구분합니다. 독립 calibration 전 확정 call은 보류되며, 실제 자원 검증과 생물학적 정확도 향상은 별도 검증 대상입니다.</p>}
       {data.schema_version==='astra_analysis_package.v6.experimental'&&<p className="rounded border p-3 text-sm">입력 자료는 DIA-NN 정량 행렬입니다. Run confidence와 site 확률, 서술적 footprint와 보정된 판단은 구분해 전달됩니다. 필요한 입력 부재와 no-call은 kinase 비활성을 뜻하지 않습니다.</p>}
       <div className="grid gap-3 sm:grid-cols-3">{Object.entries(data.counts).map(([key,n]) => <div key={key} className="rounded border p-3"><div className="text-2xl font-semibold">{n.toLocaleString()}</div><div className="text-sm">{countLabels[key] ?? key}</div></div>)}</div>
       <p className="break-all text-xs">Recorded run: {data.run_id}<br/>Provenance: {data.provenance.provenance_id}<br/>Normalization: {data.provenance.normalization.normalization_policy}</p>

@@ -206,8 +206,31 @@ def build_reader_tables(tables, design, snapshot=None):
         'reader/packet': pd.DataFrame([{'packet_id':'reader','packet_json':encode(packet),'schema_version':VERSION}])}
     combined = {**tables, **result}
     attach_temporal(combined)
+    attach_reading_guidance(combined)
     result['reader/packet'] = combined['reader/packet']
     return result
+
+
+def attach_reading_guidance(tables):
+    """Extend the existing authoring contract without selecting or calculating."""
+    packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
+    executions=tables.get('kinase/method_executions',pd.DataFrame())
+    method_path='reader/PHOSX_TIME_COURSE.md' if len(executions) else 'kinase/method_executions.csv'
+    packet['authoring_rules']['reading_order']=[
+        {'step':1,'purpose':'Original questions, design and actual stage readiness',
+         'paths':['study/STUDY_BRIEF.md','reader/READ_ME.md#저장된-연구-질문','evidence/readiness.json']},
+        {'step':2,'purpose':'Selected observations and withheld/unselected coverage',
+         'paths':['reader/READ_ME.md','reader/findings.csv','reader/coverage_summary.json']},
+        {'step':3,'purpose':'Saved temporal, native method and literature evidence with limits',
+         'paths':['reader/TEMPORAL_EVIDENCE.md',method_path,'reader/LITERATURE.md']},
+        {'step':4,'purpose':'Trace a claim to exact source row keys; large source pin only as needed',
+         'paths':['reader/cards.csv','quant/comparisons.csv','references/source_query_ledger.csv','references/source_pin.json']}]
+    packet['authoring_rules']['readiness_semantics']=[
+        'research_full is an acquisition policy, not evidence of completed collection; inspect source_execution.',
+        'Calculation completion, partial references, literature retrieval/comparison and missing localization are separate states.',
+        'PSSM percentile is not correctness probability; native method p/q is not biological replicate significance.',
+        'Keep literature proposals distinct from semantically reviewed claims; preserve no-call and uncertainty.']
+    tables['reader/packet'].loc[tables['reader/packet'].index[0],'packet_json']=json.dumps(packet,ensure_ascii=False,sort_keys=True)
 
 
 def validate_reader(tables):
@@ -333,7 +356,7 @@ def write_phosx_time_views(directory, tables):
         '[시간별 분모·실행 ID](phosx_time_summary.csv) · [모든 assay×시점 결과·membership IDs](phosx_assay_time_results.csv) · '
         '[원본 결과](../kinase/method_scores.csv) · [원본 membership](../kinase/method_membership.csv) · '
         '[실행 설정](../kinase/method_executions.csv) · [자원](../science/resource_registry.json)',
-        '아래 표는 저장된 결과의 투영입니다. Native Activity Score는 log2 단위의 descriptive specificity_A와 다릅니다. '
+        '아래 표는 저장된 결과의 투영입니다. 실행 기록은 부모 패키지에서 재사용될 수 있습니다. 이번 생성의 재계산/재사용은 [runtime](../methods/native_execution_runtime.json)과 [provenance](../provenance.json)의 stage_reuse를 확인하세요. Native Activity Score는 log2 단위의 descriptive specificity_A와 다릅니다. '
         '시점마다 입력 universe와 기질 구성이 달라질 수 있어 최대 score 시점을 kinase 활성 peak로 확정할 수 없습니다. '
         'Method p/q는 해당 contrast의 공식 rank permutation 및 다중 검정 결과이며 biological p/q나 전체 시간축의 통합 FDR가 아닙니다.',
         'Assay label은 검증된 enzyme accession/rat orthology를 대신하지 않습니다. Human assay와 substrate taxon은 구분됩니다. '
@@ -374,6 +397,8 @@ def write_reader(directory, tables):
     lines = ['# 주요 관측과 근거 — Astra reader',
         '[실험 원문과 설계](../study/STUDY_BRIEF.md) · [원문 snapshot](../study/user_input_snapshot.json) · '
         '[전체 카드](cards.csv) · [전체 행의 보류/선정 사유](coverage.csv) · [구조화 packet](authoring_packet.json)',
+        '읽기 순서: **연구 질문·[준비 상태](../evidence/readiness.json) → 아래 선정 관측 → 시간·방법·문헌 근거 → 필요한 원본 행**. '
+        '큰 source pin 전체를 먼저 읽을 필요는 없습니다. research_full은 요청 정책이며 참조 수집 완료를 뜻하지 않습니다.',
         f"전체 {coverage['total_forms']} forms / {coverage['total_form_contrasts']} form×contrast. "
         f"카드 {coverage['card_forms']} forms / 수치 관측 {coverage['card_numeric_rows']}행 / 결측 시점 {coverage['card_missing_timepoints']}행. "
         f"보류 {coverage['withheld_rows']}행. 주요 결과 {coverage['selected_findings']}개; 미선정 원본 {coverage['unselected_source_rows_retained']}행은 보존됩니다.",
@@ -418,13 +443,13 @@ def write_reader(directory, tables):
             '제한: '+ ' '.join(c['interpretation_limits']),
             '전체 joint masks·U_all/P_all·실제 precursor membership·좌표 및 localization ID는 [카드](cards.csv)의 source_bindings와 [adapter 원본](../reader_adapter/form_contrasts.csv)에 보존됩니다.'])
     if packet.get('literature'):
-        lines.insert(2, '[선정 관측별 문헌 검색·비교·접근 제한](LITERATURE.md) · [문헌 단계 요약](literature_summary.json)')
+        lines.insert(7, '[선정 관측별 문헌 검색·비교·접근 제한](LITERATURE.md) · [문헌 단계 요약](literature_summary.json)')
     method_artifacts = write_phosx_time_views(directory, tables)
     temporal_artifacts = write_temporal(directory, packet)
     if temporal_artifacts:
-        lines.insert(2, '[저장된 시간 특징·인접 비교·기질 구성·제외 민감도](TEMPORAL_EVIDENCE.md) · [finding→원본 시간 근거](temporal_links.csv)')
+        lines.insert(7, '[저장된 시간 특징·인접 비교·기질 구성·제외 민감도](TEMPORAL_EVIDENCE.md) · [finding→원본 시간 근거](temporal_links.csv)')
     if method_artifacts:
-        lines.insert(2, '[PhosX 시간별 입력 범위·실행 상태·assay 결과](PHOSX_TIME_COURSE.md)')
+        lines.insert(7, '[PhosX 시간별 입력 범위·실행 상태·assay 결과](PHOSX_TIME_COURSE.md)')
     rendered = ''.join(('\n' if i and line.startswith('|') and lines[i-1].startswith('|') else '\n\n') + line
                        for i,line in enumerate(lines)).lstrip()+'\n'
     (directory/'reader/READ_ME.md').write_text(rendered,encoding='utf-8')

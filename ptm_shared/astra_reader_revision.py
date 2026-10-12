@@ -33,7 +33,7 @@ def _copy_package(source, root):
     return run_id,directory
 
 
-def revise_temporal(source, output_dir, *, checkpoint=lambda:None):
+def revise_temporal(source, output_dir, *, refresh_figures=False, checkpoint=lambda:None):
     """Reader-only revision of saved temporal rows, without literature collection.
 
     The source and its successful pointer are never modified. Publication to the
@@ -41,7 +41,7 @@ def revise_temporal(source, output_dir, *, checkpoint=lambda:None):
     """
     from .astra_package import validate_package, write_tables, seal_archive, CODE_FILES
     from . import astra_evidence_v6 as engine
-    from .astra_reader import write_reader, validate_reader
+    from .astra_reader import write_reader, validate_reader, attach_reading_guidance
     from .astra_reader_temporal import attach_temporal, VERSION
     source=Path(source).resolve();root=Path(output_dir).resolve()
     if root==source or source in root.parents:raise ValueError('Revision must not edit source package')
@@ -52,7 +52,11 @@ def revise_temporal(source, output_dir, *, checkpoint=lambda:None):
     if 'temporal/temporal_series' not in tables:raise ValueError('Saved temporal series required; no calculation will be attempted')
     origin=json.loads((source/'provenance.json').read_text())
     run_id,directory=_copy_package(source,root)
-    attach_temporal(tables);validate_reader(tables)
+    snapshot=json.loads((source/'study/user_input_snapshot.json').read_text())
+    if (source/'references/finding_literature_pin.json').is_file():
+        literature_stage.apply(tables,json.loads((source/'references/finding_literature_pin.json').read_text()),
+            snapshot,json.loads((source/'references/literature_pin.json').read_text()))
+    attach_temporal(tables);attach_reading_guidance(tables);validate_reader(tables)
     baseline=json.loads((source/'reproducibility/data_dictionary.json').read_text())
     dictionary=deepcopy(baseline)
     update=write_tables({'reader/packet':tables['reader/packet']},directory)
@@ -62,7 +66,13 @@ def revise_temporal(source, output_dir, *, checkpoint=lambda:None):
     # No source table, card, selection, literature result or figure may change.
     preserved=[name for name in baseline if name!='reader/packet.csv']
     manifest=json.loads((source/'manifest.json').read_text())
-    preserved+= [name for name in manifest['files'] if name.startswith(('figures/','references/'))]
+    if refresh_figures:
+        from .astra_figures import figure_packet
+        design=json.loads((source/'study/study_design.json').read_text())
+        figure_packet(tables,directory,design)
+    display_files={'figures/figure_legends.json','figures/substrate_contrast_heatmap.svg',
+        'figures/emerging_detection.svg','figures/emerging_detection_columns.csv'} if refresh_figures else set()
+    preserved+= [name for name in manifest['files'] if name.startswith(('figures/','references/')) and name not in display_files]
     preserved+= ['reproducibility/replay_config.json']
     for name in preserved:
         if digest(source/name)!=digest(directory/name):raise ValueError('Reader revision changed preserved bytes: '+name)
@@ -70,9 +80,10 @@ def revise_temporal(source, output_dir, *, checkpoint=lambda:None):
     codes={name:digest(Path(__file__).with_name(name)) for name in code_files}
     (directory/'reproducibility/code/ptm_shared').mkdir(parents=True,exist_ok=True)
     for name in code_files:shutil.copyfile(Path(__file__).with_name(name),directory/'reproducibility/code/ptm_shared'/name)
-    revision={'operation':'saved_temporal_reader_revision','version':VERSION,'run_id':run_id,
+    revision={'operation':'saved_reader_display_revision' if refresh_figures else 'saved_temporal_reader_revision','version':VERSION,'run_id':run_id,
         'parent_run_id':origin['run_id'],'parent_manifest_sha256':digest(source/'manifest.json'),
         'scientific_recalculation':False,'finding_selection_repeated':False,'literature_queries':0,
+        'display_figures_refreshed':refresh_figures,'changed_display_files':sorted(display_files),
         'preserved_table_hashes':{name:digest(directory/name) for name in preserved},
         'reader_artifacts':artifacts,'replay_scope':'saved_rows_to_reader; not_method_recalculation_or_independent_validation'}
     json_write(directory/'reproducibility/temporal_reader_revision.json',revision)
@@ -94,8 +105,17 @@ def revise_temporal(source, output_dir, *, checkpoint=lambda:None):
         'parent_run_id':origin['run_id'],'source_hashes':revision['preserved_table_hashes'],
         'code_hashes':{k:codes[k] for k in ['astra_reader.py','astra_reader_temporal.py','astra_reader_revision.py']},
         'scientific_stages':'reused; see preserved original stage ledger'})
-    (directory/'START_HERE_ASTRA.md').write_text((source/'START_HERE_ASTRA.md').read_text()+
-        '\n\nSaved temporal reader revision: [READ_ME](reader/READ_ME.md) → [temporal evidence](reader/TEMPORAL_EVIDENCE.md) → original row keys. Read the temporal authoring rules; no new scientific calculation or literature comparison was performed.\n',encoding='utf-8')
+    from .astra_package import start_here
+    snapshot=json.loads((source/'study/user_input_snapshot.json').read_text())
+    readiness=json.loads((source/'evidence/readiness.json').read_text())
+    packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
+    if packet.get('literature'):
+        readiness['literature']=packet['literature']['summary']
+        readiness['reader']['literature_comparison']=readiness['literature']['status']
+        json_write(directory/'evidence/readiness.json',readiness)
+    counts=dict(zip(tables['evidence/coverage_funnel'].metric,tables['evidence/coverage_funnel']['count']))
+    (directory/'START_HERE_ASTRA.md').write_text(start_here(snapshot,counts,readiness)+
+        '\n\nSaved reader revision: original scientific tables and literature decisions retained; no new analysis.\n',encoding='utf-8')
     (directory/'evidence_report.html').write_text((source/'evidence_report.html').read_text()+
         '\n<p><a href="reader/TEMPORAL_EVIDENCE.md">Saved temporal observations and sensitivity evidence</a></p>\n',encoding='utf-8')
     checkpoint()

@@ -168,6 +168,57 @@ def heatmap_grid(frame,index,column,value,design):
     return grid.reindex(columns=order.column_id.tolist()),order.reset_index(drop=True)
 
 
+def heatmap_style(grid, value):
+    """One shared display scale per selected grid; never transform cells."""
+    finite=grid.to_numpy(float);finite=finite[np.isfinite(finite)]
+    if value=='A':
+        magnitude=float(np.max(np.abs(finite))) if len(finite) else 0.
+        limit=magnitude or 1.
+        return {'cmap':'coolwarm','vmin':-limit,'vmax':limit,'neutral_value':0.,
+                'unit':'Protein-adjusted PTM contrast, log2','scale':'symmetric_selected_grid',
+                'range_reason':'finite_absolute_max' if magnitude else 'display_only_plus_minus_one_for_zero_or_missing',
+                'missing_color':'#bdbdbd','finite_cells':len(finite)}
+    if value=='detected_n':
+        if np.any(finite<0) or np.any(finite!=np.floor(finite)):raise ValueError('Detection counts must be nonnegative integers')
+        maximum=float(finite.max()) if len(finite) else 0.
+        return {'cmap':'Blues','vmin':0.,'vmax':maximum or 1.,'neutral_value':None,
+                'unit':'Detected injections (count)','scale':'sequential_count',
+                'range_reason':'finite_maximum' if maximum else 'display_only_zero_to_one_for_zero_or_missing',
+                'missing_color':'#bdbdbd','finite_cells':len(finite)}
+    raise ValueError('Unknown heatmap quantity: '+value)
+
+
+def heatmap_rows(ids, tables):
+    """Display candidates without choosing one accession, site, taxon or charge."""
+    summary=tables.get('quant/summary',pd.DataFrame(columns=['form_id']))
+    if summary.form_id.duplicated().any():raise ValueError('Duplicate form display identity')
+    lookup=summary.set_index('form_id').to_dict('index')
+    audit=tables.get('science/site_identity_audit',pd.DataFrame())
+    taxa={fid:sorted(set(g.substrate_taxon.dropna().astype(str))) for fid,g in audit.groupby('form_id')} if len(audit) else {}
+    rows=[]
+    for order,fid in enumerate(ids):
+        r=lookup.get(fid,{})
+        raw=r.get('mapping_json');mappings=json.loads(raw) if isinstance(raw,str) and raw.strip() else []
+        genes=sorted({m['gene'] for m in mappings if m.get('gene')})
+        sites=sorted({site for m in mappings for site in m.get('sites',[])})
+        multiple=len(mappings)>1
+        identity={'form_id':fid,'gene':';'.join(genes),'candidate_residue_annotation':';'.join(sites),
+                  'mapping_status':'multiple mappings' if multiple else 'sequence mapped' if mappings else 'unresolved',
+                  'candidate_site_count':len(sites),'taxa':taxa.get(fid,[])}
+        label=project_reader_display_identity(identity,reader_measurement_unit='quantified_ptm_form')
+        rows.append({'form_id':fid,'row_order':order,'display_label':label,'candidate_sites':';'.join(sites),
+                     'candidate_genes':';'.join(genes),'mapping_status':r.get('mapping_status'),
+                     'mapping_json':raw,'taxa_json':json.dumps(taxa.get(fid,[])),
+                     'precursor_count':r.get('precursor_count'),
+                     'localization_status':r.get('strict_attribution_status','not_recorded'),
+                     'identity_scope':'quantified_form; candidate_sequence_coordinates_not_measured_localization'})
+    result=pd.DataFrame(rows)
+    for _,idx in result.groupby('display_label').groups.items():
+        if len(idx)>1:
+            for n,i in enumerate(idx,1):result.at[i,'display_label']+=f' (form {n})'
+    return result
+
+
 def figure_packet(tables,directory,design):
     import matplotlib
     matplotlib.use('Agg')
@@ -178,7 +229,9 @@ def figure_packet(tables,directory,design):
         frame=tables[key];frame.to_csv(output/(name+'_source.csv'),index=False)
         fig,ax=plt.subplots(figsize=(10,5));details=draw(ax,frame) or {}
         ax.set_title(details.get('display_title',name.replace('_',' ')));fig.tight_layout()
-        fig.savefig(output/(name+'.svg'),metadata={'Date':None});plt.close(fig)
+        fig.savefig(output/(name+'.svg'),metadata={'Date':None})
+        if details.get('raster_preview'):fig.savefig(output/(name+'.png'),dpi=130)
+        plt.close(fig)
         legends.append({'figure_id':name,'source_table':key,'source_data':name+'_source.csv','selection':selection,
                         'missing':'omitted points or gray cells, never numeric zero','error_bars':'none; technical variation is not a biological CI','full_source_rows':len(frame),**details})
     def empty(ax):ax.text(.5,.5,'Not evaluable: see readiness and source data',ha='center',transform=ax.transAxes)
@@ -240,20 +293,41 @@ def figure_packet(tables,directory,design):
         if f.empty:return empty(ax)
         grid,metadata=heatmap_grid(f,index,column,value,design)
         if grid.empty:return empty(ax)
+        if value=='detected_n':
+            denominators={cid:sorted(set(g.scheduled_n.dropna().astype(int))) for cid,g in f.groupby(column)} if 'scheduled_n' in f else {}
+            metadata['scheduled_injection_counts']=metadata.column_id.map(lambda cid:json.dumps(denominators.get(cid,[])))
+            metadata['denominator_scope']='scheduled_n in source; technical injections, not biological n' if denominators else 'unavailable; see design'
         metadata.to_csv(output/(name+'_columns.csv'),index=False)
-        ax.figure.set_size_inches(max(10,len(grid.columns)*1.1),5)
-        cmap=plt.get_cmap('coolwarm').with_extremes(bad='#bdbdbd')
-        image=ax.imshow(np.ma.masked_invalid(grid.to_numpy(float)),aspect='auto',cmap=cmap)
+        rows=heatmap_rows(grid.index,tables);rows.to_csv(output/(name+'_rows.csv'),index=False)
+        style=heatmap_style(grid,value)
+        json_write(output/(name+'_display.json'),style)
+        ax.figure.set_size_inches(max(13,len(grid.columns)*1.1+5),max(6,len(grid)*.29+2))
+        cmap=plt.get_cmap(style['cmap']).with_extremes(bad=style['missing_color'])
+        image=ax.imshow(np.ma.masked_invalid(grid.to_numpy(float)),aspect='auto',cmap=cmap,vmin=style['vmin'],vmax=style['vmax'])
         ax.set_xticks(range(len(grid.columns)),metadata.display_label,rotation=45,ha='right',fontsize=8)
         for i,label in enumerate(ax.get_xticklabels()):label.set_gid(f'heatmap-column-{i}')
-        ax.set_yticks(range(len(grid)),list(map(str,grid.index)),fontsize=5);ax.figure.colorbar(image,ax=ax)
+        from textwrap import fill
+        from matplotlib.patches import Patch
+        from matplotlib.ticker import MaxNLocator
+        ax.set_yticks(range(len(grid)),[fill(label,48) for label in rows.display_label],fontsize=7)
+        colorbar=ax.figure.colorbar(image,ax=ax,pad=.025,shrink=.7)
+        colorbar.set_label(style['unit'])
+        if value=='detected_n':colorbar.locator=MaxNLocator(integer=True);colorbar.update_ticks()
+        ax.legend(handles=[Patch(facecolor=style['missing_color'],label='NA: unavailable, not zero')],
+                  loc='upper left',bbox_to_anchor=(0,1.045),fontsize=8,frameon=False)
+
         if column=='contrast_id' and len(metadata[['arm_id','reference_condition_id','pairing']].drop_duplicates())==1:
             r=metadata.iloc[0]
             reference=next(c for c in design['conditions'] if c['condition_id']==r.reference_condition_id)
             ax.set_xlabel(f'{r.arm_label} / reference: {reference["label"]} ({r.reference_time_min:g} min) / pairing: {r.pairing}')
         else:ax.set_xlabel('Distinct conditions / actual time (minutes)')
         return {'column_metadata':name+'_columns.csv','column_order_policy':'canonical_numeric_minutes_with_distinct_arm_reference_pairing.v1',
-                'duplicate_cell_policy':'error_no_aggregation'}
+                'duplicate_cell_policy':'error_no_aggregation','row_metadata':name+'_rows.csv',
+                'display_metadata':name+'_display.json','raster_preview':name+'.png',
+                'display_title':('Protein-adjusted PTM contrasts' if value=='A' else 'Detection counts')+' — first 50 stable form IDs',
+                'value_semantics':style,'row_selection':'stable IDs; not top biological findings',
+                'zero_semantics':'observed zero; baseline non-detection does not create a fold change',
+                'site_labels':'candidate FASTA coordinates; see full ambiguity in row crosswalk'}
     save('substrate_contrast_heatmap','quant/comparisons',lambda ax,f:heat(ax,f,'form_id','contrast_id','A','substrate_contrast_heatmap'),'first 50 stable form IDs, every explicit contrast; NA gray')
     save('emerging_detection','evidence/emergence_evidence',lambda ax,f:heat(ax,f,'form_id','condition_id','detected_n','emerging_detection'),'first 50 stable forms, actual condition detection counts; shared observations not independent replicates')
     def timing(ax,f):
