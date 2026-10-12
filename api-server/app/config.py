@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     OUTPUT_DIR: str = "/app/data/outputs"
     REPORTS_DIR: str = "/app/storage/reports"
     REFERENCE_DIR: str = "/app/data/reference"
+    # Optional registered resource for new v6 requests. Both values are required;
+    # archived and explicitly supplied resources keep their original pins.
+    ASTRA_SPECIFICITY_MANIFEST_PATH: str = ""
+    ASTRA_SPECIFICITY_MANIFEST_SHA256: str = ""
     LOG_DIR: str = "/app/storage/logs"
     FILE_SHARE_DIR: str = "/app/storage/file_share"
     PTMQUANT_DIR: str = "/app/storage/ptmquant"

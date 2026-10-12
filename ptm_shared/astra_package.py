@@ -84,7 +84,11 @@ class StageLedger(list):
         from .astra_plan import STAGES
         dependencies={**STAGES,'identity_localization':['quantify_evidence'],
             'discover_regulators':['identity_localization','resolve_annotation']}
-        if self.profile=='astra_analysis.v6':dependencies['finding_literature']=['integrate_temporal_layers']
+        if self.profile=='astra_analysis.v6':
+            dependencies['quantitative_evidence']=['score_regulator_footprints']
+            dependencies['integrate_temporal_layers']=['quantitative_evidence']
+            dependencies['augment_evidence']=['integrate_temporal_layers']
+            dependencies['finding_literature']=['augment_evidence']
         seen={r['stage']:r for r in self}
         rows=[{**{'stage':name,'status':'queued'},**seen.get(name,{}),'dependencies':deps,
             'code_hash':self.code_hash,'config_hash':object_hash(self.plan),'checkpoint':self.plan.get('fingerprints',{})} for name,deps in dependencies.items()]
@@ -131,7 +135,7 @@ def compute_science(inputs,design,context,sources,*,quant=None,alternative=None,
     mapped,edges,motif=execute('discover_regulators',lambda:discover_stage(tables,design,science_inputs['FASTA'],context,sources))
     tables['site_mapping']=mapped
     discovery=execute('score_regulator_footprints',lambda:engine.score_candidates(tables,edges,design,context) if engine and hasattr(engine,'score_candidates') else score_candidates(tables,edges,design,science=bool(engine)));checkpoint()
-    evidence=quantitative_evidence(tables,alt_tables,design,norm,alt_norm,{**discovery,'source_queries':sources['queries']})
+    evidence=execute('quantitative_evidence',lambda:quantitative_evidence(tables,alt_tables,design,norm,alt_norm,{**discovery,'source_queries':sources['queries']}))
     temporal=execute('integrate_temporal_layers',lambda:temporal_stage(tables,discovery,design,context,sources.get('context'),evidence['parent_adjustment_impact']));checkpoint()
     evidence['censoring_bounds']=censoring_bounds(tables,design,context.get('detection_limit_model'))
     discovery.update(candidate_context_and_omissions(tables,discovery,evidence['technical_injection_omissions'],context.get('_runtime_reference')))
@@ -173,7 +177,32 @@ def compute_science(inputs,design,context,sources,*,quant=None,alternative=None,
         provider_limitations=failed,normalization_sensitivity={'status':'computed','primary':context['normalization_policy'],'alternative':alt_norm['normalization_policy']},
         LOD_bounds={'status':'conditional_supplied_model' if evidence['censoring_bounds'].status.eq('conditional_lower_bound').any() else 'unavailable','reason':'supplied_limits_only; no_limit_inferred_from_data'},
         needed_for_stronger_attribution=['identity_matched_localization','more_independent_substrate_genes','independent_biological_design_or_validation'])
-    if engine:scientific=engine.augment(scientific,inputs,design,{**context,'_reader_input_snapshot':snapshot},readiness)
+    if engine and engine.PROFILE=='astra_analysis.v6':
+        from copy import deepcopy
+        # Reuse scientific augmentation separately from presentation. The engine
+        # still owns all calculations; the existing cache stores successful rows.
+        def augment():
+            previous=deepcopy(readiness)
+            engine.augment(scientific,inputs,design,{**context,'_reader_input_snapshot':snapshot},readiness)
+            derived={k:v for k,v in scientific.items() if k.startswith('science/') or
+                     k in {'kinase/method_scores','kinase/method_membership','kinase/method_executions'}}
+            delta={k:v for k,v in readiness.items() if k not in {'reader','card_input_adapter'} and previous.get(k)!=v}
+            return derived,delta
+        derived,delta=execute('augment_evidence',augment)
+        scientific.update(derived);readiness.update(deepcopy(delta))
+        if 'reader/packet' not in scientific:
+            for record in readiness.get('native_method_runtime',[]):
+                record['original_runtime_seconds']=record.get('runtime_seconds')
+                record.update(status='reused',runtime_seconds=0.,reuse_scope='content_checked_scientific_augmentation')
+            scientific.update(engine.project_card_inputs(scientific,inputs,design,context,snapshot))
+            scientific.update(engine.build_reader_tables(scientific,design,snapshot))
+            projected=scientific['reader_adapter/form_contrasts']
+            readiness['card_input_adapter']={'schema_version':'astra_card_input.v1','status':'projected',
+                'rows':len(projected),'eligible_rows':int(projected.card_input_eligible.sum()),
+                'consumer_execution':'shared_report_cards_and_selector'}
+            readiness['reader']={'status':'generated','version':'astra_reader.v1',
+                'selected_findings':len(scientific['reader/findings']),'literature_comparison':'not_performed'}
+    elif engine:scientific=engine.augment(scientific,inputs,design,{**context,'_reader_input_snapshot':snapshot},readiness)
     return scientific,norm,alt_norm,readiness,motif,counts
 
 
@@ -376,9 +405,37 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                 # Canonical preparation also scores the pinned specificity
                 # resource, so it depends on the discovery fingerprint.
                 stage_keys={'identity_localization':'discovery','discover_regulators':'discovery',
-                    'score_regulator_footprints':'discovery','integrate_temporal_layers':'temporal'}
+                    'score_regulator_footprints':'discovery','quantitative_evidence':'discovery','integrate_temporal_layers':'temporal'}
+                if name=='augment_evidence':
+                    versions={}
+                    for distribution in ['phosx','numpy','pandas','scipy','h5py','tables']:
+                        try:versions[distribution]=importlib.metadata.version(distribution)
+                        except importlib.metadata.PackageNotFoundError:versions[distribution]='not_installed'
+                    official={}
+                    if versions['phosx']!='not_installed':
+                        dist=importlib.metadata.distribution('phosx')
+                        official={str(p):digest(dist.locate_file(p)) for p in dist.files or [] if str(p).startswith('phosx/') and str(p).endswith('.py')}
+                    fingerprint=object_hash({'stage':'scientific_augmentation.v1','inference':plan['fingerprints']['inference'],
+                        'input_hashes':hashes,'science_policy':context.get('science',{}),'design':design,
+                        'code':{k:code_capture[k] for k in ['astra_evidence_v6.py','science_inference.py','perturbation_validation.py',
+                            'inference_policy.py','evidence_methods.py','official_method_tracks.py','phosx_activity_adapter.py']},
+                        'environment':versions,'official_code':official})
+                    plan['fingerprints']['augmentation']=fingerprint
+                    class IncompleteAugmentation(Exception):
+                        def __init__(self,result):self.result=result
+                    def complete():
+                        result=fn()
+                        executions=result[0].get('kinase/method_executions')
+                        if executions is not None and executions.status.isin(['failed','partial']).any():raise IncompleteAugmentation(result)
+                        return result
+                    try:result,reuse=cached_stage(root/'evidence_cache',name,fingerprint,complete)
+                    except IncompleteAugmentation as error:
+                        result=error.result;reuse={'status':'not_cached','reason':'native_method_incomplete','fingerprint':fingerprint,'stage':name}
+                    evidence_reuse[name]=reuse
+                    return result
                 if name in stage_keys:
                     fingerprint=object_hash([plan['fingerprints'][stage_keys[name]],code_capture['astra_evidence_v6.py']])
+                    if name=='quantitative_evidence':fingerprint=object_hash([fingerprint,code_capture['astra_evidence.py']])
                     result,reuse=cached_stage(root/'evidence_cache',name,fingerprint,fn)
                     evidence_reuse[name]=reuse
                     return result
@@ -393,7 +450,18 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
             # analysis must not silently repeat retrieval or LLM comparison.
             finding_pin=config.get('finding_literature_pin')
             if finding_pin is None:
-                finding_pin=collect(scientific,snapshot,literature,settings=config,cache_root=root/'.astra_stage_cache')
+                previous_pin=None;previous_code=None
+                current=root/'enrichment_free_current.json'
+                if current.is_file() and not context.get('refresh_references',False):
+                    prior=json.loads(current.read_text())
+                    prior_run=str(prior.get('run_id',''))
+                    if re.fullmatch(r'g\d+-[0-9a-f]{32}',prior_run):
+                        path=root/'enrichment_free_runs'/prior_run/'references/finding_literature_pin.json'
+                        if path.is_file():previous_pin=json.loads(path.read_text())
+                        code=path.parent.parent/'reproducibility/code/ptm_shared/astra_literature.py'
+                        if code.is_file():previous_code=code.read_text()
+                finding_pin=collect(scientific,snapshot,literature,settings=config,cache_root=root/'.astra_stage_cache',frozen_pin=previous_pin,frozen_code=previous_code)
+            evidence_reuse['finding_literature']=config.get('_literature_reuse',{'status':'explicit_frozen_pin'})
             readiness['literature']=apply(scientific,finding_pin,snapshot,literature)
             readiness['reader']['literature_comparison']=readiness['literature']['status']
             plan['fingerprints']['literature']=finding_pin['request_sha256']

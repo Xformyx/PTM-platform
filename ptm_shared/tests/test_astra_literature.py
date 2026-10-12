@@ -259,6 +259,78 @@ def test_lossless_prompt_design_reference_and_execution_audit(reader):
             raw=record['resolved_prompt'];payload=json.loads(raw[raw.index('{'):])
             assert ('study_design' not in payload['study'])==equal
             assert payload['study']['canonical_study']==canonical
-            assert payload['observation']==record['search_input']['observation']
+            def expand(value):
+                if isinstance(value,dict):
+                    if set(value)=={'$observation_ref'}:return payload['observation_definitions'][value['$observation_ref']]
+                    return {k:expand(v) for k,v in value.items()}
+                return [expand(v) for v in value] if isinstance(value,list) else value
+            assert expand(payload['observation'])==record['search_input']['observation']
             assert record['comparison_execution']['status']=='completed'
             assert record['comparison_execution']['output_sha256']==hashlib.sha256(record['comparison_generation']['provider_raw_text'].encode()).hexdigest()
+
+
+def test_published_pin_reuses_executed_comparison_without_network_or_semantic_promotion(reader):
+    tables,_,snapshot=reader
+    settings={'llm_provider':'fixture','llm_model':'fixture-model'}
+    with patch('ptm_shared.finding_literature.FINDING_RETRIEVAL_BACKOFF_SECONDS',0):
+        pin=lit.collect(tables,snapshot,selection(),settings=settings,retriever=Retriever(),llm=Model())
+    frozen=copy.deepcopy(pin)
+    with patch.object(lit,'_runtime',side_effect=AssertionError('No runtime access on matching frozen pin')):
+        out=lit.collect(tables,snapshot,selection(),settings=settings,frozen_pin=pin)
+    assert out==frozen
+    assert settings['_literature_reuse']['current_queries']==0
+    assert all(c.get('claim_support_status')!='verified' for r in out['retrieval']['references'] for c in r.get('feature_comparisons',[]))
+    # A changed question or requested model cannot inherit the old comparison.
+    changed=copy.deepcopy(snapshot);changed['original']['analysis_context']['biological_question']='Changed question'
+    with patch.object(lit,'_runtime',side_effect=RuntimeError('new collection required')):
+        with pytest.raises(RuntimeError,match='new collection'):
+            lit.collect(tables,changed,selection(),settings=settings,frozen_pin=pin)
+        with pytest.raises(RuntimeError,match='new collection'):
+            lit.collect(tables,snapshot,selection(),settings={**settings,'llm_model':'new-model'},frozen_pin=pin)
+    broken=copy.deepcopy(pin);next(iter(broken['retrieval']['records'].values()))['comparison_execution']={'status':'failed'}
+    broken['sha256']=lit.object_hash({k:v for k,v in broken.items() if k!='sha256'})
+    with patch.object(lit,'_runtime',side_effect=RuntimeError('retry failed execution')):
+        with pytest.raises(RuntimeError,match='retry failed'):
+            lit.collect(tables,snapshot,selection(),settings=settings,frozen_pin=broken)
+
+
+def test_prompt_projection_roundtrips_repeated_masks_without_dropping_observations():
+    from ptm_shared.finding_literature import _prompt_observation
+    mask={'runs':['injection_'+str(i) for i in range(30)],'values':[None,0,2.3],'same_injection':True}
+    observation={'source_bindings':[mask], 'trajectory':[{'time_minutes':t,'quality':mask,'A':a} for t,a in [(1,0),(5,None),(180,-2)]]}
+    projected,definitions=_prompt_observation(observation)
+    def expand(value):
+        if isinstance(value,dict):
+            if set(value)=={'$observation_ref'}:return definitions[value['$observation_ref']]
+            return {k:expand(v) for k,v in value.items()}
+        return [expand(v) for v in value] if isinstance(value,list) else value
+    assert definitions and expand(projected)==observation
+    assert projected['source_bindings']==observation['source_bindings']
+    assert len(json.dumps([projected,definitions])) < len(json.dumps(observation))
+
+
+def test_reader_change_can_reuse_only_hash_bound_identical_execution():
+    import hashlib
+    from pathlib import Path
+    source=Path(lit.__file__).read_text()
+    prior=source.replace("'compared_no_supported_relationship'", "'old_reader_label'")
+    contract=lit._execution_contract({}, {})
+    old=copy.deepcopy(contract);old['code']['astra_literature.py']=hashlib.sha256(prior.encode()).hexdigest()
+    assert lit._compatible_contract(old,contract,prior)
+    assert not lit._compatible_contract(old,contract,None)
+    assert not lit._compatible_contract(old,contract,prior+'# unbound bytes')
+    changed=prior.replace("'raw_observation_never_present'", "'unused'").replace("'retrieved_chunks_only'", "'invented_full_text'")
+    old['code']['astra_literature.py']=hashlib.sha256(changed.encode()).hexdigest()
+    assert not lit._compatible_contract(old,contract,changed)
+
+
+def test_completed_empty_comparison_is_not_pending(reader):
+    tables,_,snapshot=reader
+    class EmptyModel(Model):
+        def generate(self,*args,**kwargs):return '{"comparisons":[]}'
+    with patch('ptm_shared.finding_literature.FINDING_RETRIEVAL_BACKOFF_SECONDS',0):
+        pin=lit.collect(tables,snapshot,selection(),retriever=Retriever(),llm=EmptyModel())
+    summary=lit.apply(tables,pin,snapshot,selection())
+    assert summary['comparison_executed_findings']==summary['selected_findings']
+    assert summary['status']=='compared_no_supported_relationship'
+    assert summary['semantically_verified_comparable_findings']==0

@@ -79,16 +79,79 @@ def _runtime(literature, settings):
         return retriever, None, {'status':'model_runtime_dependency_unavailable'}
 
 
-def collect(tables, snapshot, literature, *, settings=None, cache_root=None, retriever=None, llm=None):
+def _execution_contract(options, settings):
+    """Frozen-result reuse contract; does not assert that a live index is immutable."""
+    requested = {**options, **settings}
+    return {'version': VERSION, 'retrieval_version': RETRIEVAL_VERSION, 'prompt_version': PROMPT_VERSION,
+            'provider': requested.get('llm_provider', 'ollama'), 'model': requested.get('llm_model'),
+            'policy': (options.get('report_config') or {}).get('finding_review_policy'),
+            'code': {n: hashlib.sha256(Path(__file__).with_name(n).read_bytes()).hexdigest()
+                     for n in ('astra_literature.py', 'finding_literature.py', 'literature_cards.py')}}
+
+
+def _execution_code(source):
+    """Hash executable retrieval/export logic, excluding reader and reuse decisions."""
+    import ast
+    tree=ast.parse(source)
+    excluded={'apply','write','validate','_execution_contract','_execution_code','_compatible_contract'}
+    nodes=[]
+    for node in tree.body:
+        if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)):
+            if node.name in excluded:continue
+            if node.name=='collect':
+                # The setup and actual retrieval/export body are scientific input;
+                # the frozen-pin cache decision is not a new retrieval operation.
+                body=[]
+                for part in node.body:
+                    if isinstance(part,ast.If) and isinstance(part.test,ast.Name) and part.test.id=='frozen_pin':continue
+                    if isinstance(part,ast.Assign) and any(isinstance(t,ast.Subscript) and isinstance(t.slice,ast.Constant) and t.slice.value=='_literature_reuse' for t in part.targets):continue
+                    body.append(part)
+                nodes.extend(body)
+                continue
+        nodes.append(node)
+    return hashlib.sha256(ast.dump(ast.Module(body=nodes,type_ignores=[]),include_attributes=False).encode()).hexdigest()
+
+
+def _compatible_contract(previous, current, archived_code):
+    if previous==current:return True
+    if not archived_code:return False
+    previous=deepcopy(previous or {});current=deepcopy(current)
+    old_digest=previous.get('code',{}).pop('astra_literature.py',None)
+    current.get('code',{}).pop('astra_literature.py',None)
+    # Require the exact archived implementation bound by the old pin, then
+    # prove unchanged retrieval/export logic; never trust a version label alone.
+    return (previous==current and hashlib.sha256(archived_code.encode()).hexdigest()==old_digest and
+            _execution_code(archived_code)==_execution_code(Path(__file__).read_text()))
+
+
+def collect(tables, snapshot, literature, *, settings=None, cache_root=None, retriever=None, llm=None, frozen_pin=None, frozen_code=None):
     """Reuse the report function and checkpoint cache, then seal exported evidence.
 
     Only a complete, versioned result is cached. Failed/partial/model-unavailable
     searches can be retried; their frozen package records still replay exactly.
     """
     cards, study = inputs(tables, snapshot, literature)
-    settings = settings or {}
+    settings = settings if settings is not None else {}
     options = ((snapshot or {}).get('original', {}).get('report_options') or {})
     policy = (options.get('report_config') or {}).get('finding_review_policy')
+    contract = _execution_contract(options, settings)
+    input_hash = object_hash({'cards':cards,'study':study,'literature':literature})
+    if frozen_pin:
+        valid_hash = object_hash({k:v for k,v in frozen_pin.items() if k!='sha256'}) == frozen_pin.get('sha256')
+        records = list(frozen_pin.get('retrieval', {}).get('records', {}).values())
+        executed = all(r.get('status') not in {'retrieval_failed','budget_exhausted','not_searched'} and
+                       not r.get('partial_retrieval_failure') and
+                       not any(s.get('status')=='budget_exhausted' for s in r.get('searches', [])) and
+                       (not r.get('retrieved_count') or r.get('comparison_execution', {}).get('status')=='completed')
+                       for r in records)
+        if (valid_hash and executed and frozen_pin.get('input_sha256') == input_hash and
+                _compatible_contract(frozen_pin.get('execution_contract'), contract, frozen_code) and
+                frozen_pin.get('selected_finding_ids') == [c['finding_id'] for c in cards]):
+            settings['_literature_reuse'] = {'status':'frozen_results_reused', 'pin_sha256':frozen_pin['sha256'],
+                'current_queries':0, 'current_model_calls':0,
+                'scope':'prior_published_search_and_comparison; semantic_review_status_unchanged'}
+            return deepcopy(frozen_pin)
+    settings['_literature_reuse'] = {'status':'collect_requested', 'reason':'no_matching_complete_published_pin'}
     model = {'provider':getattr(llm,'provider',None),'model':getattr(llm,'model',None), 'prompt_version':PROMPT_VERSION,
              'status':'injected_runtime' if llm else 'not_available'}
     if retriever is None: retriever, llm, model = _runtime(literature, {**options, **settings})
@@ -127,7 +190,7 @@ def collect(tables, snapshot, literature, *, settings=None, cache_root=None, ret
         except Incomplete as e: result=e.result;reuse={'status':'not_cached','reason':'incomplete_retryable_result'}
     else: result=run()
     exported = _export_result(result,literature)
-    pin = {'schema_version':VERSION,'input_sha256':object_hash({'cards':cards,'study':study,'literature':literature}),
+    pin = {'schema_version':VERSION,'input_sha256':input_hash, 'execution_contract':contract,
            'request_sha256':fingerprint,'selected_finding_ids':[c['finding_id'] for c in cards],
            'literature_selection':deepcopy(literature),'retrieval':exported,'model':model,'cache':reuse,
            'documents':document_inventory(literature, exported), 'replay_scope':'frozen_retrieval_and_quote_anchored_proposals_not_semantic_validation'}
@@ -221,7 +284,7 @@ def apply(tables, pin, snapshot, literature):
         'read_scope_counts':dict(pd.Series([r.get('read_scope','unknown') for r in result.get('references',[])],dtype='str').value_counts().items()),
         'independent_validation':'not_performed','literature_pin_sha256':pin['sha256']}
     packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
-    packet['literature_comparison_status']='source_anchored_review_pending' if comparisons else ('internal_comparison_performed_export_restricted' if summary['internal_compared_findings'] else 'retrieved_comparison_pending' if sources else 'not_performed_no_accessible_evidence')
+    packet['literature_comparison_status']='source_anchored_review_pending' if comparisons else ('internal_comparison_performed_export_restricted' if summary['internal_compared_findings'] else 'compared_no_supported_relationship' if summary['comparison_executed_findings']==len(cards) and cards else 'retrieved_comparison_pending' if sources else 'not_performed_no_accessible_evidence')
     packet['literature']={'status_authority':'reader/literature_search.csv; inherited card status describes original card generation only',
                           'summary':summary,'pin':pin,'reference_cards':_literature_cards(result.get('references',[])),
                           'finding_records':records,'source_table':'reader/literature_sources.csv', 'comparison_table':'reader/literature_comparisons.csv'}

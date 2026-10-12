@@ -1,0 +1,637 @@
+{
+  "run_id": "g5-b2d6432b11e741ea9f998126903de0c1",
+  "manifest_files": 228,
+  "expected_profile": "astra_analysis.v6",
+  "design_preserved": true,
+  "original_inputs_preserved": true,
+  "source_pin_bytes_preserved": true,
+  "quantification_preserved": true,
+  "quant": [
+    {
+      "table": "quant/annotation_edges.csv",
+      "rows_before": 0,
+      "rows_after": 0,
+      "byte_equal": true,
+      "scope": "annotation_or_footprint",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/comparisons.csv",
+      "rows_before": 16944,
+      "rows_after": 16944,
+      "byte_equal": false,
+      "scope": "quantification",
+      "ids_values_na_equal": true,
+      "maximum_numeric_difference": 7.105427357601002e-15
+    },
+    {
+      "table": "quant/detection.csv",
+      "rows_before": 16944,
+      "rows_after": 16944,
+      "byte_equal": false,
+      "scope": "quantification",
+      "ids_values_na_equal": true,
+      "maximum_numeric_difference": 3.552713678800501e-15
+    },
+    {
+      "table": "quant/emergent_kinase_evidence.csv",
+      "rows_before": 0,
+      "rows_after": 0,
+      "byte_equal": true,
+      "scope": "annotation_or_footprint",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/form_evidence_status.csv",
+      "rows_before": 16944,
+      "rows_after": 16944,
+      "byte_equal": true,
+      "scope": "annotation_or_footprint",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/kinase_injection_omissions.csv",
+      "rows_before": 0,
+      "rows_after": 0,
+      "byte_equal": true,
+      "scope": "annotation_or_footprint",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/kinase_membership.csv",
+      "rows_before": 0,
+      "rows_after": 0,
+      "byte_equal": true,
+      "scope": "annotation_or_footprint",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/kinase_profiles.csv",
+      "rows_before": 0,
+      "rows_after": 0,
+      "byte_equal": true,
+      "scope": "annotation_or_footprint",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/kinase_sensitivity.csv",
+      "rows_before": 0,
+      "rows_after": 0,
+      "byte_equal": true,
+      "scope": "annotation_or_footprint",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/primary_A_input.csv",
+      "rows_before": 13704,
+      "rows_after": 13704,
+      "byte_equal": false,
+      "scope": "quantification",
+      "ids_values_na_equal": true,
+      "maximum_numeric_difference": 7.105427357601002e-15
+    },
+    {
+      "table": "quant/protein_contrasts.csv",
+      "rows_before": 57150,
+      "rows_after": 57150,
+      "byte_equal": false,
+      "scope": "quantification",
+      "ids_values_na_equal": true,
+      "maximum_numeric_difference": 7.105427357601002e-15
+    },
+    {
+      "table": "quant/runlevel.csv",
+      "rows_before": 59304,
+      "rows_after": 59304,
+      "byte_equal": false,
+      "scope": "quantification",
+      "ids_values_na_equal": true,
+      "maximum_numeric_difference": 3.552713678800501e-15
+    },
+    {
+      "table": "quant/site_mapping.csv",
+      "rows_before": 11614,
+      "rows_after": 11614,
+      "byte_equal": true,
+      "scope": "annotation_or_footprint",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/strict_parent_complete.csv",
+      "rows_before": 13704,
+      "rows_after": 13704,
+      "byte_equal": false,
+      "scope": "quantification",
+      "ids_values_na_equal": true,
+      "maximum_numeric_difference": 1.7763568394002505e-15
+    },
+    {
+      "table": "quant/strict_parent_paired.csv",
+      "rows_before": 13704,
+      "rows_after": 13704,
+      "byte_equal": false,
+      "scope": "quantification",
+      "ids_values_na_equal": true,
+      "maximum_numeric_difference": 1.7763568394002505e-15
+    },
+    {
+      "table": "quant/strict_parent_peptide_masks.csv",
+      "rows_before": 445712,
+      "rows_after": 445712,
+      "byte_equal": false,
+      "scope": "quantification",
+      "ids_values_na_equal": true,
+      "maximum_numeric_difference": 1.7763568394002505e-15
+    },
+    {
+      "table": "quant/strict_selected_sequences.csv",
+      "rows_before": 111311,
+      "rows_after": 111311,
+      "byte_equal": true,
+      "scope": "quantification",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/strict_unmodified_proteins.csv",
+      "rows_before": 54456,
+      "rows_after": 54456,
+      "byte_equal": false,
+      "scope": "quantification",
+      "ids_values_na_equal": true,
+      "maximum_numeric_difference": 7.105427357601002e-15
+    },
+    {
+      "table": "quant/strict_unmodified_sequences.csv",
+      "rows_before": 667866,
+      "rows_after": 667866,
+      "byte_equal": false,
+      "scope": "quantification",
+      "ids_values_na_equal": true,
+      "maximum_numeric_difference": 7.105427357601002e-15
+    },
+    {
+      "table": "quant/summary.csv",
+      "rows_before": 2824,
+      "rows_after": 2824,
+      "byte_equal": true,
+      "scope": "quantification",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/temporal_protein_summary.csv",
+      "rows_before": 18601,
+      "rows_after": 18601,
+      "byte_equal": true,
+      "scope": "quantification",
+      "ids_values_na_equal": true
+    },
+    {
+      "table": "quant/validation_panel.csv",
+      "rows_before": 0,
+      "rows_after": 0,
+      "byte_equal": true,
+      "scope": "annotation_or_footprint",
+      "ids_values_na_equal": true
+    }
+  ],
+  "contrast_executions": [
+    {
+      "contrast_id": "contrast_aea4869f398c5584",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_f541e2f63f702f17",
+      "target_condition_id": "condition_f541e2f63f702f17",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 1.0,
+      "reference_time_min": 0.0,
+      "target_label": "1min",
+      "reference_label": "Control",
+      "pairing": "unknown",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "status": "executed",
+      "parameters": {
+        "input_unit": "one_per_measurement_group",
+        "min_n_hits": 4,
+        "min_quantile": 0.95,
+        "n_proc": 1,
+        "n_top_kinases": 5,
+        "permutations": 10000,
+        "ranking_statistic": "A",
+        "residue": "ST",
+        "seed": 1729,
+        "source_pin_scope": "declared_local_resource",
+        "upstream_activation_evidence": false,
+        "zero_policy": "official_native_excludes_zero"
+      },
+      "included_joint_A_forms": 2276,
+      "site_eligible_forms": 400,
+      "site_eligible_unique_sites": 360,
+      "scored_forms": 390,
+      "scored_unique_sites": 350,
+      "native_ranked_groups": 353,
+      "selected_memberships": 1595,
+      "assay_results": 303,
+      "result_statuses": {
+        "computed_method_enrichment": 153,
+        "insufficient_coverage": 150
+      },
+      "input_hash": "2bbf528ea51c9ad5d3a0733db348fad89e264f60a5a5657d68531885e10b2ddd"
+    },
+    {
+      "contrast_id": "contrast_4147ebd64e7ecf80",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_bd68c45f543c5a83",
+      "target_condition_id": "condition_bd68c45f543c5a83",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 5.0,
+      "reference_time_min": 0.0,
+      "target_label": "5min",
+      "reference_label": "Control",
+      "pairing": "unknown",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "status": "executed",
+      "parameters": {
+        "input_unit": "one_per_measurement_group",
+        "min_n_hits": 4,
+        "min_quantile": 0.95,
+        "n_proc": 1,
+        "n_top_kinases": 5,
+        "permutations": 10000,
+        "ranking_statistic": "A",
+        "residue": "ST",
+        "seed": 1729,
+        "source_pin_scope": "declared_local_resource",
+        "upstream_activation_evidence": false,
+        "zero_policy": "official_native_excludes_zero"
+      },
+      "included_joint_A_forms": 2310,
+      "site_eligible_forms": 399,
+      "site_eligible_unique_sites": 360,
+      "scored_forms": 389,
+      "scored_unique_sites": 350,
+      "native_ranked_groups": 357,
+      "selected_memberships": 1612,
+      "assay_results": 303,
+      "result_statuses": {
+        "computed_method_enrichment": 158,
+        "insufficient_coverage": 145
+      },
+      "input_hash": "75bb8c2eb7d00225a6f45c0a3b748cfda9f5584f6742ba86d7d914c6ad76a399"
+    },
+    {
+      "contrast_id": "contrast_eb2f813f825c4ccb",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_d9c5c91ebf3d5bfc",
+      "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 15.0,
+      "reference_time_min": 0.0,
+      "target_label": "15min",
+      "reference_label": "Control",
+      "pairing": "unknown",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "status": "executed",
+      "parameters": {
+        "input_unit": "one_per_measurement_group",
+        "min_n_hits": 4,
+        "min_quantile": 0.95,
+        "n_proc": 1,
+        "n_top_kinases": 5,
+        "permutations": 10000,
+        "ranking_statistic": "A",
+        "residue": "ST",
+        "seed": 1729,
+        "source_pin_scope": "declared_local_resource",
+        "upstream_activation_evidence": false,
+        "zero_policy": "official_native_excludes_zero"
+      },
+      "included_joint_A_forms": 2306,
+      "site_eligible_forms": 403,
+      "site_eligible_unique_sites": 363,
+      "scored_forms": 394,
+      "scored_unique_sites": 354,
+      "native_ranked_groups": 357,
+      "selected_memberships": 1611,
+      "assay_results": 303,
+      "result_statuses": {
+        "computed_method_enrichment": 155,
+        "insufficient_coverage": 148
+      },
+      "input_hash": "f7c18219dd86793da450fc1c04a93c89283ed9e6bf98c3d5103a9288a0b3cb12"
+    },
+    {
+      "contrast_id": "contrast_c15817d77868a59a",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_c96e6ecd71344ff2",
+      "target_condition_id": "condition_c96e6ecd71344ff2",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 30.0,
+      "reference_time_min": 0.0,
+      "target_label": "30min",
+      "reference_label": "Control",
+      "pairing": "unknown",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "status": "executed",
+      "parameters": {
+        "input_unit": "one_per_measurement_group",
+        "min_n_hits": 4,
+        "min_quantile": 0.95,
+        "n_proc": 1,
+        "n_top_kinases": 5,
+        "permutations": 10000,
+        "ranking_statistic": "A",
+        "residue": "ST",
+        "seed": 1729,
+        "source_pin_scope": "declared_local_resource",
+        "upstream_activation_evidence": false,
+        "zero_policy": "official_native_excludes_zero"
+      },
+      "included_joint_A_forms": 2299,
+      "site_eligible_forms": 397,
+      "site_eligible_unique_sites": 357,
+      "scored_forms": 387,
+      "scored_unique_sites": 347,
+      "native_ranked_groups": 354,
+      "selected_memberships": 1601,
+      "assay_results": 303,
+      "result_statuses": {
+        "computed_method_enrichment": 156,
+        "insufficient_coverage": 147
+      },
+      "input_hash": "041faf4cf906b46f409e6608093859515cfbdeadb74520b7c4ee2dd75c1b46e7"
+    },
+    {
+      "contrast_id": "contrast_fd5240cdb335e779",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_824bfd9a5e97c3aa",
+      "target_condition_id": "condition_824bfd9a5e97c3aa",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 60.0,
+      "reference_time_min": 0.0,
+      "target_label": "60min",
+      "reference_label": "Control",
+      "pairing": "unknown",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "status": "executed",
+      "parameters": {
+        "input_unit": "one_per_measurement_group",
+        "min_n_hits": 4,
+        "min_quantile": 0.95,
+        "n_proc": 1,
+        "n_top_kinases": 5,
+        "permutations": 10000,
+        "ranking_statistic": "A",
+        "residue": "ST",
+        "seed": 1729,
+        "source_pin_scope": "declared_local_resource",
+        "upstream_activation_evidence": false,
+        "zero_policy": "official_native_excludes_zero"
+      },
+      "included_joint_A_forms": 2215,
+      "site_eligible_forms": 390,
+      "site_eligible_unique_sites": 352,
+      "scored_forms": 381,
+      "scored_unique_sites": 343,
+      "native_ranked_groups": 348,
+      "selected_memberships": 1570,
+      "assay_results": 303,
+      "result_statuses": {
+        "computed_method_enrichment": 152,
+        "insufficient_coverage": 151
+      },
+      "input_hash": "fd65bcc65a78fce2aef8398a43f8fe938b9e386115f5d43d398c7275940ae398"
+    },
+    {
+      "contrast_id": "contrast_d6757f4b8563521f",
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_a9adc1cf0158f4a6",
+      "target_condition_id": "condition_a9adc1cf0158f4a6",
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "time_min": 180.0,
+      "reference_time_min": 0.0,
+      "target_label": "180min",
+      "reference_label": "Control",
+      "pairing": "unknown",
+      "comparison_interpretation": "target_vs_declared_reference_condition_not_necessarily_time_zero",
+      "status": "executed",
+      "parameters": {
+        "input_unit": "one_per_measurement_group",
+        "min_n_hits": 4,
+        "min_quantile": 0.95,
+        "n_proc": 1,
+        "n_top_kinases": 5,
+        "permutations": 10000,
+        "ranking_statistic": "A",
+        "residue": "ST",
+        "seed": 1729,
+        "source_pin_scope": "declared_local_resource",
+        "upstream_activation_evidence": false,
+        "zero_policy": "official_native_excludes_zero"
+      },
+      "included_joint_A_forms": 2298,
+      "site_eligible_forms": 392,
+      "site_eligible_unique_sites": 353,
+      "scored_forms": 383,
+      "scored_unique_sites": 344,
+      "native_ranked_groups": 351,
+      "selected_memberships": 1582,
+      "assay_results": 303,
+      "result_statuses": {
+        "computed_method_enrichment": 153,
+        "insufficient_coverage": 150
+      },
+      "input_hash": "a42a7963757d9b4e3561f31ad72cc02d1ed7a39e3121df58e8aabc1be6ca1459"
+    }
+  ],
+  "literature": {
+    "anchored_proposals": 0,
+    "cache": {
+      "fingerprint": "f44d98c1b0d66b537ed59ff7c5e668df96e6fa4bca673d77a3557baf74196eda",
+      "stage": "finding_literature",
+      "status": "computed"
+    },
+    "collections": 1,
+    "comparison_executed_findings": 15,
+    "comparison_failed_findings": 0,
+    "comparison_validation": "source_anchors_only_semantic_review_required",
+    "cost": {
+      "cache_entries": 46,
+      "model_calls": 15,
+      "queries": 46
+    },
+    "documents_read": 6,
+    "export_restricted_chunks": 187,
+    "independent_validation": "not_performed",
+    "internal_compared_findings": 0,
+    "literature_pin_sha256": "904baece848c067fa3745f01d9a2e3df58293c007fdce2185f1b4e7495c2f916",
+    "model": {
+      "model": "ptm-round08b-qwen3-14b-40k:latest",
+      "prompt_version": "finding_comparison.v6.2",
+      "provider": "ollama",
+      "status": "available"
+    },
+    "publications_read": 6,
+    "read_scope_counts": {
+      "full_text_excerpt": 217
+    },
+    "schema_version": "astra_finding_literature.v1",
+    "selected_findings": 15,
+    "semantically_verified_comparable_findings": 0,
+    "source_chunks_read": 25,
+    "status": "retrieved_comparison_pending",
+    "status_counts": {
+      "not_explained_by_retrieved_evidence": 15
+    }
+  },
+  "temporal_coverage": {
+    "linked": 15
+  },
+  "stage_reuse": {
+    "augment_evidence": {
+      "fingerprint": "e3684a70e492beb065c2a0f54d1095ca0a7835e2fee0f76c0b9a90bcf02105db",
+      "stage": "augment_evidence",
+      "status": "computed"
+    },
+    "discover_regulators": {
+      "fingerprint": "0699dcd24ee1e82fb3ef7cb9a0d38ac7e6fe2b247c8e1e126451928def27d85b",
+      "stage": "discover_regulators",
+      "status": "reused"
+    },
+    "finding_literature": {
+      "reason": "no_matching_complete_published_pin",
+      "status": "collect_requested"
+    },
+    "identity_localization": {
+      "fingerprint": "0699dcd24ee1e82fb3ef7cb9a0d38ac7e6fe2b247c8e1e126451928def27d85b",
+      "stage": "identity_localization",
+      "status": "reused"
+    },
+    "integrate_temporal_layers": {
+      "fingerprint": "30d6359304a675566a5474538d3ecf01356330651cef4afb16143b193ed37cfb",
+      "stage": "integrate_temporal_layers",
+      "status": "reused"
+    },
+    "normalization_sensitivity": {
+      "fingerprint": "quant_v6_db38591e52984a4ae732",
+      "origin_analysis_run_id": "g1-d15a6db9544d4b0780bd958f0ef574ed",
+      "status": "reused"
+    },
+    "quant": {
+      "fingerprint": "quant_v6_ea2f4c2720fbeb9f5704",
+      "origin_analysis_run_id": "g1-d15a6db9544d4b0780bd958f0ef574ed",
+      "status": "reused"
+    },
+    "quantitative_evidence": {
+      "fingerprint": "3de36393913ee14b8a68ca6325d2fb88ce7664f5fbfe4d082a4bca5a2e1147e6",
+      "stage": "quantitative_evidence",
+      "status": "computed"
+    },
+    "score_regulator_footprints": {
+      "fingerprint": "0699dcd24ee1e82fb3ef7cb9a0d38ac7e6fe2b247c8e1e126451928def27d85b",
+      "stage": "score_regulator_footprints",
+      "status": "reused"
+    }
+  },
+  "native_runtime": [
+    {
+      "contrast_id": "contrast_4147ebd64e7ecf80",
+      "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/357 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 180/357 [00:01<00:01, 123.93it/s]\n     Scoring phosphosites     :  76%|██████▊  | 270/357 [00:02<00:00, 99.40it/s]\n     Scoring phosphosites     : 100%|████████| 357/357 [00:02<00:00, 136.84it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  29%|▊  | 2900/10000 [00:00<00:00, 28157.25it/s]\n    Performing permutations   :  29%|▊  | 2900/10000 [00:14<00:00, 28157.25it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:19, 262.04it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:31<00:12, 202.96it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:44<00:12, 202.96it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 183.30it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 212.97it/s]\n   Computing activity scores  : DONE\n\n",
+      "method": "PhosX",
+      "runtime_seconds": 68.21788362506777,
+      "status": "executed"
+    },
+    {
+      "contrast_id": "contrast_aea4869f398c5584",
+      "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/353 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 178/353 [00:01<00:01, 127.78it/s]\n     Scoring phosphosites     :  76%|██████  | 267/353 [00:02<00:00, 102.48it/s]\n     Scoring phosphosites     : 100%|████████| 353/353 [00:02<00:00, 141.07it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  29%|▊  | 2899/10000 [00:00<00:00, 27193.16it/s]\n    Performing permutations   :  29%|▊  | 2899/10000 [00:15<00:00, 27193.16it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:18, 269.15it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:30<00:11, 208.35it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:45<00:11, 208.35it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 188.15it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 218.61it/s]\n   Computing activity scores  : DONE\n\n",
+      "method": "PhosX",
+      "runtime_seconds": 66.27262374991551,
+      "status": "executed"
+    },
+    {
+      "contrast_id": "contrast_c15817d77868a59a",
+      "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/354 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 178/354 [00:01<00:01, 124.95it/s]\n     Scoring phosphosites     :  75%|██████  | 267/354 [00:02<00:00, 100.52it/s]\n     Scoring phosphosites     : 100%|████████| 354/354 [00:02<00:00, 138.69it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  29%|▊  | 2899/10000 [00:00<00:00, 27099.83it/s]\n    Performing permutations   :  29%|▊  | 2899/10000 [00:15<00:00, 27099.83it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:18, 264.23it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:31<00:12, 204.63it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:45<00:12, 204.63it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 185.18it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 215.03it/s]\n   Computing activity scores  : DONE\n\n",
+      "method": "PhosX",
+      "runtime_seconds": 67.42445074999705,
+      "status": "executed"
+    },
+    {
+      "contrast_id": "contrast_d6757f4b8563521f",
+      "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/351 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 176/351 [00:01<00:01, 127.38it/s]\n     Scoring phosphosites     :  75%|██████  | 264/351 [00:02<00:00, 101.99it/s]\n     Scoring phosphosites     : 100%|████████| 351/351 [00:02<00:00, 141.22it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  36%|█  | 3599/10000 [00:00<00:00, 34183.12it/s]\n    Performing permutations   :  36%|█  | 3599/10000 [00:15<00:00, 34183.12it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:19, 257.94it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:30<00:12, 204.65it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:45<00:12, 204.65it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 187.02it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 220.87it/s]\n   Computing activity scores  : DONE\n\n",
+      "method": "PhosX",
+      "runtime_seconds": 65.69754458381794,
+      "status": "executed"
+    },
+    {
+      "contrast_id": "contrast_eb2f813f825c4ccb",
+      "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/357 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 180/357 [00:01<00:01, 128.41it/s]\n     Scoring phosphosites     :  76%|██████  | 270/357 [00:02<00:00, 103.37it/s]\n     Scoring phosphosites     : 100%|████████| 357/357 [00:02<00:00, 142.21it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  29%|▊  | 2900/10000 [00:00<00:00, 27305.20it/s]\n    Performing permutations   :  29%|▊  | 2900/10000 [00:15<00:00, 27305.20it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:18, 266.13it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:30<00:12, 206.27it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:45<00:12, 206.27it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 186.30it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:46<00:00, 216.43it/s]\n   Computing activity scores  : DONE\n\n",
+      "method": "PhosX",
+      "runtime_seconds": 67.06918783299625,
+      "status": "executed"
+    },
+    {
+      "contrast_id": "contrast_fd5240cdb335e779",
+      "log": "     Loading input objects    : DONE\n\n     Scoring phosphosites     :   0%|                   | 0/348 [00:00<?, ?it/s]\n     Scoring phosphosites     :  50%|████    | 174/348 [00:01<00:01, 123.84it/s]\n     Scoring phosphosites     :  75%|██████  | 261/348 [00:02<00:00, 100.89it/s]\n     Scoring phosphosites     : 100%|█████████| 348/348 [00:03<00:00, 92.10it/s]\n     Scoring phosphosites     : 100%|█████████| 348/348 [00:03<00:00, 97.37it/s]\n Assigning kinases to targets : DONE\n\n    Performing permutations   :   0%|                 | 0/10000 [00:00<?, ?it/s]\n    Performing permutations   :  36%|█  | 3598/10000 [00:00<00:00, 32845.24it/s]\n    Performing permutations   :  36%|█  | 3598/10000 [00:15<00:00, 32845.24it/s]\n    Performing permutations   :  50%|██▌  | 5000/10000 [00:15<00:19, 258.61it/s]\n    Performing permutations   :  75%|███▊ | 7500/10000 [00:30<00:12, 205.11it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 187.77it/s]\n    Performing permutations   : 100%|████| 10000/10000 [00:45<00:00, 221.65it/s]\n   Computing activity scores  : DONE\n\n",
+      "method": "PhosX",
+      "runtime_seconds": 65.5164917500224,
+      "status": "executed"
+    }
+  ],
+  "archive_sha256": "0880e58baf75372c0f57a96e85770402accae5addb323689fa8a8e1cadec6536",
+  "actual_UI_download_matches_pointer": true,
+  "local_order_id": 73,
+  "production_verified": false,
+  "independent_parity": {
+    "implementation": "independent_official_functions",
+    "version": "0.23.1",
+    "contrast_id": "contrast_d6757f4b8563521f",
+    "permutations": 10000,
+    "seed": 1729,
+    "upstream_activation_evidence": false,
+    "matrix_sha256": "7d18a78d6efc45925aacae9c62ea26c5d7c22519eb856b2891debeed0ea42c6d",
+    "background_sha256": "487beac611126c973c36b3b01161991a7c01d08e8d00f764136eb2c45aac1c11",
+    "input_hash": "a42a7963757d9b4e3561f31ad72cc02d1ed7a39e3121df58e8aabc1be6ca1459",
+    "eligible_sites": 383,
+    "excluded_sites": 9,
+    "measurement_groups": 351,
+    "native_evaluable_kinases": 153,
+    "atol": 1e-12,
+    "rtol": 1e-12,
+    "passed": true,
+    "scored_rows_compared": 116049,
+    "native_results_compared": 303,
+    "native_membership_rows_compared": 106353,
+    "maximum_absolute_differences": {
+      "raw_score": 0.0,
+      "percentile": 0.0,
+      "native_score_p_q": 0.0
+    },
+    "skip_count": 0,
+    "comparison_scope": "raw_score_percentile_selection_native_activity_p_q_and_membership"
+  },
+  "reader_replay": {
+    "passed": true,
+    "files": 21,
+    "network_requests": 0,
+    "repository_code_used": false
+  },
+  "tests": {
+    "unique_tests": 22,
+    "passed": 22,
+    "initial_fixture_failures_corrected": 2
+  },
+  "scientific_limits": [
+    "localization_missing",
+    "technical_only",
+    "uncalibrated",
+    "no_causal_validation"
+  ],
+  "reader_status_correction": "completed empty comparison now compared_no_supported_relationship; g5 archive preserved; corrected reader generated in 11-C/11-D",
+  "prior_run_comparison": {
+    "quant22_byte_identical": true,
+    "selected15_byte_identical": true,
+    "67_scientific_tables": {
+      "66_byte_identical": true,
+      "kinase_candidate_edges": "170563x53 values and NA equal; serialization only"
+    }
+  },
+  "source_policy": "existing research_full partial pin reused; no refresh"
+}

@@ -204,6 +204,14 @@ async def _clear_order_locks(order_id: int) -> int:
         key = pattern.format(order_id=order_id)
         if await r.delete(key):
             cleared += 1
+    # Preprocessing owns its stage lock in the Celery broker DB, unlike report
+    # locks/run-generation keys in REDIS_URL. Cancel/restart must clear both.
+    import redis.asyncio as aioredis
+    broker = aioredis.from_url(get_settings().CELERY_BROKER_URL, decode_responses=True)
+    try:
+        cleared += int(bool(await broker.delete(f"preprocessing_lock:{order_id}")))
+    finally:
+        await broker.aclose()
     if cleared:
         logger.info(f"Cleared {cleared} Redis lock(s) for order {order_id}")
     return cleared

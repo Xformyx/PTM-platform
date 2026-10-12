@@ -3,6 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 ENV PYTHONPATH=/app:/opt
+ARG INSTALL_ASTRA_OFFICIAL=false
 
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -19,6 +20,7 @@ RUN set -eux; \
     done; \
     apt-get install -y --no-install-recommends \
       gcc \
+      git \
       default-libmysqlclient-dev \
       pkg-config \
       poppler-utils \
@@ -38,12 +40,14 @@ RUN set -eux; \
 ARG INSTALL_DEV_DEPS=true
 COPY workers/pyproject.toml ./
 COPY ptm_shared /opt/ptm_shared
-RUN INSTALL_DEV_DEPS="$INSTALL_DEV_DEPS" python3 -c "\
+RUN INSTALL_DEV_DEPS="$INSTALL_DEV_DEPS" INSTALL_ASTRA_OFFICIAL="$INSTALL_ASTRA_OFFICIAL" python3 -c "\
 import os, tomllib, subprocess, sys; \
 spec = tomllib.load(open('pyproject.toml','rb'))['project']; \
 deps = list(spec['dependencies']); \
 deps += spec.get('optional-dependencies', {}).get('dev', []) \
     if os.environ['INSTALL_DEV_DEPS'].lower() in ('1', 'true', 'yes') else []; \
+deps += spec.get('optional-dependencies', {}).get('astra-official', []) \
+    if os.environ['INSTALL_ASTRA_OFFICIAL'].lower() in ('1', 'true', 'yes') else []; \
 subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--no-cache-dir'] + deps)"
 
 # ── Layer: Source code ───────────────────────────────────────────────────────

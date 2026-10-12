@@ -10,7 +10,76 @@ from app.models.rag_collection import RagCollection, RagDocument
 from ptm_shared.astra_inputs import capture_order
 
 
+def _attach_registered_specificity(order, reference_root):
+    """Connect an explicitly configured local resource to the existing Order field.
+
+    No scoring or resource acquisition occurs here. Content-addressed copies are
+    shared by API and worker; an uploaded/persisted manifest always takes priority.
+    """
+    from copy import deepcopy
+    from app.config import get_settings
+    from ptm_shared.annotation_registry import digest
+    from ptm_shared.contrast_quantification import ContrastEstimator
+    from ptm_shared.official_specificity import PHOSX_VERSION, PHOSX_COMMIT
+    settings = get_settings()
+    context = deepcopy(order.analysis_context or {})
+    configured = getattr(settings, 'ASTRA_SPECIFICITY_MANIFEST_PATH', '')
+    if (not configured or getattr(order, 'specificity_manifest_path', None) or
+            context.get('quantitation_export_mode') != 'astra_analysis.v6'):
+        return
+    design = context.get('study_design') or {}
+    if design.get('study', {}).get('ptm_type') not in {'phosphorylation', 'phospho'}:
+        return
+    path = Path(configured)
+    expected = getattr(settings, 'ASTRA_SPECIFICITY_MANIFEST_SHA256', '')
+    if not expected or not path.is_file() or digest(path) != expected:
+        raise ValueError('registered_specificity_manifest_checksum_mismatch')
+    resource = json.loads(path.read_text())
+    if (resource.get('adapter') != 'phosx_official.v1' or
+            resource.get('local_use_permission') != 'permitted' or
+            resource.get('derived_export_permission') != 'permitted'):
+        raise ValueError('registered_specificity_requires_official_adapter_and_recorded_permissions')
+    destination = Path(reference_root) / 'specificity_objects' / expected
+    files = [(path, Path(path.name), expected)]
+    for name in ('matrix', 'background'):
+        relative = Path(resource[name + '_file'])
+        source = path.parent / relative
+        if (relative.is_absolute() or '..' in relative.parts or relative == Path(path.name) or
+                not source.is_file() or digest(source) != resource[name + '_sha256']):
+            raise ValueError('registered_specificity_resource_checksum_mismatch:' + name)
+        files.append((source, relative, resource[name + '_sha256']))
+    for source, relative, sha in files:
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            temporary = target.with_name('.' + target.name + '-' + uuid4().hex)
+            shutil.copyfile(source, temporary)
+            if digest(temporary) != sha:
+                raise ValueError('registered_specificity_changed_during_capture')
+            temporary.replace(target)
+        if digest(target) != sha:
+            raise ValueError('registered_specificity_stored_checksum_mismatch')
+    estimator = ContrastEstimator(design)
+    metadata = [estimator.metadata(c) for c in design['contrasts']]
+    metadata.sort(key=lambda r: (r['arm_id'], r['reference_condition_id'], r['pairing'],
+                                r['time_min'] is None, r['time_min'] or 0, r['contrast_id']))
+    science = context.setdefault('science', {})
+    method = science.setdefault('official_methods', {}).setdefault('PhosX', {})
+    method.setdefault('contrast_ids', [r['contrast_id'] for r in metadata])
+    method.setdefault('permutations', 10000)
+    method.setdefault('seed', 1729)
+    science['resource_registration'] = {
+        'source': 'configured_server_resource', 'manifest_sha256': expected,
+        'matrix_sha256': resource['matrix_sha256'], 'background_sha256': resource['background_sha256'],
+        'method_version': PHOSX_VERSION, 'method_commit': PHOSX_COMMIT,
+        'scope_policy': 'declared_contrasts_existing_scope_preserved.v1',
+    }
+    order.specificity_manifest_path = str(destination / path.name)
+    order.analysis_context = context
+
+
 async def prepare_astra_inputs(order, db, reference_root):
+    _attach_registered_specificity(order, reference_root)
     snapshot=capture_order(order)
     context=order.analysis_context or {}
     attachment_hashes=sorted(r.get('sha256','') for r in context.get('research_attachment_records',[]))
