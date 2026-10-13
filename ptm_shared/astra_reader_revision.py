@@ -15,6 +15,41 @@ from .generic_workflow import json_write, object_hash
 from . import astra_literature as literature_stage
 
 
+def _card_without_display_order(card):
+    card = deepcopy(card)
+    grid = card.get('condition_grid')
+    conditions = list(grid.get('conditions') or []) if isinstance(grid, dict) else []
+    if isinstance(grid, dict):
+        grid.pop('time_order_status', None)
+        grid.pop('conditions', None)
+    bindings = card.pop('source_bindings', None) or []
+    trajectory = card.pop('trajectory', None) or []
+    return card, conditions, bindings, trajectory
+
+
+def _row_multiset(rows):
+    return sorted(json.dumps(row, ensure_ascii=False, sort_keys=True, default=str) for row in rows)
+
+
+def assert_reader_time_projection_only(source_csv, revised_csv):
+    """cards.csv may change only by a recorded-time permutation and its unresolved flag."""
+    before = pd.read_csv(source_csv, low_memory=False)
+    after = pd.read_csv(revised_csv, low_memory=False)
+    if list(before.card_id.astype(str)) != list(after.card_id.astype(str)):
+        raise ValueError('Reader card identity changed')
+    if list(before.form_id.astype(str)) != list(after.form_id.astype(str)):
+        raise ValueError('Reader card form changed')
+    if list(before.selected.astype(str).str.lower()) != list(after.selected.astype(str).str.lower()):
+        raise ValueError('Reader selection changed')
+    for raw_before, raw_after in zip(before.card_json, after.card_json):
+        left, left_conditions, left_bindings, left_trajectory = _card_without_display_order(json.loads(raw_before))
+        right, right_conditions, right_bindings, right_trajectory = _card_without_display_order(json.loads(raw_after))
+        if left != right or set(left_conditions) != set(right_conditions):
+            raise ValueError('Reader card changed beyond recorded time order')
+        if _row_multiset(left_bindings) != _row_multiset(right_bindings) or _row_multiset(left_trajectory) != _row_multiset(right_trajectory):
+            raise ValueError('Reader time-row values changed')
+
+
 def read_tables(root):
     dictionary=json.loads((Path(root)/'reproducibility/data_dictionary.json').read_text())
     return {name[:-4]:pd.read_csv(Path(root)/name,low_memory=False,float_precision='round_trip',
@@ -56,15 +91,24 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, checkpoint=lam
     if (source/'references/finding_literature_pin.json').is_file():
         literature_stage.apply(tables,json.loads((source/'references/finding_literature_pin.json').read_text()),
             snapshot,json.loads((source/'references/literature_pin.json').read_text()))
-    attach_temporal(tables);attach_reading_guidance(tables);validate_reader(tables)
+    attach_temporal(tables);attach_reading_guidance(tables)
+    from .measured_feature_cards import apply_recorded_time_order
+    apply_recorded_time_order(tables)
+    validate_reader(tables)
     baseline=json.loads((source/'reproducibility/data_dictionary.json').read_text())
     dictionary=deepcopy(baseline)
-    update=write_tables({'reader/packet':tables['reader/packet']},directory)
-    update['reader/packet.csv'].update(unique_key=baseline['reader/packet.csv']['unique_key'],row_grain=baseline['reader/packet.csv']['row_grain'])
+    update=write_tables({'reader/packet':tables['reader/packet'],'reader/cards':tables['reader/cards']},directory)
+    for name in ('reader/packet.csv','reader/cards.csv'):
+        update[name].update(unique_key=baseline[name]['unique_key'],row_grain=baseline[name]['row_grain'])
     dictionary.update(update);json_write(directory/'reproducibility/data_dictionary.json',dictionary)
     artifacts=write_reader(directory,tables)
-    # No source table, card, selection, literature result or figure may change.
-    preserved=[name for name in baseline if name!='reader/packet.csv']
+    if 'reader/literature_sources' in tables and json.loads(tables['reader/packet'].iloc[0].packet_json).get('literature'):
+        literature_stage.write(directory,tables,pins=False)
+        artifacts=sorted(set(artifacts+['reader/LITERATURE.md']))
+    assert_reader_time_projection_only(source/'reader/cards.csv', directory/'reader/cards.csv')
+    # Source tables, selection, literature decisions and figures stay byte-identical.
+    # reader/cards.csv may change only by the recorded-time permutation checked above.
+    preserved=[name for name in baseline if name not in {'reader/packet.csv','reader/cards.csv'}]
     manifest=json.loads((source/'manifest.json').read_text())
     if refresh_figures:
         from .astra_figures import figure_packet

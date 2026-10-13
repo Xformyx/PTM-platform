@@ -75,6 +75,122 @@ def _condition_sort_key(value: str) -> tuple[int, float, str]:
     return (1, minutes if minutes is not None else math.inf, lowered)
 
 
+def _condition_order_key(value: str, design_conditions: Iterable[Mapping[str, Any]] = ()) -> tuple[int, float, str]:
+    """조건 목록을 기록된 time_minutes 숫자 순으로 둔다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «저장된 결과의 reader 연결»
+    사전등록: 2026-10-13. g7 authoring packet의 조건 문자열이 15, 180, 1, 30, 5, 60분으로 남은 것을 본 뒤. 탐색적. primary 승격 금지.
+    해석 한계: 같은 조건에 기록된 시간이 하나만 있을 때만 그 값을 쓴다. 그림과 수치표가 이미 쓰는 time_minutes 정렬과 선정 점수는 바꾸지 않는다.
+    주장 금지: 이 순서로 insulin cascade나 kinase 활성을 구성하지 않는다.
+    """
+    base = _condition_sort_key(value)
+    recorded = []
+    for item in design_conditions:
+        if not isinstance(item, Mapping) or str(item.get("condition")) != str(value):
+            continue
+        explicit = item.get("time_minutes")
+        if explicit is None:
+            continue
+        try:
+            minutes = float(explicit)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(minutes):
+            recorded.append(minutes)
+    unique = set(recorded)
+    if len(unique) == 1:
+        return (base[0], unique.pop(), base[2])
+    return base
+
+
+def _finite_minutes(value: Any) -> float | None:
+    try:
+        minutes = float(value)
+    except (TypeError, ValueError):
+        return None
+    return minutes if math.isfinite(minutes) else None
+
+
+def _recorded_minutes_by_label(card: Mapping[str, Any]) -> dict[str, set[float | None]]:
+    grouped: dict[str, set[float | None]] = defaultdict(set)
+    for point in card.get("trajectory") or []:
+        if not isinstance(point, Mapping):
+            continue
+        label = point.get("condition")
+        if label is None:
+            continue
+        grouped[str(label)].add(_finite_minutes(point.get("time_minutes")))
+    return grouped
+
+
+def project_recorded_time_order(card: dict) -> dict:
+    """저장된 숫자 시간으로 한 카드의 소비용 시간 목록만 다시 배열한다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «저장된 결과의 reader 연결»
+    사전등록: 2026-10-13. g7 condition_grid가 15, 180, 1, 30, 5, 60분으로 남은 것을 본 뒤. 탐색적. primary 승격 금지.
+    해석 한계: 조건마다 기록된 시간이 하나만 있을 때만 순서를 바꾼다. 값, 결측, ID, 선정 점수는 옮기지 않는다.
+    주장 금지: 이 순서로 insulin cascade나 kinase 활성을 구성하지 않는다.
+    """
+    grid = card.get("condition_grid")
+    if isinstance(grid, dict) and isinstance(grid.get("conditions"), list):
+        grouped = _recorded_minutes_by_label(card)
+        resolved = []
+        unresolved = False
+        for index, label in enumerate(grid["conditions"]):
+            recorded = {minutes for minutes in grouped.get(str(label), set()) if minutes is not None}
+            if str(label) not in grouped or None in grouped.get(str(label), set()) or len(recorded) != 1:
+                unresolved = True
+                break
+            resolved.append((next(iter(recorded)), index, label))
+        if unresolved:
+            grid["time_order_status"] = "unresolved_recorded_time"
+        else:
+            grid["conditions"] = [label for _, _, label in sorted(resolved)]
+            grid.pop("time_order_status", None)
+    for key, time_key in (("trajectory", "time_minutes"), ("source_bindings", "time_min")):
+        rows = card.get(key)
+        if not isinstance(rows, list) or not rows:
+            continue
+        keyed = []
+        if any(_finite_minutes(row.get(time_key) if isinstance(row, Mapping) else None) is None for row in rows):
+            continue
+        for index, row in enumerate(rows):
+            keyed.append((_finite_minutes(row.get(time_key)), index, row))
+        card[key] = [row for _, _, row in sorted(keyed)]
+    return card
+
+
+def apply_recorded_time_order(tables: dict) -> None:
+    """Packet과 cards.csv의 같은 card_id에 한 투영 결과를 쓴다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «저장된 결과의 reader 연결»
+    사전등록: 2026-10-13. 저장 reader revision은 build_feature_observation_cards를 다시 호출하지 않는다. 탐색적. primary 승격 금지.
+    해석 한계: 표시 순서만 바꾼다. 정량, finding 선정, 문헌 검색을 다시 실행하지 않는다.
+    주장 금지: 카드 ID를 바꾸거나 시간 순서를 새 측정으로 보고하지 않는다.
+    """
+    from .astra_card_inputs import encode
+    packet_frame = tables["reader/packet"]
+    packet = json.loads(packet_frame.iloc[0].packet_json)
+    packet_cards = {card["card_id"]: card for card in packet.get("reader_cards") or [] if card.get("card_id")}
+    updated = []
+    for raw in tables["reader/cards"]["card_json"]:
+        original = json.loads(raw)
+        card = json.loads(raw)
+        project_recorded_time_order(card)
+        normalized = json.loads(encode(card))
+        if normalized == original:
+            updated.append(raw)
+            continue
+        updated.append(encode(normalized))
+        target = packet_cards.get(original.get("card_id"))
+        if target is not None:
+            target.clear()
+            target.update(normalized)
+    tables["reader/cards"] = tables["reader/cards"].copy()
+    tables["reader/cards"]["card_json"] = updated
+    packet_frame.loc[packet_frame.index[0], "packet_json"] = json.dumps(packet, ensure_ascii=False, sort_keys=True)
+
+
 def _condition_rows(row: Mapping[str, Any]) -> list[dict]:
     condition_data = row.get("condition_data")
     if isinstance(condition_data, list) and condition_data:
@@ -289,7 +405,10 @@ def build_feature_observation_cards(
     design_conditions = (state.get("sample_manifest") or {}).get("conditions") or []
     declared = [str(d["condition"]) for d in design_conditions if isinstance(d, Mapping) and d.get("condition")]
     grid_source = "sample_manifest" if declared else "observed_execution_conditions"
-    observed_conditions = sorted(set(observed_conditions) | set(declared), key=_condition_sort_key)
+    observed_conditions = sorted(
+        set(observed_conditions) | set(declared),
+        key=lambda label: _condition_order_key(label, design_conditions),
+    )
     for key, rows in grouped_features:
         ordered = _identity_complete_condition_rows(rows, allow_partial_conflicts=True)
         if ordered is None:
@@ -523,6 +642,7 @@ def build_feature_observation_cards(
             "selection_rule": "identity completeness; replicate/q-value support; observed condition coverage; signed temporal-shape diversity; lexical tie-breaker; no magnitude ranking",
             "evidence_envelope": envelope,
         })
+        project_recorded_time_order(cards[-1])
     return cards
 
 
