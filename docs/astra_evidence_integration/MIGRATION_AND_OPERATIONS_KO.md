@@ -39,3 +39,29 @@ query cache는 검증된 성공/no_hit만 재사용한다. 실패·partial은 �
 격리 로컬 환경에서 API 8016, UI 5176, 기존 검증용 MySQL 13366의 새 주문, Redis 16386 DB9 및 별도 output/reference directory를 사용했다. 운영 주문이나 무관한 volume을 삭제하지 않았다. 별도 DB 생성 권한이 없어 이미 격리된 검증 DB에서 새 주문만 만들었다. 이는 운영 URL/production mount 확인이 아니다.
 
 배포 시 동일 commit으로 API/worker/frontend를 빌드하고 additive column migration, shared reference digest, 기능 flag, 신규 테스트 주문을 확인한다. rollback은 v6 flag를 해제하고 이전 image를 복원한다. nullable column과 이미 완료된 run/archive는 보존한다. Git push는 배포가 아니다. 이번 작업에서 운영 배포·운영 URL 확인은 수행하지 않았다.
+
+## 문헌 검토 단계
+
+2026-10-13 선언. 승인 조건은 `finding_retrieval.v6`와 같다. 인용문이 검색 구간에 있고, 범위와 조건 문자열이 그 인용문에 있으며, DOI 또는 PMID가 있을 때만 비교 후보로 남긴다. 이 조건을 낮춰 승인 건수를 늘리지 않는다. `semantically_verified_comparable_findings`는 0이다. 통과한 행도 `claim_support_status=not_verified`, `relationship=literature_background`로 유지한다.
+
+거절된 제안만 기존 조건의 첫 실패 지점으로 나눈다.
+
+- `citation_mismatch`: 인용문이 검색 구간에 없거나 DOI·PMID가 없다.
+- `scope`: 범위가 선언되지 않았거나, gene·site·허용 관계가 인용문과 맞지 않거나, 주장 문장이 비어 있다.
+- `condition_comparison`: species, cell type, dose, time, readout, perturbation 중 모델이 적은 값이 인용문에 없다.
+
+검색 완료, 모델 비교 완료, 인용 근거 검증, 생물학적 의미 검토, 외부 전달은 `review_stages`에 따로 적는다. packet `mode=citation_complete`는 reference card가 있다는 뜻이며 인용 검증이나 외부 전달 승인이 아니다. 원문 구간을 패키지에 넣지 않으면 DOI, PMID, 원문 위치, 접근 제한을 `LITERATURE.md`에 남긴다.
+
+선정 finding은 전체 신호망이 아니다. insulin 경로 기대에 맞춰 고르지 않는다. `cards.csv`와 `authoring_packet.json` 전체를 읽지 않고 `findings.csv`와 `question_map.json`의 card_id만 고른다. 전체 emergence, protein, kinase 표로 범위를 넓힌다. `repository_measured_gene_zscore` 행은 PhosX 실행 결과가 아니다. PhosX는 `method_id=PhosX_native_functions`이고 `method_executions`가 있을 때만 그렇게 읽는다.
+
+## PhosX 등록 자원
+
+2026-10-13 선언. 회차 09에서 실행 전에 고정한 행렬 해시를 그대로 쓴다. PSSM `7d18a78d6efc45925aacae9c62ea26c5d7c22519eb856b2891debeed0ea42c6d`, background `487beac611126c973c36b3b01161991a7c01d08e8d00f764136eb2c45aac1c11`, metadata `ab48c161eb8f35225cc410331c71cd0d35c1fd198a828a6eb78069d3fc341952`. 코드 commit `b556f59c39f099b5f3fcb574a8a70856c3fdc82c`.
+
+`ptm-workers` 이미지 빌드는 PhosX 0.23.1 commit `b556f59c`를 포함한다. RAG, report, beat도 같은 이미지 태그를 쓰므로 이 패키지를 뺀 빌드가 그 태그를 덮어쓰면 안 된다. 행렬 HDF5는 이미지에 넣지 않고 reference 마운트에 둔다. API 이미지의 duckdb는 `api-server/pyproject.toml` 의존성이다.
+
+`REFERENCE_DIR/phosx-0.23.1-b556f59/manifest.json`이 있고 위 행렬 해시가 맞을 때만 기존 v6 specificity 연결이 그 파일을 읽는다. 서버 환경변수로 다른 manifest를 지정하면 그 값이 우선이다. 파일이 없거나 해시가 다르면 기존처럼 PhosX를 실행하지 않고 `resource_unavailable`로 남긴다. 원본 manifest 파일 `12eff82db554b22355169115f39fc4ba0ce65584f26aac4dcccf9b4b999dfa0a`는 이 작업 공간에 없다. 로컬 wrapper의 sha256은 `1f0f262e684276d95672f33ba79f7e2ff7e1d6b8f7a8d5d6cddce2874380a605`이며 그 파일과 같지 않다. 같은 것은 행렬과 background 바이트다.
+
+이 연결은 여섯 시간점 실행 기록이 아니다. 실행은 주문의 선언된 contrast 전부이며, 시간 목록을 코드에 새로 넣지 않는다. `method_executions.csv`에 `executed` 행이 생기기 전에는 PhosX 결과라고 적지 않는다. 원본 HDF5는 패키지에 넣지 않는다.
+
+

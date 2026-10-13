@@ -23,15 +23,23 @@ def _attach_registered_specificity(order, reference_root):
     from ptm_shared.official_specificity import PHOSX_VERSION, PHOSX_COMMIT
     settings = get_settings()
     context = deepcopy(order.analysis_context or {})
-    configured = getattr(settings, 'ASTRA_SPECIFICITY_MANIFEST_PATH', '')
-    if (not configured or getattr(order, 'specificity_manifest_path', None) or
+    configured = getattr(settings, 'ASTRA_SPECIFICITY_MANIFEST_PATH', '') or ''
+    expected = getattr(settings, 'ASTRA_SPECIFICITY_MANIFEST_SHA256', '') or ''
+    if (getattr(order, 'specificity_manifest_path', None) or
             context.get('quantitation_export_mode') != 'astra_analysis.v6'):
+        return
+    if not configured:
+        from ptm_shared.phosx_registered_resource import locate_declared_phosx_manifest
+        found = locate_declared_phosx_manifest(reference_root)
+        if found is not None:
+            configured = str(found)
+            expected = digest(found)
+    if not configured:
         return
     design = context.get('study_design') or {}
     if design.get('study', {}).get('ptm_type') not in {'phosphorylation', 'phospho'}:
         return
     path = Path(configured)
-    expected = getattr(settings, 'ASTRA_SPECIFICITY_MANIFEST_SHA256', '')
     if not expected or not path.is_file() or digest(path) != expected:
         raise ValueError('registered_specificity_manifest_checksum_mismatch')
     resource = json.loads(path.read_text())

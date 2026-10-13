@@ -248,6 +248,41 @@ def _export_result(result, literature):
     return result
 
 
+def literature_review_stages(summary, records):
+    """검색, 모델 비교, 인용 검증, 생물학적 검토, 외부 전달을 서로 다른 상태로 남긴다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «문헌 검토 단계»
+    사전등록: 2026-10-13. 승인 조건은 바꾸지 않는다. semantically_verified_comparable_findings는 0으로 유지한다.
+    해석 한계: packet mode citation_complete는 reference card가 있다는 뜻이다. 인용 검증이나 외부 전달 승인이 아니다.
+    주장 금지: 단계 이름을 나눴다고 비교가 승인되었다고 하지 않는다. 승인 건수를 늘리려고 기준을 낮추지 않는다.
+    """
+    classes = {}
+    for record in records.values():
+        for item in record.get("excluded_comparisons") or []:
+            key = item.get("exclusion_class") or "unclassified"
+            classes[key] = classes.get(key, 0) + 1
+    chunks = int(summary.get("source_chunks_read") or 0)
+    selected = int(summary.get("selected_findings") or 0)
+    executed = int(summary.get("comparison_executed_findings") or 0)
+    restricted = int(summary.get("export_restricted_chunks") or 0)
+    if restricted:
+        delivery = "source_text_not_exported"
+    elif chunks:
+        delivery = "source_text_recorded_review_still_required"
+    else:
+        delivery = "no_retrieved_source_text"
+    return {
+        "search": "completed" if chunks else "no_retrieved_chunks",
+        "model_comparison": "completed" if selected and executed == selected else ("partial" if executed else "not_run"),
+        "citation_evidence_verification": "not_verified",
+        "biological_meaning_review": "not_performed",
+        "external_delivery": delivery,
+        "approved_relationships": int(summary.get("semantically_verified_comparable_findings") or 0),
+        "exclusion_class_counts": classes,
+        "packet_mode_meaning": "citation_complete means reference cards exist. It is not citation verification, biological review, or permission to deliver the claim.",
+    }
+
+
 def apply(tables, pin, snapshot, literature):
     """Deterministic reader projection; replay enters here without a retriever/LLM."""
     if object_hash({k:v for k,v in pin.items() if k!='sha256'}) != pin.get('sha256'): raise ValueError('Literature pin hash mismatch')
@@ -283,6 +318,7 @@ def apply(tables, pin, snapshot, literature):
         'model':pin['model'],'cache':pin['cache'],'cost':result['cost'],
         'read_scope_counts':dict(pd.Series([r.get('read_scope','unknown') for r in result.get('references',[])],dtype='str').value_counts().items()),
         'independent_validation':'not_performed','literature_pin_sha256':pin['sha256']}
+    summary['review_stages']=literature_review_stages(summary, records)
     packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
     packet['literature_comparison_status']='source_anchored_review_pending' if comparisons else ('internal_comparison_performed_export_restricted' if summary['internal_compared_findings'] else 'compared_no_supported_relationship' if summary['comparison_executed_findings']==len(cards) and cards else 'retrieved_comparison_pending' if sources else 'not_performed_no_accessible_evidence')
     packet['literature']={'status_authority':'reader/literature_search.csv; inherited card status describes original card generation only',
@@ -294,6 +330,8 @@ def apply(tables, pin, snapshot, literature):
         'rule':'Raw card literature flags/limits record the earlier card-build stage. Use each finding record for actual search/comparison execution; never turn completed comparison with no supported relation into not_performed. Independent validation remains not_performed.'}
     packet['coverage_inventory']['literature_comparison']=summary['status']
     packet['mode']='citation_complete' if packet['literature']['reference_cards'] else 'data_only'
+    packet['literature_stages']=summary['review_stages']
+    packet['mode_meaning']=summary['review_stages']['packet_mode_meaning']
     for q in packet['research_question_evidence_map']['questions']:
         matching=[records[f] for f in q['finding_ids']]
         q['literature_comparison_status']=packet['literature_comparison_status'] if matching else 'no_linked_findings'
@@ -336,7 +374,9 @@ def write(directory,tables):
     packet=json.loads(tables['reader/packet'].iloc[0].packet_json);data=packet['literature']
     json_write(p/'references/finding_literature_pin.json',data['pin']);json_write(p/'reader/literature_summary.json',data['summary'])
     lines=['# 선정 관측의 문헌 검색과 비교', '[주요 관측](READ_ME.md) · [검색 기록](literature_search.csv) · [출처](literature_sources.csv) · [비교](literature_comparisons.csv)',
+        '검색 완료, 모델 비교 완료, 인용 근거 검증, 생물학적 의미 검토, 외부 전달 가능 여부는 서로 다른 단계다. packet mode가 citation_complete여도 인용 검증이 끝난 것이 아니다.',
         '검색 성공·인용문 일치·생물학적 판단 검증은 서로 다릅니다. 제안된 일치/상이는 원문 의미 검토 전까지 배경 근거로 유지합니다. 미검색은 반대 결과가 아닙니다. 본문/PDF 재배포 여부는 내부 검색 여부와 별도입니다.',
+        '승인된 비교는 semantically_verified_comparable_findings입니다. 이 값은 기준을 낮춰 늘리지 않습니다. 제외 사유는 exclusion_class_counts에서 인용 불일치(citation_mismatch), 범위(scope), 조건 비교(condition_comparison)로 나뉩니다.',
         '```json\n'+json.dumps(data['summary'],ensure_ascii=False,indent=2)+'\n```']
     comps=tables['reader/literature_comparisons']; refs={r.source_key:json.loads(r.source_json) for r in tables['reader/literature_sources'].itertuples()}
     for card in [c for c in packet['reader_cards'] if c.get('finding_id')]:
@@ -349,6 +389,19 @@ def write(directory,tables):
                 '> '+c['quote'], '근거 위치: '+json.dumps(ref['evidence_location'],ensure_ascii=False),
                 '조건 비교: '+json.dumps(c['condition_differences'],ensure_ascii=False)])
         if not r.get('comparisons'):lines.append('평가 가능한 문헌 비교 없음. 반대 근거를 생성하지 않았습니다.')
+        for item in r.get('excluded_comparisons') or []:
+            lines.append('제외: '+json.dumps({'reason':item.get('reason'),'exclusion_class':item.get('exclusion_class'),'source_index':item.get('source_index')},ensure_ascii=False))
+    lines.append('## 원문 구간을 패키지에 넣지 않은 경우 Astra가 확인할 위치')
+    lines.append('아래 DOI·PMID·원문 위치·접근 제한은 검색 기록의 메타데이터다. 원문 본문이 없으면 그 위치를 직접 확인해야 하며, 이 목록이 인용 검증을 대신하지 않는다.')
+    for doc in data['pin'].get('documents') or []:
+        meta = doc.get('metadata') or {}
+        loc = doc.get('evidence_location') or meta.get('evidence_location') or {}
+        lines.append('- DOI={doi}; PMID={pmid}; 위치={loc}; 접근={access}; 내보내기={export}'.format(
+            doi=doc.get('doi') or meta.get('doi') or '없음',
+            pmid=doc.get('pmid') or meta.get('pmid') or '없음',
+            loc=json.dumps(loc, ensure_ascii=False),
+            access=doc.get('access_restriction') or doc.get('evidence_export_permission') or meta.get('evidence_export_permission') or '기록 없음',
+            export=doc.get('export_status') or doc.get('comparison_export_status') or '기록 없음'))
     lines.append('## 선택 문서 접근 상태\n\n'+json.dumps(data['pin']['documents'],ensure_ascii=False,indent=2))
     (p/'reader/LITERATURE.md').write_text('\n\n'.join(lines)+'\n',encoding='utf-8')
     return ARTIFACTS

@@ -213,7 +213,7 @@ services:
       context: .
       dockerfile: workers/Dockerfile
       args:
-        INSTALL_ASTRA_OFFICIAL: ${INSTALL_ASTRA_OFFICIAL:-false}
+        INSTALL_ASTRA_OFFICIAL: ${INSTALL_ASTRA_OFFICIAL:-true}
         VERSION: ${VERSION_WORKERS:-001}
     image: ptm-workers:${VERSION_WORKERS:-001}
     container_name: ptm-worker-preprocessing
@@ -373,7 +373,7 @@ services:
       context: .
       dockerfile: workers/Dockerfile
       args:
-        INSTALL_ASTRA_OFFICIAL: ${INSTALL_ASTRA_OFFICIAL:-false}
+        INSTALL_ASTRA_OFFICIAL: ${INSTALL_ASTRA_OFFICIAL:-true}
         VERSION: ${VERSION_WORKERS:-001}
     image: ptm-workers:${VERSION_WORKERS:-001}
     container_name: ptm-worker-rag
@@ -455,7 +455,7 @@ services:
       context: .
       dockerfile: workers/Dockerfile
       args:
-        INSTALL_ASTRA_OFFICIAL: ${INSTALL_ASTRA_OFFICIAL:-false}
+        INSTALL_ASTRA_OFFICIAL: ${INSTALL_ASTRA_OFFICIAL:-true}
         VERSION: ${VERSION_WORKERS:-001}
     image: ptm-workers:${VERSION_WORKERS:-001}
     container_name: ptm-worker-report

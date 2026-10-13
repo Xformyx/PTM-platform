@@ -212,15 +212,21 @@ def build_reader_tables(tables, design, snapshot=None):
 
 
 def attach_reading_guidance(tables):
-    """Extend the existing authoring contract without selecting or calculating."""
+    """선정 관측과 문헌 단계, PhosX 실행 여부를 서로 다른 안내로 남긴다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «문헌 검토 단계»
+    사전등록: 2026-10-13. 선정 규칙과 문헌 승인 조건은 바꾸지 않는다.
+    해석 한계: 안내는 읽기 범위다. 선정 finding 수나 z-score 행 수가 PhosX 실행이나 cascade 구성이 아니다.
+    주장 금지: 15개 관측이나 repository_measured_gene_zscore로 kinase 귀속 정확도를 논하지 않는다.
+    """
     packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
     executions=tables.get('kinase/method_executions',pd.DataFrame())
     method_path='reader/PHOSX_TIME_COURSE.md' if len(executions) else 'kinase/method_executions.csv'
     packet['authoring_rules']['reading_order']=[
         {'step':1,'purpose':'Original questions, design and actual stage readiness',
          'paths':['study/STUDY_BRIEF.md','reader/READ_ME.md#저장된-연구-질문','evidence/readiness.json']},
-        {'step':2,'purpose':'Selected observations and withheld/unselected coverage',
-         'paths':['reader/READ_ME.md','reader/findings.csv','reader/coverage_summary.json']},
+        {'step':2,'purpose':'Selected observations are not the full signaling network. Do not build a cascade from the selected findings or from an expected insulin pathway. Choose card_id values from findings.csv and question_map.json; do not read all of cards.csv or authoring_packet.json. Kinase candidate contribution linkage is separate and is not implied by selection. Continue to the full emergence, protein, and kinase tables.',
+         'paths':['reader/READ_ME.md','reader/findings.csv','reader/question_map.json','reader/coverage_summary.json','evidence/emergence_evidence.csv','quant/protein_contrasts.csv','kinase/substrate_contributions.csv','science/inference_results.csv']},
         {'step':3,'purpose':'Saved temporal, native method and literature evidence with limits',
          'paths':['reader/TEMPORAL_EVIDENCE.md',method_path,'reader/LITERATURE.md']},
         {'step':4,'purpose':'Trace a claim to exact source row keys; large source pin only as needed',
@@ -229,7 +235,9 @@ def attach_reading_guidance(tables):
         'research_full is an acquisition policy, not evidence of completed collection; inspect source_execution.',
         'Calculation completion, partial references, literature retrieval/comparison and missing localization are separate states.',
         'PSSM percentile is not correctness probability; native method p/q is not biological replicate significance.',
-        'Keep literature proposals distinct from semantically reviewed claims; preserve no-call and uncertainty.']
+        'Keep literature proposals distinct from semantically reviewed claims; preserve no-call and uncertainty.',
+        'Search completion, model comparison, citation verification, biological review, and external delivery are separate literature stages. packet mode citation_complete only means reference cards exist.',
+        'repository_measured_gene_zscore rows are not PhosX. PhosX results require method_id PhosX_native_functions and rows in kinase/method_executions.csv.']
     tables['reader/packet'].loc[tables['reader/packet'].index[0],'packet_json']=json.dumps(packet,ensure_ascii=False,sort_keys=True)
 
 
@@ -394,9 +402,12 @@ def write_reader(directory, tables):
             ('question_map',packet['research_question_evidence_map']),('selection_audit',packet['observation_selection_audit'])]:
         json_write(directory/'reader'/f'{name}.json',value)
     coverage = packet['coverage_inventory']
+    selected_findings = [c for c in packet['reader_cards'] if c.get('category')=='measured_feature_observation' and c.get('finding_id')]
+    linked_kinase_findings = sum(1 for c in selected_findings if any(b.get('membership_ids') for b in c.get('source_bindings') or []))
     lines = ['# 주요 관측과 근거 — Astra reader',
         '[실험 원문과 설계](../study/STUDY_BRIEF.md) · [원문 snapshot](../study/user_input_snapshot.json) · '
         '[전체 카드](cards.csv) · [전체 행의 보류/선정 사유](coverage.csv) · [구조화 packet](authoring_packet.json)',
+        'cards.csv와 authoring_packet.json은 전체 저장소다. 필요한 카드만 [findings.csv](findings.csv)와 [question_map.json](question_map.json)의 card_id로 고른다. 두 파일 전체를 읽지 않는다.',
         '읽기 순서: **연구 질문·[준비 상태](../evidence/readiness.json) → 아래 선정 관측 → 시간·방법·문헌 근거 → 필요한 원본 행**. '
         '큰 source pin 전체를 먼저 읽을 필요는 없습니다. research_full은 요청 정책이며 참조 수집 완료를 뜻하지 않습니다.',
         f"전체 {coverage['total_forms']} forms / {coverage['total_form_contrasts']} form×contrast. "
@@ -417,7 +428,11 @@ def write_reader(directory, tables):
         'PSSM percentile은 정답 확률이 아니며 method p/q는 생물학적 반복의 p/q가 아닙니다. '
         '서열 적합성으로 미측정 localization이나 개별 kinase 활성·인과를 확정하지 마세요.',
         '선정: 기존 select_finding_cards의 quality/parent/pattern diversity 및 stable ID 기준, 최대 15개. '
-        '질문 연결은 선정 이후 수행하며 경로 기대를 점수에 사용하지 않습니다.', '## 저장된 연구 질문']
+        '질문 연결은 선정 이후 수행하며 경로 기대를 점수에 사용하지 않습니다. '
+        f'선정 관측 {len(selected_findings)}개 가운데 저장된 kinase 후보 기여도(membership)가 연결된 것은 {linked_kinase_findings}개입니다. '
+        '이 선정만으로 insulin cascade를 구성하지 마세요. 전체 emergence, protein, kinase 표로 범위를 넓히세요. '
+        'method_id가 repository_measured_gene_zscore인 행은 PhosX 결과가 아닙니다. PhosX_native_functions와 method_executions가 있을 때만 PhosX로 읽습니다.',
+        '## 저장된 연구 질문']
     for q in packet['research_question_evidence_map']['questions']:
         lines.extend([f"### {q['question_id']}", q['original_text'], f"상태: {q['answer_status']}; {q['answer_scope']}",
                       '연결 결과: '+(', '.join(q['finding_ids']) or '없음'), '부족한 근거: '+' '.join(q['missing_evidence'])])

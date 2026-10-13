@@ -57,6 +57,31 @@ def test_registered_resource_reaches_snapshot_and_existing_dispatch(config,tmp_p
     assert order.analysis_context==frozen and order.specificity_manifest_path==str(target)
 
 
+def test_declared_directory_without_round09_bytes_is_not_a_resource(tmp_path):
+    from ptm_shared.phosx_registered_resource import locate_declared_phosx_manifest
+    assert locate_declared_phosx_manifest(tmp_path) is None
+    root = tmp_path / "phosx-0.23.1-b556f59"
+    root.mkdir()
+    (root / "S_T_PSSMs.h5").write_bytes(b"not-the-round09-matrix")
+    (root / "manifest.json").write_text("{}")
+    assert locate_declared_phosx_manifest(tmp_path) is None
+
+
+def test_empty_server_setting_uses_declared_manifest(config, tmp_path, monkeypatch):
+    order, settings, path, _resource = registration(tmp_path, monkeypatch, config["experimental_context"])
+    settings.ASTRA_SPECIFICITY_MANIFEST_PATH = ""
+    settings.ASTRA_SPECIFICITY_MANIFEST_SHA256 = ""
+    monkeypatch.setattr(
+        "ptm_shared.phosx_registered_resource.locate_declared_phosx_manifest",
+        lambda reference_root: path,
+    )
+    _attach_registered_specificity(order, settings.REFERENCE_DIR)
+    assert order.specificity_manifest_path
+    method = order.analysis_context["science"]["official_methods"]["PhosX"]
+    assert method["permutations"] == 10000 and method["seed"] == 1729
+    assert method["contrast_ids"]
+
+
 def test_registration_never_overrides_explicit_scope_or_legacy(config,tmp_path,monkeypatch):
     order,settings,path,_=registration(tmp_path,monkeypatch,config['experimental_context'])
     order.analysis_context['quantitation_export_mode']='astra_analysis.v5'

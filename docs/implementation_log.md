@@ -3530,3 +3530,26 @@
 - **해석 한계:** 등록은 서열 파일의 신원이다. kinase 귀속 정확도가 올라갔다고 하지 않는다. manifest가 없는 기계에서는 분석 FASTA 업로드가 필요하다.
 - **결정성:** 새 seed·solver 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_species_sequence_reference.py`.
 
+### [2026-10-13] 문헌 제외 사유와 검토 단계 — 승인 기준은 유지
+
+- **분류:** 구현
+- **대상:** `ptm_shared/finding_literature.py` `quote_binding_failure`, `ptm_shared/astra_literature.py` `literature_review_stages`, `ptm_shared/astra_reader.py` `attach_reading_guidance`, `ptm_shared/astra_evidence_v6.py` `report_addendum`, `ptm_shared/phosx_registered_resource.py` `locate_declared_phosx_manifest`
+- **구현 대상 설계:** `docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md` «문헌 검토 단계». 2026-10-13 선언. 승인 조건은 결과 열람 전의 v6 조건과 같다.
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). 비교 제안이 `unbound_quote_context_or_scope`로만 거절되고 승인 0건인 패키지를 본 뒤, 거절 사유와 상태 이름을 나누기로 했다. 승인 임계는 새로 만들지 않았다.
+- **내용:** 거절된 비교만 인용 불일치, 범위, 조건 비교로 나눈다. 통과 조건과 `claim_support_status=not_verified`는 바꾸지 않는다. 검색, 모델 비교, 인용 검증, 생물학적 검토, 외부 전달을 `review_stages`에 따로 적는다. `citation_complete`는 reference card 존재를 뜻한다. 원문 본문이 없으면 DOI·PMID·위치·접근 제한을 남긴다. 선정 finding만으로 신호망을 설명하지 않고, `repository_measured_gene_zscore`를 PhosX로 읽지 말라고 적는다. 회차 09 행렬 해시가 맞는 파일을 `REFERENCE_DIR/phosx-0.23.1-b556f59`에 두었고, 기존 v6 연결이 그 manifest를 읽는다. wrapper sha256은 `1f0f262e684276d95672f33ba79f7e2ff7e1d6b8f7a8d5d6cddce2874380a605`이며 원본 manifest sha `12eff82d…`와 다르다. 전처리 worker의 현재 컨테이너에 PhosX 0.23.1 commit `b556f59c`를 설치했다. 합성 서열 1건은 `official_pssm_scored`, 303행이었다. 여섯 시간점 native 실행은 시작하지 않았다. 완료된 pin은 바꾸지 않았다.
+- **논문에서의 용도:** methods (문헌 비교가 승인되지 않았다는 한계). 결과의 kinase 귀속에는 쓰지 않는다.
+- **해석 한계:** 사유를 나누어도 승인 건수는 늘지 않는다. z-score 행은 PhosX가 아니다. Localization 미측정, 기술 반복, 독립 calibration 부재는 그대로다.
+- **결정성:** 새 seed·solver 없음. 새 측정 임계 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_quote_binding.py ptm_shared/tests/test_astra_literature.py::test_completed_empty_comparison_is_not_pending workers/tests/test_flow_finding_retrieval.py`.
+
+### [2026-10-13] worker 이미지에 PhosX 패키지를 포함
+
+- **분류:** 구현
+- **대상:** `docker-compose.yml` `INSTALL_ASTRA_OFFICIAL`, `workers/pyproject.toml` extra `astra-official`
+- **구현 대상 설계:** `docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md` «PhosX 등록 자원»
+- **사전등록 상태:** 결과 열람 전 확정된 패키지 pin `b556f59c39f099b5f3fcb574a8a70856c3fdc82c`. 새 점수 임계 없음.
+- **내용:** 전처리, RAG, report, beat가 같은 `ptm-workers` 이미지를 쓴다. 그 이미지 빌드가 PhosX 0.23.1을 설치한다. 행렬 HDF5는 이미지에 넣지 않는다. API duckdb는 기존 `api-server/pyproject.toml` 의존성이다.
+- **논문에서의 용도:** methods (실행 환경). kinase 귀속 결과에는 쓰지 않는다.
+- **해석 한계:** 패키지가 이미지에 있어도 method_executions가 없으면 PhosX를 실행한 것이 아니다. pandas는 PhosX 요구에 따라 3 미만이다.
+- **결정성:** 새 seed·solver 없음. 이미지 빌드는 이 기록 시점에 실행하지 않았다.
+
+
