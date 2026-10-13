@@ -54,6 +54,16 @@ query cache는 검증된 성공/no_hit만 재사용한다. 실패·partial은 �
 
 선정 finding은 전체 신호망이 아니다. insulin 경로 기대에 맞춰 고르지 않는다. `cards.csv`와 `authoring_packet.json` 전체를 읽지 않고 `findings.csv`와 `question_map.json`의 card_id만 고른다. 전체 emergence, protein, kinase 표로 범위를 넓힌다. `repository_measured_gene_zscore` 행은 PhosX 실행 결과가 아니다. PhosX는 `method_id=PhosX_native_functions`이고 `method_executions`가 있을 때만 그렇게 읽는다.
 
+## 저장된 결과의 reader 연결
+
+2026-10-13 선언. Order 89 g7 패키지를 본 뒤의 탐색적 표시 규칙이다. primary 승격 금지. 새 측정 임계는 없다. 정량과 PhosX를 다시 계산하지 않는다.
+
+- `source_bindings.membership_ids`는 precursor 카드 멤버다. kinase 후보 기여도가 아니다. precursor 연결 수는 `reader_adapter/precursor_membership.csv`의 `membership_id`와 맞는 선정 관측이다. 표가 없으면 0개로 적지 않는다.
+- 후보 기여도는 `project_temporal()`이 카드의 contrast, arm, reference, pairing 범위에서 연결한 `candidates`의 고유 `candidate_id`다. `candidates` 배열 길이를 후보 수로 쓰지 않는다. 이 투영이 없으면 `substrate_contributions.csv`의 `form_ids`를 `;`로 나눈 토큰이 `form_id`와 같고 `contrast_id`가 카드 범위 안인 행만 센다. `form_1`과 `form_10`은 다른 ID다. PhosX native membership은 이 수와 합치지 않는다.
+- `condition_grid.conditions`와 카드의 trajectory, source_bindings는 기록된 `time_minutes` 또는 `time_min`이 조건마다 하나일 때 그 숫자 순이다. 조건 문자열로 시간을 추정하지 않는다. 시간이 없거나 충돌하면 기존 목록을 두고 `time_order_status=unresolved_recorded_time`으로 남긴다. 이 투영은 카드 생성과 저장 reader revision이 함께 호출한다. revision은 `build_feature_observation_cards()`를 다시 실행하지 않는다. 이미 숫자 시간순인 그림, PhosX 표, temporal 배열은 다시 쓰지 않는다.
+- `LITERATURE.md`의 구간 안내는 `literature_sources.csv`의 `source_key`, title, DOI, PMID, `evidence_location`이다. `source_key` 순으로 구간을 각각 남기고, 고유 논문 수와 구간 수를 따로 적는다. pin documents의 빈 DOI는 그 목록에 넣지 않는다. 승인 조건은 «문헌 검토 단계»와 같다.
+- `method_executions`의 executed와 `method_scores` 행 수는 유의한 kinase 활성 검출이 아니다. `insufficient_coverage`는 비활성이 아니다. method q로 특정 kinase의 활성 또는 비활성을 결론내지 않는다. no-call은 v6 미적용의 증거가 아니다. 이 문장은 저장된 상태 개수를 옮길 뿐 새 q 임계를 적용하지 않는다.
+
 ## PhosX 등록 자원
 
 2026-10-13 선언. 회차 09에서 실행 전에 고정한 행렬 해시를 그대로 쓴다. PSSM `7d18a78d6efc45925aacae9c62ea26c5d7c22519eb856b2891debeed0ea42c6d`, background `487beac611126c973c36b3b01161991a7c01d08e8d00f764136eb2c45aac1c11`, metadata `ab48c161eb8f35225cc410331c71cd0d35c1fd198a828a6eb78069d3fc341952`. 코드 commit `b556f59c39f099b5f3fcb574a8a70856c3fdc82c`.

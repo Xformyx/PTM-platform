@@ -369,20 +369,83 @@ def validate(tables):
     return {'finding_records':len(rows),'source_chunks':len(sources),'source_anchor_validation':'passed','semantic_validation':'not_performed'}
 
 
-def write(directory,tables):
-    p=Path(directory);(p/'references').mkdir(parents=True,exist_ok=True);(p/'reader').mkdir(parents=True,exist_ok=True)
+def _source_field(ref, *names):
+    meta = ref.get('metadata') or {}
+    for name in names:
+        if ref.get(name) not in (None, ''):
+            return ref.get(name)
+        if meta.get(name) not in (None, ''):
+            return meta.get(name)
+    return None
+
+
+def retrieved_source_guidance(records):
+    """검색 구간 행의 DOI, PMID, 위치를 source_key마다 옮긴다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «저장된 결과의 reader 연결»
+    사전등록: 2026-10-13. g7 LITERATURE.md가 pin documents의 빈 DOI를 검색 구간 위치로 적은 것을 본 뒤. 탐색적. primary 승격 금지.
+    해석 한계: 이미 저장된 출처 필드의 연결이다. 새 검색이 아니고 승인 조건을 낮추지 않는다.
+    주장 금지: DOI가 보여도 claim_support_status가 not_verified인 비교를 승인된 문헌 근거로 쓰지 않는다.
+    """
+    lines = ['## 검색된 구간의 출처',
+        '아래는 reader/literature_sources.csv의 검색 구간 식별 metadata다. 원문 페이지나 문장을 만들지 않는다. 이 목록은 인용 검증이나 승인된 비교가 아니다.']
+    records = [item for _, item in sorted(enumerate(records), key=lambda item: (str(item[1][0]), item[0]))]
+    if not records:
+        lines.append('검색 구간 출처 행이 없습니다.')
+        return lines
+    papers = set()
+    for key, ref in records:
+        doi = _source_field(ref, 'doi', 'DOI')
+        pmid = _source_field(ref, 'pmid', 'PMID')
+        if doi:
+            papers.add(('doi', str(doi)))
+        elif pmid:
+            papers.add(('pmid', str(pmid)))
+    lines.append(f'검색 구간 {len(records)}개, 고유 논문 {len(papers)}편. 같은 논문의 구간은 각각 유지한다. 구간 수는 승인된 비교 수가 아니다.')
+    for key, ref in records:
+        meta = ref.get('metadata') or {}
+        loc = ref.get('evidence_location') or meta.get('evidence_location') or {}
+        fields = [f'source_key={key}', f"title={_source_field(ref, 'title') or '미기록'}",
+                  f"DOI={_source_field(ref, 'doi', 'DOI') or '미기록'}", f"PMID={_source_field(ref, 'pmid', 'PMID') or '미기록'}",
+                  f"chunk_id={loc.get('chunk_id') if loc.get('chunk_id') is not None else '미기록'}",
+                  f"chunk_index={loc.get('chunk_index') if loc.get('chunk_index') is not None else '미기록'}",
+                  f"section={loc.get('section') if loc.get('section') is not None else '미기록'}"]
+        if loc.get('page') is not None:
+            fields.append(f"page={loc.get('page')}")
+        access = ref.get('access_restriction') or ref.get('evidence_export_permission') or meta.get('evidence_export_permission') or '미기록'
+        export = ref.get('export_status') or ref.get('comparison_export_status') or '미기록'
+        fields.extend([f'접근={access}', f'내보내기={export}'])
+        lines.append('- ' + '; '.join(str(field) for field in fields))
+    return lines
+
+
+def write(directory,tables, *, pins=True):
+    p=Path(directory);(p/'reader').mkdir(parents=True,exist_ok=True)
     packet=json.loads(tables['reader/packet'].iloc[0].packet_json);data=packet['literature']
-    json_write(p/'references/finding_literature_pin.json',data['pin']);json_write(p/'reader/literature_summary.json',data['summary'])
+    if pins:
+        (p/'references').mkdir(parents=True,exist_ok=True)
+        json_write(p/'references/finding_literature_pin.json',data['pin']);json_write(p/'reader/literature_summary.json',data['summary'])
     lines=['# 선정 관측의 문헌 검색과 비교', '[주요 관측](READ_ME.md) · [검색 기록](literature_search.csv) · [출처](literature_sources.csv) · [비교](literature_comparisons.csv)',
         '검색 완료, 모델 비교 완료, 인용 근거 검증, 생물학적 의미 검토, 외부 전달 가능 여부는 서로 다른 단계다. packet mode가 citation_complete여도 인용 검증이 끝난 것이 아니다.',
         '검색 성공·인용문 일치·생물학적 판단 검증은 서로 다릅니다. 제안된 일치/상이는 원문 의미 검토 전까지 배경 근거로 유지합니다. 미검색은 반대 결과가 아닙니다. 본문/PDF 재배포 여부는 내부 검색 여부와 별도입니다.',
         '승인된 비교는 semantically_verified_comparable_findings입니다. 이 값은 기준을 낮춰 늘리지 않습니다. 제외 사유는 exclusion_class_counts에서 인용 불일치(citation_mismatch), 범위(scope), 조건 비교(condition_comparison)로 나뉩니다.',
         '```json\n'+json.dumps(data['summary'],ensure_ascii=False,indent=2)+'\n```']
-    comps=tables['reader/literature_comparisons']; refs={r.source_key:json.loads(r.source_json) for r in tables['reader/literature_sources'].itertuples()}
+    comps=tables['reader/literature_comparisons']
+    source_rows=[row for _, row in sorted(enumerate(tables['reader/literature_sources'].itertuples()), key=lambda item: (str(item[1].source_key), item[0]))]
+    records=[(row.source_key, json.loads(row.source_json)) for row in source_rows]
+    keys=[row.source_key for row in source_rows]
+    duplicate_keys={key for key in keys if keys.count(key) > 1}
+    refs={}
+    for key, ref in records:
+        if key not in duplicate_keys and key not in refs:
+            refs[key]=ref
     for card in [c for c in packet['reader_cards'] if c.get('finding_id')]:
         r=data['finding_records'][card['finding_id']]
         lines.extend([f"## {card['feature_label']} — {card['finding_id']}",f"검색: {r['status']}; 사유: {r.get('reason',r.get('review_reason','none'))}. 원본: {', '.join(r['source_row_ids'])}"])
         for row in comps.loc[comps.finding_id.eq(card['finding_id'])].itertuples():
+            if row.source_key in duplicate_keys:
+                lines.append(f'{row.comparison_id}: source_key {row.source_key}가 둘 이상이라 출처를 고르지 않았습니다.')
+                continue
             c=json.loads(row.comparison_json);ref=refs[row.source_key]
             lines.extend([f"{row.comparison_id}: {ref.get('title')} ({ref.get('year')}); DOI={ref.get('doi')}, PMID={ref.get('pmid')}",
                 f"관계: {c['relationship']}; 제안: {c.get('proposed_relationship')}; {c['comparison_status']}",
@@ -391,17 +454,9 @@ def write(directory,tables):
         if not r.get('comparisons'):lines.append('평가 가능한 문헌 비교 없음. 반대 근거를 생성하지 않았습니다.')
         for item in r.get('excluded_comparisons') or []:
             lines.append('제외: '+json.dumps({'reason':item.get('reason'),'exclusion_class':item.get('exclusion_class'),'source_index':item.get('source_index')},ensure_ascii=False))
-    lines.append('## 원문 구간을 패키지에 넣지 않은 경우 Astra가 확인할 위치')
-    lines.append('아래 DOI·PMID·원문 위치·접근 제한은 검색 기록의 메타데이터다. 원문 본문이 없으면 그 위치를 직접 확인해야 하며, 이 목록이 인용 검증을 대신하지 않는다.')
-    for doc in data['pin'].get('documents') or []:
-        meta = doc.get('metadata') or {}
-        loc = doc.get('evidence_location') or meta.get('evidence_location') or {}
-        lines.append('- DOI={doi}; PMID={pmid}; 위치={loc}; 접근={access}; 내보내기={export}'.format(
-            doi=doc.get('doi') or meta.get('doi') or '없음',
-            pmid=doc.get('pmid') or meta.get('pmid') or '없음',
-            loc=json.dumps(loc, ensure_ascii=False),
-            access=doc.get('access_restriction') or doc.get('evidence_export_permission') or meta.get('evidence_export_permission') or '기록 없음',
-            export=doc.get('export_status') or doc.get('comparison_export_status') or '기록 없음'))
-    lines.append('## 선택 문서 접근 상태\n\n'+json.dumps(data['pin']['documents'],ensure_ascii=False,indent=2))
+    lines.extend(retrieved_source_guidance(records))
+    lines.append('## 패키지 문서 목록')
+    lines.append('아래는 pin documents다. 검색 구간의 DOI·PMID·위치는 앞의 출처 절과 literature_sources.csv를 본다. 이 목록의 빈 DOI는 검색 구간에 출처가 없다는 뜻이 아니다.')
+    lines.append(json.dumps(data['pin']['documents'],ensure_ascii=False,indent=2))
     (p/'reader/LITERATURE.md').write_text('\n\n'.join(lines)+'\n',encoding='utf-8')
     return ARTIFACTS
