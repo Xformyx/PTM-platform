@@ -297,8 +297,10 @@ for arg in "$@"; do
       cat <<'EOF'
 Usage: ./scripts/dev-deploy.sh [--all] [--dry-run] [--classify path...]
 
-Bind-mounted Python (workers, ptm_shared, api-server/app) is restarted
-without an image rebuild. Frontend and Dockerfile/pyproject changes build.
+Bind-mounted Python (workers, ptm_shared, api-server/app) reloads with
+docker compose restart. compose up -d does not reload an already running
+process. Frontend and Dockerfile/pyproject changes build, then those
+containers are recreated. production-tmm-worker is only started if missing.
 
 Worker trees restart only their queue:
   workers/report_generation/**  -> celery-worker-report
@@ -440,9 +442,58 @@ RESTART_SERVICES=($(printf '%s\n' "${RESTART_SERVICES[@]}" | awk 'NF && !seen[$0
 if [[ ${#RESTART_SERVICES[@]} -eq 0 ]]; then
   echo "Warning: nothing to restart."
 else
-  echo "Restarting: ${RESTART_SERVICES[*]}"
-  if ! $DRY_RUN; then
-    "${COMPOSE_CMD[@]}" up -d "${RESTART_SERVICES[@]}"
+  # up -d leaves an already-running container on its old process. Bind-mounted
+  # Python is loaded at process start, so those services need compose restart.
+  # A rebuilt image or a compose/env change has to recreate the container.
+  # production-tmm-worker stays out of both lists; _ensure_production_tmm_worker
+  # starts it only when it is missing.
+  worker_image_rebuilt=false
+  recreate_config=false
+  for c in "${CHANGED[@]}"; do
+    if [[ "$c" == "dotenv" || "$c" == "compose-file" ]]; then
+      recreate_config=true
+    fi
+  done
+  for svc in "${BUILD_SERVICES[@]}"; do
+    if [[ "$svc" == "celery-worker-preprocessing" ]]; then
+      worker_image_rebuilt=true
+    fi
+  done
+  PROCESS_RESTART=()
+  RECREATE=()
+  for svc in "${RESTART_SERVICES[@]}"; do
+    if [[ "$svc" == "production-tmm-worker" ]]; then
+      continue
+    fi
+    recreate=false
+    if $recreate_config; then
+      recreate=true
+    fi
+    for built in "${BUILD_SERVICES[@]}"; do
+      if [[ "$svc" == "$built" ]]; then
+        recreate=true
+      fi
+    done
+    if $worker_image_rebuilt && [[ "$svc" == celery-worker-preprocessing || "$svc" == celery-worker-rag || "$svc" == celery-worker-report ]]; then
+      recreate=true
+    fi
+    if $recreate; then
+      RECREATE+=("$svc")
+    else
+      PROCESS_RESTART+=("$svc")
+    fi
+  done
+  if [[ ${#PROCESS_RESTART[@]} -gt 0 ]]; then
+    echo "Process restart: ${PROCESS_RESTART[*]}"
+    if ! $DRY_RUN; then
+      "${COMPOSE_CMD[@]}" restart "${PROCESS_RESTART[@]}"
+    fi
+  fi
+  if [[ ${#RECREATE[@]} -gt 0 ]]; then
+    echo "Recreate: ${RECREATE[*]}"
+    if ! $DRY_RUN; then
+      "${COMPOSE_CMD[@]}" up -d --force-recreate "${RECREATE[@]}"
+    fi
   fi
 fi
 
