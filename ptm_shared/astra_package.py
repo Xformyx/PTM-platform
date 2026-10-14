@@ -274,7 +274,158 @@ def validate_science(tables,design):
     return checks
 
 
-def write_tables(tables,directory):
+def _canonical_minutes(value, contrast_id, field):
+    """Read one stored minute value. Missing stays missing; units are not inferred."""
+    import math
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, str):
+        text = value.strip()
+        if text.lower() in {'', 'nan', 'none', 'na', '<na>'}:
+            return None
+        try:
+            number = float(text)
+        except ValueError:
+            raise ValueError(f'Invalid {field} for {contrast_id}') from None
+    else:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f'Invalid {field} for {contrast_id}') from None
+    if not math.isfinite(number):
+        raise ValueError(f'Invalid {field} for {contrast_id}')
+    return number
+
+
+def _contrast_metadata_table(frame, source):
+    identity = ['contrast_id', 'arm_id', 'reference_condition_id', 'pairing', 'time_min', 'reference_time_min']
+    missing = [column for column in identity if column not in frame.columns]
+    if missing:
+        raise ValueError(source + ' metadata missing ' + ','.join(missing))
+    work = frame.loc[:, identity].copy()
+    work['contrast_id'] = work['contrast_id'].astype(str)
+    for field in ('time_min', 'reference_time_min'):
+        work[field] = [
+            _canonical_minutes(value, contrast_id, field)
+            for value, contrast_id in zip(work[field].tolist(), work['contrast_id'].tolist())
+        ]
+    collapsed = work.drop_duplicates()
+    duplicated = collapsed['contrast_id'].duplicated(keep=False)
+    if duplicated.any():
+        conflicts = ','.join(sorted(set(collapsed.loc[duplicated, 'contrast_id'])))
+        raise ValueError('Conflicting contrast metadata from ' + source + ': ' + conflicts)
+    return collapsed.set_index('contrast_id')
+
+
+def _metadata_agrees(left, right):
+    from .study_design import same_time
+    for contrast_id in left.index.intersection(right.index):
+        first, second = left.loc[contrast_id], right.loc[contrast_id]
+        for field in ('arm_id', 'reference_condition_id', 'pairing'):
+            if str(first[field]) != str(second[field]):
+                raise ValueError(f'Conflicting {field} for {contrast_id}')
+        for field in ('time_min', 'reference_time_min'):
+            x, y = first[field], second[field]
+            if pd.isna(x) and pd.isna(y):
+                continue
+            if pd.isna(x) or pd.isna(y) or not same_time(x, y):
+                raise ValueError(f'Conflicting {field} for {contrast_id}')
+
+
+def order_method_scores(frame, *, design=None, comparisons=None):
+    """kinase/method_scores의 행 순서만 canonical minutes로 맞춘다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «method_scores 저장 순서»
+    사전등록: 2026-10-14. g8 method_scores가 contrast ID 순인 것을 본 뒤. 탐색적. primary 승격 금지.
+    해석 한계: 저장 순서다. 점수, p/q, membership, 선정, no-call을 바꾸지 않는다. 미기록 시간을 0분으로 만들지 않는다.
+    주장 금지: 시간순 저장을 kinase 활성, 비활성, 또는 새 분석 완료로 적지 않는다.
+    """
+    columns = list(frame.columns)
+    audit = {
+        'policy': 'canonical_minutes_within_method_scope',
+        'metadata_source': None,
+        'sort_keys': [],
+        'unresolved_time_contrasts': [],
+        'time_order_complete': False,
+        'status': 'empty',
+    }
+    if len(frame) == 0:
+        return frame.copy(), audit
+    if 'method_id' not in frame.columns or 'contrast_id' not in frame.columns:
+        raise ValueError('method_scores is missing method_id or contrast_id')
+    designed = compared = None
+    if design is not None:
+        from .contrast_quantification import ContrastEstimator
+        designed = _contrast_metadata_table(pd.DataFrame([
+            ContrastEstimator(design).metadata(contrast) for contrast in design.get('contrasts') or []
+        ]), 'design')
+    if comparisons is not None:
+        compared = _contrast_metadata_table(comparisons, 'quant/comparisons')
+    if designed is not None and compared is not None:
+        _metadata_agrees(designed, compared)
+        resolved = designed
+        available = set(designed.index) & set(compared.index)
+        audit['metadata_source'] = 'design+quant/comparisons'
+    elif designed is not None:
+        resolved = designed
+        available = set(designed.index)
+        audit['metadata_source'] = 'design'
+    elif compared is not None:
+        resolved = compared
+        available = set(compared.index)
+        audit['metadata_source'] = 'quant/comparisons'
+    else:
+        raise ValueError('method_scores time order requires design or quant/comparisons metadata')
+    contrast_ids = frame['contrast_id'].astype(str)
+    missing = sorted(set(contrast_ids) - available)
+    if missing:
+        raise ValueError('method_scores contrast_id has no canonical metadata: ' + ','.join(missing))
+    work = frame.copy()
+    work['_scope_arm'] = contrast_ids.map(resolved['arm_id']).to_numpy()
+    work['_scope_reference'] = contrast_ids.map(resolved['reference_condition_id']).to_numpy()
+    work['_scope_pairing'] = contrast_ids.map(resolved['pairing']).to_numpy()
+    work['_scope_time'] = pd.to_numeric(contrast_ids.map(resolved['time_min']), errors='coerce').to_numpy()
+    keys = ['method_id']
+    public = ['method_id']
+    if 'method_version' in frame.columns:
+        work['_scope_version'] = frame['method_version'].map(lambda value: '' if pd.isna(value) else str(value)).to_numpy()
+        keys.append('_scope_version')
+        public.append('method_version')
+    keys += ['_scope_arm', '_scope_reference', '_scope_pairing']
+    public += ['arm_id', 'reference_condition_id', 'pairing']
+    if 'track' in frame.columns:
+        keys.append('track')
+        public.append('track')
+    keys.append('_scope_time')
+    public.append('time_min')
+    for column in ('contrast_id', 'candidate_id', 'score_name', 'method_result_id'):
+        if column in frame.columns:
+            keys.append(column)
+            public.append(column)
+    ordered = work.sort_values(keys, kind='mergesort', na_position='last').loc[:, columns].reset_index(drop=True)
+    counts = contrast_ids.value_counts()
+    unresolved = []
+    for contrast_id, time_min in resolved['time_min'].items():
+        if contrast_id in set(contrast_ids) and pd.isna(time_min):
+            unresolved.append({'contrast_id': str(contrast_id), 'rows': int(counts[contrast_id])})
+    unresolved.sort(key=lambda item: item['contrast_id'])
+    audit.update(sort_keys=public, unresolved_time_contrasts=unresolved,
+                 time_order_complete=not unresolved, status='ordered' if not unresolved else 'ordered_with_unresolved_time')
+    return ordered, audit
+
+
+def write_tables(tables, directory, *, design=None):
+    if 'kinase/method_scores' in tables:
+        ordered, score_audit = order_method_scores(
+            tables['kinase/method_scores'], design=design, comparisons=tables.get('quant/comparisons'))
+        tables = {**tables, 'kinase/method_scores': ordered}
+    else:
+        score_audit = None
     if 'science/inference_results' in tables:
         from . import astra_evidence_v6 as science_engine
     elif any(name.startswith('science/') for name in tables):
@@ -291,11 +442,16 @@ def write_tables(tables,directory):
             keys=science_engine.KEYS.get(short)
         elif science_engine and hasattr(science_engine,'ADDITIONAL_KEYS'):
             keys=keys or science_engine.ADDITIONAL_KEYS.get(name)
-        dictionary[name+'.csv']={'rows':len(frame),'columns':list(frame),'unique_key':keys,
+        entry={'rows':len(frame),'columns':list(frame),'unique_key':keys,
             'dtypes':{k:str(v) for k,v in frame.dtypes.items()},'nullable':True,
             'missing':'unobserved/unavailable; never zero; status/reasons accompany quantities',
             'units':'minutes; log2 relative contrast; original positive intensity; counts as named',
             'row_grain':keys,'inference':'descriptive; p/q only explicitly labeled external gene-set statistics'}
+        if name=='kinase/method_scores' and score_audit is not None:
+            entry.update(row_order_policy=score_audit['policy'], row_order_metadata_source=score_audit['metadata_source'],
+                row_order_keys=score_audit['sort_keys'], unresolved_time_contrasts=score_audit['unresolved_time_contrasts'],
+                time_order_complete=score_audit['time_order_complete'], row_order_status=score_audit['status'])
+        dictionary[name+'.csv']=entry
     return dictionary
 
 
@@ -499,7 +655,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
             raise ValueError('Scientific source changed during execution; retry on a frozen release')
         fields,transfer,brief=transfer_contract(snapshot,design,context,literature)
         scientific['study/input_field_manifest']=pd.DataFrame(fields)
-        validation=validate_science(scientific,design);dictionary=write_tables(scientific,directory)
+        validation=validate_science(scientific,design);dictionary=write_tables(scientific,directory,design=design)
         provenance={'schema_version':package_version,'order_id':order_id,'order_code':config['order_code'],'run_id':run_id,'analysis_profile':profile,
             'execution_profile':execution,
             'input_hashes':hashes,'design_hash':object_hash(design),'input_context_hash':object_hash(snapshot),'literature_pin_hash':object_hash(literature),
@@ -657,7 +813,7 @@ def replay_package(directory,output,*,specificity_manifest=None):
     if (directory/'references/finding_literature_pin.json').is_file():
         from .astra_literature import apply
         apply(tables,json.loads((directory/'references/finding_literature_pin.json').read_text()),config['snapshot'],config['literature'])
-    validate_science(tables,config['design']);output.mkdir(parents=True,exist_ok=False);write_tables(tables,output)
+    validate_science(tables,config['design']);output.mkdir(parents=True,exist_ok=False);write_tables(tables,output,design=config['design'])
     reader_results=[]
     if 'reader/packet' in tables:
         from .astra_reader import write_reader

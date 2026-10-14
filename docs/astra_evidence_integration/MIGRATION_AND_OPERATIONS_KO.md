@@ -64,6 +64,14 @@ query cache는 검증된 성공/no_hit만 재사용한다. 실패·partial은 �
 - `LITERATURE.md`의 구간 안내는 `literature_sources.csv`의 `source_key`, title, DOI, PMID, `evidence_location`이다. `source_key` 순으로 구간을 각각 남기고, 고유 논문 수와 구간 수를 따로 적는다. pin documents의 빈 DOI는 그 목록에 넣지 않는다. 승인 조건은 «문헌 검토 단계»와 같다.
 - `method_executions`의 executed와 `method_scores` 행 수는 유의한 kinase 활성 검출이 아니다. `insufficient_coverage`는 비활성이 아니다. method q로 특정 kinase의 활성 또는 비활성을 결론내지 않는다. no-call은 v6 미적용의 증거가 아니다. 이 문장은 저장된 상태 개수를 옮길 뿐 새 q 임계를 적용하지 않는다.
 
+## method_scores 저장 순서
+
+2026-10-14 선언. g8 `g8-b94289df62a5497c931b7f6476ab86a9`의 `kinase/method_scores.csv`가 contrast ID 문자열 순으로 저장된 것을 본 뒤의 탐색적 출력 규칙이다. primary 승격 금지. 새 측정 임계는 없다. 점수, p/q, membership, 선정, no-call을 바꾸지 않는다.
+
+`write_tables()`가 `kinase/method_scores`를 쓰기 전에 `order_method_scores()`로 행 순서만 바꾼다. 시간은 `ContrastEstimator.metadata()` 또는 `quant/comparisons`의 `KEY_COLUMNS`에 이미 있는 canonical minutes다. label, contrast ID, 시점 목록으로 시간을 추정하지 않고, minutes를 다시 단위 변환하지 않는다. 정렬 키는 `method_id`, `method_version`, `arm_id`, `reference_condition_id`, `pairing`, 스키마에 있는 `track`, `time_min`, `contrast_id`, `candidate_id`, `score_name`, `method_result_id`다. 같은 시각의 contrast는 합치지 않는다. 미기록 시간은 그 범위의 유한 시간 뒤에 두고 0으로 채우지 않는다. metadata 충돌, 알 수 없는 contrast, 무한대·단위 문자열은 발행을 막는다. metadata가 없으면 기존 ID순 CSV를 발행하지 않는다. 빈 표는 그대로 둔다.
+
+이 정렬은 계산 순회를 바꾸지 않는다. `evidence_methods.py`, `official_method_tracks.py`, `astra_evidence_v6.py`의 cache fingerprint를 이 출력 순서 때문에 바꾸지 않는다. 정상 생성과 replay는 같은 writer에 설계를 전달한다. 이미 발행된 패키지 ZIP은 다시 서명하지 않는다.
+
 ## PhosX 등록 자원
 
 2026-10-13 선언. 회차 09에서 실행 전에 고정한 행렬 해시를 그대로 쓴다. PSSM `7d18a78d6efc45925aacae9c62ea26c5d7c22519eb856b2891debeed0ea42c6d`, background `487beac611126c973c36b3b01161991a7c01d08e8d00f764136eb2c45aac1c11`, metadata `ab48c161eb8f35225cc410331c71cd0d35c1fd198a828a6eb78069d3fc341952`. 코드 commit `b556f59c39f099b5f3fcb574a8a70856c3fdc82c`.

@@ -3574,4 +3574,15 @@
 - **해석 한계:** 후보 연결 수는 활성이나 비활성이 아니다. 시간 순서는 선정 점수를 바꾸지 않는다. DOI를 보여도 승인된 비교는 늘지 않는다. 15개 관측으로 insulin cascade를 구성하지 않는다.
 - **결정성:** 새 seed·solver 없음. 새 측정 임계 없음. 회귀 검사는 `PYTHONPATH=.:workers python -m pytest ptm_shared/tests/test_reader_stored_links.py ptm_shared/tests/test_reader_reading_guidance.py ptm_shared/tests/test_astra_literature.py`.
 
+### [2026-10-14] method_scores 저장 순서 — canonical minutes
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_package.py` `order_method_scores`, `write_tables`
+- **구현 대상 설계:** `docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md` «method_scores 저장 순서»
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). g8 `g8-b94289df62a5497c931b7f6476ab86a9`의 method_scores가 contrast ID 순인 것을 본 뒤. 새 측정 임계 없음.
+- **내용:** `write_tables()`가 method_scores를 쓰기 전에 설계 또는 `quant/comparisons`의 canonical minutes로 행 순서만 바꾼다. 정상 생성과 replay가 그 writer에 design을 전달한다. 계산 파일과 cache fingerprint는 바꾸지 않았다. 발행 g8 ZIP은 유지했다. 검토용 CSV는 `data/review/g8-method-score-order`.
+- **논문에서의 용도:** limitation (저장 순서). kinase 귀속 결과에는 쓰지 않는다.
+- **해석 한계:** 시간순 저장은 활성이나 비활성이 아니다. 미기록 시간을 0분으로 만들지 않는다. repository z-score 행은 PhosX가 아니다.
+- **결정성:** 새 seed·solver 없음. 회귀 검사는 `PYTHONPATH=.:workers python -m pytest ptm_shared/tests/test_method_score_order.py`. g8 1,859행을 method_result_id로 맞춰 셀이 같음을 확인했다. 정량·PhosX·문헌 검색·LLM은 실행하지 않았다.
+
 
