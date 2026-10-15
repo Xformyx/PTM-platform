@@ -31,6 +31,7 @@ from .annotation_registry import digest
 from .generic_kinase import fasta_taxonomy
 
 VERSION='astra_analysis_package.v4'
+READER_CODE_FILES=['astra_evidence_catalog.py']
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
     'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py']))
@@ -249,6 +250,9 @@ def validate_science(tables,design):
             keys=science_engine.KEYS.get(short)
         elif science_engine and hasattr(science_engine,'ADDITIONAL_KEYS'):
             keys=keys or science_engine.ADDITIONAL_KEYS.get(name)
+        if name.startswith('reader/'):
+            from .astra_evidence_catalog import TABLE_KEYS as ACCESS_KEYS
+            keys=keys or ACCESS_KEYS.get(name)
         if keys and (any(k not in df for k in keys) or df.duplicated(keys).any()):raise ValueError('Duplicate/missing row key: '+name)
         if not len(df.columns):raise ValueError('Missing header: '+name)
         for column,universe in [('form_id',forms),('contrast_id',contrasts),('candidate_id',candidates),('condition_id',conditions),('reference_condition_id',conditions),('series_id',series),('source_evidence_id',feature_ids),('target_evidence_id',feature_ids)]:
@@ -275,7 +279,7 @@ def validate_science(tables,design):
 
 
 def write_tables(tables,directory):
-    if 'science/inference_results' in tables:
+    if 'science/inference_results' in tables or any(n.startswith(('reader/', 'reader_adapter/')) for n in tables):
         from . import astra_evidence_v6 as science_engine
     elif any(name.startswith('science/') for name in tables):
         from . import astra_science as science_engine
@@ -313,6 +317,7 @@ def start_here(snapshot,counts,readiness):
             '. research_full is a policy, not collection completion. Partial references, missing localization and uncalibrated calls remain separate limits.',
         'Use the complete biological question, report_options.research_questions, special conditions and selected literature. Do not ask again for information already supplied. Expectations are not measurements.',
         'Primary quantitative evidence: quant/primary_A_input.csv. Check actual masks and rows when a summary conflicts; record the conflict.',
+        ('Whole evidence access: [catalog and query guide](reader/EVIDENCE_ACCESS.md). Selected findings are a summary preview. Unselected, withheld and no-call rows remain accessible; availability is not evidence of review.' if readiness.get('reader') else ''),
         json.dumps(counts,ensure_ascii=False),'Profile rows are candidate × contrast × track, not discovered or activated kinase counts.',
         'Kinase protein abundance, observed kinase regulatory sites and substrate footprints are separate evidence. Curated native, orthology, motif, KEA/network and literature hypotheses must remain distinct.',
         'Include baseline-undetected emergence and post-reference evidence without inventing baseline FC. Different post-references cannot be averaged as one baseline curve.',
@@ -346,7 +351,8 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
     profile=engine.PROFILE if engine else PROFILE
     from .analysis_context import verify_execution_profile
     execution = verify_execution_profile(config['experimental_context'], profile)
-    code_files=sorted(set(CODE_FILES+(engine.CODE_FILES if engine else [])))
+    code_files=sorted(set(CODE_FILES+(engine.CODE_FILES if engine else [])+
+                          (READER_CODE_FILES if profile=='astra_analysis.v6' else [])))
     code_capture={name:digest(Path(__file__).parent/name) for name in code_files}
     plan_resolver=engine.resolve_plan if engine else resolve_plan
     context=sanitize_research(effective_context(config['experimental_context']));design=context['study_design']
@@ -415,6 +421,8 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
             acquisition_policy=requested_acquisition_policy(context))
         source_execution=source_execution_record(context,config.get('source_pin_sha256'),sources)
         plan=plan_resolver(context,hashes,sources['pin_sha256'],fasta_taxonomy(inputs['FASTA']).values())
+        if profile=='astra_analysis.v6':
+            plan['code_dependencies']['reader_access']={name:code_capture[name] for name in READER_CODE_FILES}
         plan['source_execution']=source_execution
         plan['source_policy']=source_execution['message']
         metrics.plan=plan
@@ -630,6 +638,9 @@ def validate_package(directory):
         packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
         if json.loads((directory/'references/finding_literature_pin.json').read_text())!=packet['literature']['pin']:
             raise ValueError('Literature pin/table mismatch')
+    if (directory/'reader/evidence_catalog.json').is_file():
+        from .astra_evidence_catalog import EvidenceCatalog
+        EvidenceCatalog(directory)
     print(json.dumps({'manifest_files':len(manifest['files']),'scientific_tables':len(tables),'validated':True}))
     return checks
 
@@ -661,7 +672,7 @@ def replay_package(directory,output,*,specificity_manifest=None):
     reader_results=[]
     if 'reader/packet' in tables:
         from .astra_reader import write_reader
-        for relative in write_reader(output,tables):
+        for relative in write_reader(output,tables,source_root=directory):
             same=digest(directory/relative)==digest(output/relative)
             if not same:raise ValueError('Reader replay differs: '+relative)
             reader_results.append({'file':relative,'byte_equal':same})

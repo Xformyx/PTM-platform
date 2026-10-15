@@ -16,9 +16,9 @@ from . import astra_literature as literature_stage
 
 
 def read_tables(root):
+    from .astra_evidence_catalog import read_source
     dictionary=json.loads((Path(root)/'reproducibility/data_dictionary.json').read_text())
-    return {name[:-4]:pd.read_csv(Path(root)/name,low_memory=False,float_precision='round_trip',
-            dtype={k:'str' for k,v in d['dtypes'].items() if v in {'str','object'}}) for name,d in dictionary.items()}
+    return {name[:-4]:read_source(root,name,d) for name,d in dictionary.items()}
 
 
 def _copy_package(source, root):
@@ -33,16 +33,18 @@ def _copy_package(source, root):
     return run_id,directory
 
 
-def revise_temporal(source, output_dir, *, refresh_figures=False, checkpoint=lambda:None):
+def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=False, checkpoint=lambda:None):
     """Reader-only revision of saved temporal rows, without literature collection.
 
     The source and its successful pointer are never modified. Publication to the
     caller's output root happens only after validation and atomic archive sealing.
     """
-    from .astra_package import validate_package, write_tables, seal_archive, CODE_FILES
+    from .astra_package import validate_package, write_tables, seal_archive, CODE_FILES, READER_CODE_FILES
     from . import astra_evidence_v6 as engine
     from .astra_reader import write_reader, validate_reader, attach_reading_guidance
     from .astra_reader_temporal import attach_temporal, VERSION
+    from .astra_evidence_catalog import attach_access, VERSION as ACCESS_VERSION, INDEX, LINKS
+    if access_only and refresh_figures: raise ValueError('Evidence-access revision cannot refresh figures')
     source=Path(source).resolve();root=Path(output_dir).resolve()
     if root==source or source in root.parents:raise ValueError('Revision must not edit source package')
     validate_package(source)
@@ -53,18 +55,20 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, checkpoint=lam
     origin=json.loads((source/'provenance.json').read_text())
     run_id,directory=_copy_package(source,root)
     snapshot=json.loads((source/'study/user_input_snapshot.json').read_text())
-    if (source/'references/finding_literature_pin.json').is_file():
+    if not access_only and (source/'references/finding_literature_pin.json').is_file():
         literature_stage.apply(tables,json.loads((source/'references/finding_literature_pin.json').read_text()),
             snapshot,json.loads((source/'references/literature_pin.json').read_text()))
-    attach_temporal(tables);attach_reading_guidance(tables);validate_reader(tables)
+    if not access_only:
+        attach_temporal(tables);attach_reading_guidance(tables)
+    attach_access(tables);validate_reader(tables)
     baseline=json.loads((source/'reproducibility/data_dictionary.json').read_text())
     dictionary=deepcopy(baseline)
     update=write_tables({'reader/packet':tables['reader/packet']},directory)
     update['reader/packet.csv'].update(unique_key=baseline['reader/packet.csv']['unique_key'],row_grain=baseline['reader/packet.csv']['row_grain'])
     dictionary.update(update);json_write(directory/'reproducibility/data_dictionary.json',dictionary)
-    artifacts=write_reader(directory,tables)
+    artifacts=write_reader(directory,tables,access_only=access_only)
     # No source table, card, selection, literature result or figure may change.
-    preserved=[name for name in baseline if name!='reader/packet.csv']
+    preserved=[name for name in baseline if name not in {'reader/packet.csv', INDEX, LINKS}]
     manifest=json.loads((source/'manifest.json').read_text())
     if refresh_figures:
         from .astra_figures import figure_packet
@@ -74,18 +78,28 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, checkpoint=lam
         'figures/emerging_detection.svg','figures/emerging_detection_columns.csv'} if refresh_figures else set()
     preserved+= [name for name in manifest['files'] if name.startswith(('figures/','references/')) and name not in display_files]
     preserved+= ['reproducibility/replay_config.json']
+    if access_only:
+        preserved += [name for name in manifest['files'] if name.startswith('reader/') and name not in
+                      {'reader/packet.csv','reader/authoring_packet.json','reader/READ_ME.md',*artifacts}]
     for name in preserved:
         if digest(source/name)!=digest(directory/name):raise ValueError('Reader revision changed preserved bytes: '+name)
-    code_files=sorted(set(CODE_FILES+engine.CODE_FILES))
-    codes={name:digest(Path(__file__).with_name(name)) for name in code_files}
+    code_files=sorted(set(CODE_FILES+engine.CODE_FILES+READER_CODE_FILES))
+    refreshed_code=set(code_files) if not access_only else {'astra_evidence_catalog.py','astra_reader.py',
+        'astra_reader_revision.py','astra_package.py'}
+    captured={name:digest(Path(__file__).with_name(name)) for name in refreshed_code}
     (directory/'reproducibility/code/ptm_shared').mkdir(parents=True,exist_ok=True)
-    for name in code_files:shutil.copyfile(Path(__file__).with_name(name),directory/'reproducibility/code/ptm_shared'/name)
+    for name in refreshed_code:shutil.copyfile(Path(__file__).with_name(name),directory/'reproducibility/code/ptm_shared'/name)
+    codes={name:digest(directory/'reproducibility/code/ptm_shared'/name) for name in code_files}
     revision={'operation':'saved_reader_display_revision' if refresh_figures else 'saved_temporal_reader_revision','version':VERSION,'run_id':run_id,
         'parent_run_id':origin['run_id'],'parent_manifest_sha256':digest(source/'manifest.json'),
         'scientific_recalculation':False,'finding_selection_repeated':False,'literature_queries':0,
         'display_figures_refreshed':refresh_figures,'changed_display_files':sorted(display_files),
         'preserved_table_hashes':{name:digest(directory/name) for name in preserved},
         'reader_artifacts':artifacts,'replay_scope':'saved_rows_to_reader; not_method_recalculation_or_independent_validation'}
+    if access_only:
+        revision.update(operation='whole_evidence_access_revision',version=ACCESS_VERSION,
+                        refreshed_code_files=sorted(refreshed_code),
+                        replay_scope='M1_index_from_saved_sources; existing_reader_and_literature_not_recomputed')
     json_write(directory/'reproducibility/temporal_reader_revision.json',revision)
     provenance=deepcopy(origin);provenance.update(run_id=run_id,parent_package_run_id=origin['run_id'],
         parent_manifest_sha256=revision['parent_manifest_sha256'],operation=revision['operation'],scientific_recalculation=False,
@@ -109,17 +123,18 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, checkpoint=lam
     snapshot=json.loads((source/'study/user_input_snapshot.json').read_text())
     readiness=json.loads((source/'evidence/readiness.json').read_text())
     packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
-    if packet.get('literature'):
+    if packet.get('literature') and not access_only:
         readiness['literature']=packet['literature']['summary']
         readiness['reader']['literature_comparison']=readiness['literature']['status']
         json_write(directory/'evidence/readiness.json',readiness)
     counts=dict(zip(tables['evidence/coverage_funnel'].metric,tables['evidence/coverage_funnel']['count']))
-    (directory/'START_HERE_ASTRA.md').write_text(start_here(snapshot,counts,readiness)+
+    (directory/'START_HERE_ASTRA.md').write_text(((source/'START_HERE_ASTRA.md').read_text()+
+        '\n\nWhole evidence access: [catalog and query guide](reader/EVIDENCE_ACCESS.md). Summary findings are a preview, not the full evidence scope.\n' if access_only else start_here(snapshot,counts,readiness))+
         '\n\nSaved reader revision: original scientific tables and literature decisions retained; no new analysis.\n',encoding='utf-8')
     (directory/'evidence_report.html').write_text((source/'evidence_report.html').read_text()+
         '\n<p><a href="reader/TEMPORAL_EVIDENCE.md">Saved temporal observations and sensitivity evidence</a></p>\n',encoding='utf-8')
     checkpoint()
-    if codes!={name:digest(Path(__file__).with_name(name)) for name in code_files}:raise ValueError('Reader source changed during revision')
+    if captured!={name:digest(Path(__file__).with_name(name)) for name in refreshed_code}:raise ValueError('Reader source changed during revision')
     archive,files=seal_archive(directory,root,run_id,engine.VERSION,checkpoint)
     result=deepcopy(json.loads((source/'platform_run.json').read_text())) if (source/'platform_run.json').is_file() else {}
     result.update(run_id=run_id,provenance=provenance,analysis_plan=plan)
@@ -180,8 +195,8 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
                 if not p.is_relative_to(directory) or not p.is_file() or digest(p)!=doc.get('sha256'):
                     raise ValueError('New literature binary must already exist in the validated package; use metadata/excerpts otherwise')
     code_files=sorted(set(engine.CODE_FILES))
-    from .astra_package import CODE_FILES
-    code_files=sorted(set(code_files+CODE_FILES))
+    from .astra_package import CODE_FILES, READER_CODE_FILES
+    code_files=sorted(set(code_files+CODE_FILES+READER_CODE_FILES))
     code_hashes={name:digest(Path(__file__).with_name(name)) for name in code_files}
     metrics=StageLedger(directory/'stage_checkpoint.json',engine.PROFILE,object_hash(code_hashes))
     from .astra_plan import STAGES
@@ -195,6 +210,8 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
         summary=literature_stage.apply(tables,pin,config['snapshot'],config['literature'])
         metrics.plan['fingerprints']['literature']=pin['request_sha256']
     with stage('assemble_evidence_package',metrics,checkpoint,lambda _:None):
+        from .astra_evidence_catalog import attach_access
+        attach_access(tables)
         changed={name:tables[name] for name in ['reader/packet',*literature_stage.TABLE_KEYS]}
         if selection_revision:
             from .astra_inputs import transfer_contract

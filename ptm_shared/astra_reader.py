@@ -17,6 +17,7 @@ from .research_questions import build_question_map
 from .reader_authoring import build_authoring_packet
 from .astra_reader_temporal import (attach_temporal, validate_temporal, write_temporal,
                                     SOURCE_TABLES as TEMPORAL_SOURCE_TABLES)
+from .astra_evidence_catalog import attach_access, write_evidence_access
 
 VERSION = 'astra_reader.v1'
 TABLE_KEYS = {'reader/cards': ['card_id'], 'reader/findings': ['finding_id'],
@@ -207,6 +208,7 @@ def build_reader_tables(tables, design, snapshot=None):
     combined = {**tables, **result}
     attach_temporal(combined)
     attach_reading_guidance(combined)
+    attach_access(combined)
     result['reader/packet'] = combined['reader/packet']
     return result
 
@@ -385,16 +387,27 @@ def write_phosx_time_views(directory, tables):
     return ['reader/PHOSX_TIME_COURSE.md','reader/phosx_time_summary.csv','reader/phosx_assay_time_results.csv']
 
 
-def write_reader(directory, tables):
+def write_reader(directory, tables, *, source_root=None, access_only=False):
     """Deterministic JSON/Markdown views of the canonical reader tables."""
     from .generic_workflow import json_write
     directory = Path(directory)
+    access_artifacts = write_evidence_access(directory, source_root=source_root)
     packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
+    if access_only:
+        # A reader revision must not reinterpret newer archived literature/cards
+        # with an older checkout. Keep all existing interpretation bytes intact.
+        json_write(directory/'reader/authoring_packet.json', packet)
+        note = '\n\n## 전체 근거 접근 (M1)\n\n[전체 인덱스와 조회 절차](EVIDENCE_ACCESS.md). 선정 findings는 요약이며 전체 접근 범위를 제한하지 않습니다. 인덱스 생성은 검토 수행을 뜻하지 않습니다.\n'
+        path = directory/'reader/READ_ME.md'
+        original = path.read_text() if path.exists() else ''
+        if note not in original: path.write_text(original + note, encoding='utf-8')
+        return access_artifacts + ['reader/authoring_packet.json', 'reader/READ_ME.md']
     for name,value in [('authoring_packet',packet),('coverage_summary',packet['coverage_inventory']),
             ('question_map',packet['research_question_evidence_map']),('selection_audit',packet['observation_selection_audit'])]:
         json_write(directory/'reader'/f'{name}.json',value)
     coverage = packet['coverage_inventory']
     lines = ['# 주요 관측과 근거 — Astra reader',
+        '[전체 근거 catalog와 미선정·보류·no-call 조회](EVIDENCE_ACCESS.md). 선정 findings는 요약입니다. 전체 접근 가능성과 실제 검토 범위는 다릅니다.',
         '[실험 원문과 설계](../study/STUDY_BRIEF.md) · [원문 snapshot](../study/user_input_snapshot.json) · '
         '[전체 카드](cards.csv) · [전체 행의 보류/선정 사유](coverage.csv) · [구조화 packet](authoring_packet.json)',
         '읽기 순서: **연구 질문·[준비 상태](../evidence/readiness.json) → 아래 선정 관측 → 시간·방법·문헌 근거 → 필요한 원본 행**. '
@@ -459,5 +472,5 @@ def write_reader(directory, tables):
     (directory/'reader/READ_ME.md').write_text(rendered,encoding='utf-8')
     if packet.get("literature"):
         from .astra_literature import write
-        return ARTIFACTS + method_artifacts + temporal_artifacts + write(directory,tables)
-    return ARTIFACTS + method_artifacts + temporal_artifacts
+        return ARTIFACTS + access_artifacts + method_artifacts + temporal_artifacts + write(directory,tables)
+    return ARTIFACTS + access_artifacts + method_artifacts + temporal_artifacts

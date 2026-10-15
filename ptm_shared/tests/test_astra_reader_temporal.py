@@ -79,7 +79,8 @@ def test_saved_values_na_scope_links_questions_and_writer(saved, tmp_path):
     (tmp_path/'reader').mkdir()
     # Hard guards: nothing in this boundary may calculate or retrieve.
     with patch('ptm_shared.astra_package.compute_science', side_effect=AssertionError('calculation')), \
-         patch('ptm_shared.astra_literature.collect', side_effect=AssertionError('retrieval')):
+         patch('ptm_shared.astra_literature.collect', side_effect=AssertionError('retrieval')), \
+         patch('ptm_shared.astra_reader.write_evidence_access', return_value=[]):
         temporal.attach_temporal(saved)
         temporal.validate_temporal(saved)
         write_reader(tmp_path, saved)
@@ -169,18 +170,23 @@ def test_immutable_revision_failure_keeps_pointer_and_source(saved, tmp_path):
     source = tmp_path/'source';source.mkdir()
     (source/'reproducibility/code/ptm_shared').mkdir(parents=True)
     (source/'study').mkdir()
+    (source/'evidence').mkdir()
+    saved['evidence/coverage_funnel']=pd.DataFrame([{'metric':'forms','denominator':'all','count':6}])
     dictionary = write_tables(saved, source)
     json_write(source/'reproducibility/data_dictionary.json', dictionary)
     json_write(source/'reproducibility/replay_config.json', {'engine_profile':'astra_analysis.v6'})
     json_write(source/'provenance.json', {'run_id':'old','code_sha256':{},'stage_fingerprints':{}})
     json_write(source/'study/analysis_plan.json', {'code_dependencies':{'evidence':{}}})
+    json_write(source/'study/user_input_snapshot.json', {'original':{}})
+    json_write(source/'evidence/readiness.json', {})
     (source/'START_HERE_ASTRA.md').write_text('old')
     (source/'evidence_report.html').write_text('old')
     manifest = {str(p.relative_to(source)):{'sha256':digest(p),'bytes':p.stat().st_size} for p in source.rglob('*') if p.is_file()}
     json_write(source/'manifest.json', {'files':manifest})
     output=tmp_path/'out';output.mkdir();pointer=output/'enrichment_free_current.json';pointer.write_text('previous_success')
     with patch('ptm_shared.astra_package.validate_package'), patch('ptm_shared.astra_reader_revision.read_tables',return_value=saved), \
-         patch('ptm_shared.astra_reader.validate_reader'), patch('ptm_shared.astra_package.seal_archive',side_effect=RuntimeError('write failure')):
+         patch('ptm_shared.astra_reader.validate_reader'), patch('ptm_shared.astra_reader.write_evidence_access',return_value=[]), \
+         patch('ptm_shared.astra_package.seal_archive',side_effect=RuntimeError('write failure')):
         with pytest.raises(RuntimeError,match='write failure'): revise_temporal(source,output)
     assert pointer.read_text() == 'previous_success'
     assert all(digest(source/name)==entry['sha256'] for name,entry in manifest.items())
