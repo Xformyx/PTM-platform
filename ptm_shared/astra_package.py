@@ -31,7 +31,7 @@ from .annotation_registry import digest
 from .generic_kinase import fasta_taxonomy
 
 VERSION='astra_analysis_package.v4'
-READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py']
+READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py','astra_literature_review.py']
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
     'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py']))
@@ -253,7 +253,8 @@ def validate_science(tables,design):
         if name.startswith('reader/'):
             from .astra_evidence_catalog import TABLE_KEYS as ACCESS_KEYS
             from .astra_reader_full import TABLE_KEYS as FULL_KEYS
-            keys=keys or ACCESS_KEYS.get(name) or FULL_KEYS.get(name)
+            from .astra_literature_review import TABLE_KEYS as REVIEW_KEYS
+            keys=keys or ACCESS_KEYS.get(name) or FULL_KEYS.get(name) or REVIEW_KEYS.get(name)
         if keys and (any(k not in df for k in keys) or df.duplicated(keys).any()):raise ValueError('Duplicate/missing row key: '+name)
         if not len(df.columns):raise ValueError('Missing header: '+name)
         for column,universe in [('form_id',forms),('contrast_id',contrasts),('candidate_id',candidates),('condition_id',conditions),('reference_condition_id',conditions),('series_id',series),('source_evidence_id',feature_ids),('target_evidence_id',feature_ids)]:
@@ -298,7 +299,8 @@ def write_tables(tables,directory):
             keys=keys or science_engine.ADDITIONAL_KEYS.get(name)
         if name.startswith('reader/'):
             from .astra_reader_full import TABLE_KEYS as FULL_KEYS
-            keys=keys or FULL_KEYS.get(name)
+            from .astra_literature_review import TABLE_KEYS as REVIEW_KEYS
+            keys=keys or FULL_KEYS.get(name) or REVIEW_KEYS.get(name)
         dictionary[name+'.csv']={'rows':len(frame),'columns':list(frame),'unique_key':keys,
             'dtypes':{k:str(v) for k,v in frame.dtypes.items()},'nullable':True,
             'missing':'unobserved/unavailable; never zero; status/reasons accompany quantities',
@@ -321,7 +323,7 @@ def start_here(snapshot,counts,readiness):
             '. research_full is a policy, not collection completion. Partial references, missing localization and uncalibrated calls remain separate limits.',
         'Use the complete biological question, report_options.research_questions, special conditions and selected literature. Do not ask again for information already supplied. Expectations are not measurements.',
         'Primary quantitative evidence: quant/primary_A_input.csv. Check actual masks and rows when a summary conflicts; record the conflict.',
-        ('Whole evidence access: [catalog and query guide](reader/EVIDENCE_ACCESS.md). Selected findings are a summary preview. Unselected, withheld and no-call rows remain accessible; availability is not evidence of review.' if readiness.get('reader') else ''),
+        ('Whole evidence access: [catalog and query guide](reader/EVIDENCE_ACCESS.md). Selected findings are a summary preview. Unselected, withheld and no-call rows remain accessible; availability is not evidence of review. [Typed literature review plan](reader/LITERATURE_REVIEW_PLAN.md) is separate from actual search and comparison.' if readiness.get('reader') else ''),
         json.dumps(counts,ensure_ascii=False),'Profile rows are candidate × contrast × track, not discovered or activated kinase counts.',
         'Kinase protein abundance, observed kinase regulatory sites and substrate footprints are separate evidence. Curated native, orthology, motif, KEA/network and literature hypotheses must remain distinct.',
         'Include baseline-undetected emergence and post-reference evidence without inventing baseline FC. Different post-references cannot be averaged as one baseline curve.',
@@ -644,7 +646,10 @@ def validate_package(directory):
             raise ValueError('Literature pin/table mismatch')
     if (directory/'reader/evidence_catalog.json').is_file():
         from .astra_evidence_catalog import EvidenceCatalog
-        EvidenceCatalog(directory)
+        catalog=EvidenceCatalog(directory)
+        if (directory/'reader/literature_review_plan.json').is_file():
+            from .astra_literature_review import validate_plan
+            validate_plan(catalog)
     print(json.dumps({'manifest_files':len(manifest['files']),'scientific_tables':len(tables),'validated':True}))
     return checks
 

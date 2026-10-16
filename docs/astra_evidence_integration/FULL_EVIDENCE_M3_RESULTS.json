@@ -1,0 +1,865 @@
+{
+  "actual_model_calls": 0,
+  "actual_retrievals": 0,
+  "added_files": [
+    "reader/LITERATURE_REVIEW_PLAN.md",
+    "reader/literature_review_plan.json",
+    "reader/literature_review_subjects.csv",
+    "reproducibility/code/ptm_shared/astra_literature_review.py"
+  ],
+  "archive": "/Users/josephk/Projects/PTM-platform/codex-inputs/full-evidence-m3/final/revision/astra_analysis_package_g0-d09c6d03835a46248e5bdb6fe9e07e8c.zip",
+  "baseline_run": "g0-24d53aad7f924819bde2389b8316c241",
+  "changed_existing_files": {
+    "START_HERE_ASTRA.md": {
+      "after": "4a4fd9086ca5d8ff141dfc4b3c4de81e9d2f389e387e75d14c94d4440fd19a91",
+      "before": "6a0dbd4229fe15ce7b4aab2896b638907432ec326fab9d15cdd0e297b2310775"
+    },
+    "evidence_report.html": {
+      "after": "06c940af2c58200e07981de87a57d96a38cfed5052ac4d4b19d83739eb1e20b4",
+      "before": "7fd6ae7eb0edad9bdadedb62b86764badaa054da39bc2a91f6ee13aa0b05182a"
+    },
+    "provenance.json": {
+      "after": "3458ca18c7e0794038dfb77670ad8dd6bd9c0e263d45c201a1692d8e9e969c1f",
+      "before": "3c472a53c13d258d49b854ddfc8394e9657b67057a933452a861117a1b067f74"
+    },
+    "reader/EVIDENCE_ACCESS.md": {
+      "after": "55413a7e580a31726b3abea9d0d4f29a70eee5960c30608b20e3147d9de81bce",
+      "before": "5fc77b9b059c735c42613b45fed7f767dbb6ea48923a0cf4d2f29bb903dc80ae"
+    },
+    "reader/READ_ME.md": {
+      "after": "fc4bd82a3068744916470b16db370199229054d4bd35fd74a725bf9947f2e599",
+      "before": "6122ab8b1f217dcd0ce6c7e119886a17226acda9edf086b1383671089410b083"
+    },
+    "reader/authoring_packet.json": {
+      "after": "95574c0d550a9ca01f1e97160fe3c40cac47372fd8fc763d724e0b7b2cc54699",
+      "before": "043219bfe54543531dc2e47ba1e5fdd47c49ed13639309dc023611e813dd64e2"
+    },
+    "reader/evidence_catalog.json": {
+      "after": "61ff8ed92c2e3b78d1b1b465ec299a50e5747ca6fc5b4912237e8c165fb08efe",
+      "before": "6889a73d72682f67f8b395b94cfd432ea2935af409513f17ca6fd029eec068be"
+    },
+    "reader/packet.csv": {
+      "after": "08d0aad022ec6e3987caf2635a09f04f1b097a55d53b3184b3d68ff6ab7474d8",
+      "before": "8a352e7b0da2a07aeef2ddcf1aec0d4df1b9c934dad02f83846b1ff52f2afccd"
+    },
+    "reproducibility/code/ptm_shared/astra_literature.py": {
+      "after": "b5e30e2e0616459cd7236bb0d27435c7315b1655a8db76d08cffa0a81364c51c",
+      "before": "87e9becadb5350dee9608af8c085cf4681ac7b1ae000021e383585f00b7c9cbf"
+    },
+    "reproducibility/code/ptm_shared/astra_package.py": {
+      "after": "e04126700f0d7c7c860b060a5adc55d909249aa85e746908d0271f60ee9075da",
+      "before": "9dadb22f9354557edd2bad0800f15ac16d20210cf28821ec255aca2836576d71"
+    },
+    "reproducibility/code/ptm_shared/astra_reader.py": {
+      "after": "f2e9019ae1d1529da946ed6a95b6fa29a4da05dcec273735a27aa3427b72b987",
+      "before": "1f8ec89c639306a665dc8f194891ea6f6d893e3d7431484e535ebfb264076260"
+    },
+    "reproducibility/code/ptm_shared/astra_reader_revision.py": {
+      "after": "5eea2e7f17758e676a7effb219a62eca627f19bad6ee617f835543e4f43c1bd7",
+      "before": "8700fa5b7db19b8cb26c16e0e45c5fccc2d23aef0ac501bc49a2fb65cff29dc8"
+    },
+    "reproducibility/code/ptm_shared/finding_literature.py": {
+      "after": "98929fe20c512b6c6cc5ac35078a8644c62d51ab2ed3d586a3fd201f1ee55baa",
+      "before": "bf34f223fe72525c974a9ab2443fd873ac69962e5f7767bbb69b3c605fa7f37d"
+    },
+    "reproducibility/data_dictionary.json": {
+      "after": "4fb50b58393f600d145ecfa71e3482c80f114481b6de23c7b10657b7673c61a4",
+      "before": "49d6b43f48c0f855c62e83ebe97bc8243a1b589a30fe968b8dc27353195f7942"
+    },
+    "reproducibility/parent_reader_provenance.json": {
+      "after": "3c472a53c13d258d49b854ddfc8394e9657b67057a933452a861117a1b067f74",
+      "before": "00c1b61d630a8dd32766f056cb2dc784b5de9832d879d1e6ad61aa865c51cbcc"
+    },
+    "reproducibility/temporal_reader_revision.json": {
+      "after": "36ea87b8b1cd104a2a09803754dcd1897b313286f7aa4b2c51993bd569177f8a",
+      "before": "cc4cff2dabc73504606b64f369c5b977555d8a3e6b893b1e8948a69761561854"
+    },
+    "reproducibility/temporal_reader_stage.json": {
+      "after": "1cb956509ae9f3290f711e590cbfb6478331fb5b784d56aac8ee37735cd3f342",
+      "before": "6b401ff1cc9ba81b30330921e4ef8ed351d7982603a5c0441859684e2971521d"
+    },
+    "study/analysis_plan.json": {
+      "after": "6da596e5fe16aa1a6250a6466aaeb4ef233eb4372ec3d2588c91e4ddc3b1cc2a",
+      "before": "3872b4fe680fb287a86046522328b500c27a05eb168f192d1e68bbb1b86345d7"
+    }
+  },
+  "elapsed_seconds": 308.95119995903224,
+  "git": {
+    "base": "4a29b769a106c513a6e39a33aaab948f9369699a",
+    "deployment": false,
+    "flags_changed": false,
+    "push": false
+  },
+  "package_root": "/Users/josephk/Projects/PTM-platform/codex-inputs/full-evidence-m3/final/revision/enrichment_free_runs/g0-d09c6d03835a46248e5bdb6fe9e07e8c",
+  "packet_only_M3_extension": true,
+  "passed": true,
+  "plan_metadata": {
+    "M4": "not_performed",
+    "by_eligibility": {
+      "eligible_with_source_restrictions": 158593
+    },
+    "by_subject_type": {
+      "comparison": 12499,
+      "detection": 16944,
+      "emergence": 19768,
+      "form": 2824,
+      "inference": 11502,
+      "method_result": 1859,
+      "observation": 2159,
+      "protein": 57150,
+      "ptm_contrast": 16944,
+      "raw_ptm": 16944
+    },
+    "cache_contract": "resolved source values/scope/questions + pinned literature + code/model/prompt/policy; summary excluded",
+    "current_execution": "not_requested",
+    "current_model_calls": 0,
+    "current_queries": 0,
+    "execution_extension_schema": "literature_subject_execution.v1",
+    "legacy_execution_authority": "reader/literature_search.csv; not reset by this plan",
+    "legacy_finding_pin_sha256": "575270523dd55ceda1b39fa0d5e62b359751150e0864dbfe842e3a4fef7fb420",
+    "legacy_selected_finding_ids": [
+      "finding_a0f138f34e259e65da05",
+      "finding_e9961a39b1192935b7b4",
+      "finding_d439daac7ed70c17907e",
+      "finding_85e82f2c754a7e5f6c15",
+      "finding_14ae32c53211dbe34c1a",
+      "finding_e68a84b5597284e7585d",
+      "finding_696636ad85310f1393ed",
+      "finding_e729d948655bb383bf90",
+      "finding_bd2193bf35d16ee950fd",
+      "finding_1011f501dabce788a13c",
+      "finding_ddd27caf48112aa8be08",
+      "finding_c3aed5d4ce7c30b2df7b",
+      "finding_852f4b96ec652776a5b8",
+      "finding_5ca13dd04345bb1bfb67",
+      "finding_99977f2c761f656ee19e"
+    ],
+    "literature_selection_file_sha256": "de95eed8076da7939fc8e70391320e72e92a573113c0ff55a434b045565ccf7c",
+    "population_semantics": "representations overlap; rows are not independent observations",
+    "request_contract": {
+      "max_subjects": "execution only, independent of retrieval layer quotas and max_queries/max_model_calls",
+      "reason": "required",
+      "requested_subject_ids": "explicit subset of plan",
+      "resume": "deferred_subject_ids from frozen execution pin"
+    },
+    "review_status": "not_recorded",
+    "schema_version": "literature_review_subjects.v1",
+    "subject_count": 158593,
+    "subjects": "reader/literature_review_subjects.csv",
+    "subjects_sha256": "3446690ca6af9da3414bf107eea94b153a7cc2d2a5cf17ce3d0a3a23ebb78491"
+  },
+  "plan_validation": {
+    "available": true,
+    "execution": "not_requested",
+    "subjects": 158593
+  },
+  "preserved_files": {
+    "evidence/analysis_limitations.json": "4a0ac9c413531185c2ae791285404167bf6485dd338f5c0d85eb521179f31e23",
+    "evidence/censoring_bounds.csv": "bcf47ffe21e529dc7e02232ea079819609b4c87fd515f453dbd351ab335e66ed",
+    "evidence/coverage_funnel.csv": "d21c6cdd91ede594e43568d76c4b2ecb87aab8fdf520b8daff99e452cd66eaa4",
+    "evidence/emergence_evidence.csv": "cf8647ac2089a2f264c4c46f65170fbb59301a3e27d45ee218977c5111d8cbfd",
+    "evidence/evidence_claims.jsonl": "3e8140b2d313e302916c156159c3cc8e9296830eadf190b1fd7b66faff07e951",
+    "evidence/feature_evidence_ledger.csv": "ce039f0e140dafba6d2e9e9bb49f67f7eaa3d8df014d4a93121a63e9e78f9111",
+    "evidence/normalization_offsets.csv": "d6987599fd51fa6c3fb6c1828eeffe81722db07c668125b230a7b574b50d4cdf",
+    "evidence/parent_adjustment_impact.csv": "1ee8ef327125b29dbbd3c4150fd770b80b1d03f3e6b31698f514e235ea5556bb",
+    "evidence/readiness.json": "591955ff9bd8cc8838a750d63863ca2dcc916532cba406ed5d6eacfe7da2ee39",
+    "evidence/technical_dispersion.csv": "6d79b51a75698ece3af9c8b8d0071d95599eccc488d92fa10c2de90cbd6b077d",
+    "evidence/technical_injection_omissions.csv": "b58f1cd1f7b94017f2cc07e7670937d3751b270f0023b08a9357b37faf5af602",
+    "figures/U_P_A_examples.svg": "04c52b017be5a4e4de48d190578dde6f8ad06f6bf1da1dd44f4ba33706addc76",
+    "figures/U_P_A_examples_source.csv": "1ee8ef327125b29dbbd3c4150fd770b80b1d03f3e6b31698f514e235ea5556bb",
+    "figures/coverage.svg": "4a704ffbd669ab97bb102e6fa726a1b4df5505817cf524484a14c7d8182f95e9",
+    "figures/coverage_source.csv": "d21c6cdd91ede594e43568d76c4b2ecb87aab8fdf520b8daff99e452cd66eaa4",
+    "figures/cross_layer_timing.svg": "e7ddea41eb6cfbc88a3a466c8082fb03b456cc8b7e27c0805d48b917070a3dc5",
+    "figures/cross_layer_timing_source.csv": "d0fb151db60fe2e2607880a4638dfbc0784acef2d9e942a26de7bc56c22d4064",
+    "figures/emerging_detection.png": "1c754112e825f178c5f92fc1b4101728688cb7c1a2ca5daad00c8e886252d32f",
+    "figures/emerging_detection.svg": "c747cbe72239bab951fe4c44b4d2b44d18d83eb247444bf0a6c9b91a8bea2f9f",
+    "figures/emerging_detection_columns.csv": "ddd3fb131a34783bd9ce3802fce1cac7d5a11c406ff85a122ebcbc5d73dd71cf",
+    "figures/emerging_detection_display.json": "60f825621a487fe2b9269324a2abd50597095fdc245dc3ab75154b79d71ff843",
+    "figures/emerging_detection_rows.csv": "2c1a18522f43924dc9e508b25efcde8c7f61c70d1d5c18fa471248760719e359",
+    "figures/emerging_detection_source.csv": "cf8647ac2089a2f264c4c46f65170fbb59301a3e27d45ee218977c5111d8cbfd",
+    "figures/figure_legends.json": "80a7cb0752eb2ecc440618b898eb36e7b5aab54a97613b8c264d76b4b500d31f",
+    "figures/kinase_footprints.svg": "2fae3a22f820118bb701b3fbe5ba4214ff3c37d13211c9ad652b1aa676ef3e6b",
+    "figures/kinase_footprints_points.csv": "fe8e4eb89795140e9bde4b25b3bf3288112f85fde66d4be908cf7fe9f8ae410d",
+    "figures/kinase_footprints_selection.csv": "a77c7f5bad74ab6d72e39dabfe789d8007d8ae1baf342cfa30f535b6d8e9c857",
+    "figures/kinase_footprints_source.csv": "130541865ae4eb439474e2d9a70b3a034303a8391561981cc0db7b7c745d075d",
+    "figures/parent_correction.svg": "8fe960629101de62212266fe4c6181c11974f489d71cb4352629d86a8f374ff7",
+    "figures/parent_correction_source.csv": "1ee8ef327125b29dbbd3c4150fd770b80b1d03f3e6b31698f514e235ea5556bb",
+    "figures/protein_trajectories.svg": "add013f646afa47b356d8644d4295e7943938ae771521f9aed248b92e886bc49",
+    "figures/protein_trajectories_points.csv": "190682e74a5b5db32aa2aa93c98f6b15eadcc5d019a55ef842b1332a66c78652",
+    "figures/protein_trajectories_selection.csv": "00470c180a34231796891042ac46a1dfe5b8348d36f63c28a4c8f8498bfc61dc",
+    "figures/protein_trajectories_source.csv": "08fe73c422929d0886cb0afd35b12206f8a867d25350b7d6e2205aa57faceb35",
+    "figures/substrate_contrast_heatmap.png": "9ec3ff16909e888f570d782a170b92d83043d06d427e3de1431f2289b0879491",
+    "figures/substrate_contrast_heatmap.svg": "e3abafb33c542768c7e8a14666d737baced1a942112025c6627699f8914781b2",
+    "figures/substrate_contrast_heatmap_columns.csv": "ce79f35782a9447988dbb2cda88b6539f5886368eee344f26158c2095c418973",
+    "figures/substrate_contrast_heatmap_display.json": "4fe3c6822effab558c5a77167acf07769ad7e5cfd8afd488e7e9c5a739e00a09",
+    "figures/substrate_contrast_heatmap_rows.csv": "2c1a18522f43924dc9e508b25efcde8c7f61c70d1d5c18fa471248760719e359",
+    "figures/substrate_contrast_heatmap_source.csv": "0936a28fab025b60255290ce4652a1f7274279740a536824b7802dadfa3b3875",
+    "figures/technical_dispersion.svg": "26f7d7e8583288bd4bc71557dd25b55270ed409716fd5b79f482bb9304618e9d",
+    "figures/technical_dispersion_source.csv": "6d79b51a75698ece3af9c8b8d0071d95599eccc488d92fa10c2de90cbd6b077d",
+    "inputs/PG.tsv": "57c874a46f57608a64a779c4ef8ddecd07273cc0603aa228b8fbd662cbfca745",
+    "inputs/PR.tsv": "7160e863ddaf5236d22c5dc95fd3b066355341e8b2b130f11ef12e5a46a52ba4",
+    "inputs/analysis_reference.fasta": "b0fdcde7454b166e7f62be41e5414ed3893e18b16a9fa0b3e3a9b96e3f74c71f",
+    "inputs/reference.fasta": "61b5d367511111d46377c78cfcfc1a09bacb0c1632c9960282520de732823c83",
+    "inputs/specificity/SPECIFICITY.json": "1f0f262e684276d95672f33ba79f7e2ff7e1d6b8f7a8d5d6cddce2874380a605",
+    "kinase/candidate_sensitivity.csv": "da21e80ee7b8d806b64372de878be00ddfda0be3f05ba5ccd8d85e517e0124cb",
+    "kinase/kea3_results.csv": "353764d299b94915559b68c8c0ecf0e0774bbff1d5f1b3de2cd3c08fa7f4502f",
+    "kinase/kinase_candidate_edges.csv": "cc00b9ea136d3737aeb5305a5438be820a6b8e8617d645927c0aac083d4365a3",
+    "kinase/kinase_candidate_summary.csv": "5554e85db275bd1b4662d77c27576445ae5d564d8880dae1f0a828b89c3a9c1f",
+    "kinase/kinase_protein_context.csv": "9be64c03039f4abef8d6ea095e26de9985e88c110176cfaa58cb4f2817cac1b3",
+    "kinase/kinase_self_site_context.csv": "5b60a36aefcce6583e9f8dd57f2b28ce4496982872e97145c2b734887edd7dbb",
+    "kinase/kinase_technical_omissions.csv": "967ce65cbef2e9d58b843313a39a62a6b8b3cecae21d264ad569aec240e3e039",
+    "kinase/kinase_temporal_profiles.csv": "130541865ae4eb439474e2d9a70b3a034303a8391561981cc0db7b7c745d075d",
+    "kinase/method_executions.csv": "b218a4da60c1c37ccfbb32137645f0bc438fcee9a4f9a2dcc6ea23d59e38506b",
+    "kinase/method_membership.csv": "8c7661c34d21f6fa3042fb40be1162d5c17a72c2ccf17247fcfe8a3ad0aa1e0d",
+    "kinase/method_scores.csv": "bac9ec3ce979ced99aee840471afef057cefda197f5c9a8076e3c71045359ccd",
+    "kinase/substrate_contributions.csv": "c1a6b4a59f9732c73bc51b180eee37591d9a7c92b6b6308051cad680a94def69",
+    "methods/METHODS.md": "7ad1ff4ef4a1f18cdf25bea1a3291158c8af9a5a79d34e7ae2aa9af2235f705c",
+    "methods/adapter_parameters.json": "821f1e0e242820ba416f75f6d5775e3d15187849f0b1337e14b06c7f3bb1ccdc",
+    "methods/method_registry.json": "4c4828dc82cd8cc49e54aaefd9e2760ad069982023e9795462ceeda13587783b",
+    "methods/motif.json": "6d98068969f324dda646607de5c2986324ec63dfde62ddc44b9edb53e08d52e6",
+    "methods/native_execution_runtime.json": "72d662de58aad694c02cec7e5eb82b65730befff321812bf3fdbe2faa0931a76",
+    "methods/normalization.json": "2a82432ee74a87f1fe9290161b6714b742de02fbaf1388b0fa17a50f34214007",
+    "methods/software_versions.json": "460eb187aa717f3df93e14d425c702b1c4d82416e133432a1159058d2fea35b8",
+    "methods/statistics_inventory.json": "3a4c7b386bfc61cb23a34ed3b2d1250193686b01ca922f0405aa12b3cb054ad5",
+    "quant/annotation_edges.csv": "ab555595c3f294dd63e65960e46c90744ac81efe49c5ebc9a08e0d8d93fb0bc4",
+    "quant/comparisons.csv": "0936a28fab025b60255290ce4652a1f7274279740a536824b7802dadfa3b3875",
+    "quant/detection.csv": "352228515a2a169aafd4699cce475fdfefb36a2f03c731b226966bf2ba2cbcb7",
+    "quant/emergent_kinase_evidence.csv": "cd8e1ac9670efe6d8ed65373f45780fce6a30fa79f6935f947d092ae84b2034e",
+    "quant/form_evidence_status.csv": "0229daf7ca1f0383d7f15dda2e67973cf07c9f7b17e6092fccc111db6f7c3639",
+    "quant/kinase_injection_omissions.csv": "c7dd60af7fb3ef655ec58ff9aec19d3d02391f30852bb61e3e1b7c456c28446b",
+    "quant/kinase_membership.csv": "0949fcf78cb754c90b43cb3314385934fca46e58f9e6298ccc8c8aca5e352915",
+    "quant/kinase_profiles.csv": "df78178a41f3aa50bc3fd391f6b9750598ed071a0f2a1259b89c467d81e56bee",
+    "quant/kinase_sensitivity.csv": "dd482c1d58e71e4154d9e6f9f9eeea632bff75e4b036724c12a4c9e333d48161",
+    "quant/primary_A_input.csv": "ec2129b23ab4b385fdec8809a2a6a7f075ea04578f4652eee64512dd471143b3",
+    "quant/protein_contrasts.csv": "08fe73c422929d0886cb0afd35b12206f8a867d25350b7d6e2205aa57faceb35",
+    "quant/runlevel.csv": "f9e960ed122fd3ba8773145a091110cf1c1539013ed8328bc1c8fcb88d8406a7",
+    "quant/site_mapping.csv": "2690b405e44bbf3ef56b521fd9cfc3063adff10d00756333721c52cef0807bea",
+    "quant/strict_parent_complete.csv": "8ccd0252df68b63eb67b60a764b8b644451c661afc1a76f453aeb6e25d3cf727",
+    "quant/strict_parent_paired.csv": "c1ced00d455ed75212b199aa5c18f7a6ba59e10e6f2b95ab544011a70b981b64",
+    "quant/strict_parent_peptide_masks.csv": "5bffe52d1722f46852f4945f5d3c3dda8e52c5ec4413a721427090ad2f0a241a",
+    "quant/strict_selected_sequences.csv": "9636bee80af780425c3eeea7720d314523cbda2b0155c0c8481e59f509394184",
+    "quant/strict_unmodified_proteins.csv": "69f8f847fd9e20c411c374f6b13dbbe6568b56dd725e1e13c319a7daf59fa661",
+    "quant/strict_unmodified_sequences.csv": "071cc1d937310233917710b8954305fe1a76055949a2a4567dceee095983846a",
+    "quant/summary.csv": "4d90b48233fb106cf67869f117f9221338846ab3e71a4574faa66e871598d100",
+    "quant/temporal_protein_summary.csv": "173746aff05917a8599bc83739c4fc10a5c449b0e16b12daf0181527570027ae",
+    "quant/validation_panel.csv": "90888a0d560e242d0a8854adf500f06d46fe0c51a7c7668d767e2e200e7bcdcd",
+    "reader/FULL_EVIDENCE.md": "91aa31eae9f5885be64fd83da2916295070dca763ec4803895b88c4380a0f5a5",
+    "reader/LITERATURE.md": "52faa7f3b14ac347100366a098a53f33574cf2917571d8727b4e371db32d7011",
+    "reader/PHOSX_TIME_COURSE.md": "21edd017948dcef0550c29376c45c136348c495c7378e46657ecc9e3f0e9d6b5",
+    "reader/TEMPORAL_EVIDENCE.md": "f8a3e828eb418fadb9cbd4fe1dfe3606d23c2872aa878647cb3ca86d6b8ea922",
+    "reader/cards.csv": "c7d1c92f70a3743d0e641b1e2afb29c4cb56ac690b7c08cd83c1d6b25c14440b",
+    "reader/coverage.csv": "46eca8b2e4f2c0b166d10efbf51ff73d0015207cdead7de3742e762ca9155922",
+    "reader/coverage_summary.json": "7662883573ec6208d8792e2f7373a12e1992e475bba980d78c5641be7ae100eb",
+    "reader/evidence_index.csv": "b96c04d50c9001fc99704389bc4111971f43867f2163bfa66330fd0d66101b5b",
+    "reader/evidence_links.csv": "86060731dfc4533d7e1e0eca4e781c47ea1b725771a9608618590d1401b5ecaa",
+    "reader/findings.csv": "fa49cfe8dc760a5ea15f261329d9c961ea0d48f47f572fab99704aaf5d737d25",
+    "reader/full_evidence_summary.json": "1b3e137ffd792266e5eda7d1adeb44bb68e74edf70ee58a385b4925594ac786e",
+    "reader/full_module_membership.csv": "fad0c4a3fc9c594d2357840eb546dc3ab8aae245f0e6bc77657e78b177982810",
+    "reader/full_question_links.csv": "42d706c7817ff383a37c2164595f8506ba464a7dcb0423b347e9c7956d305b4c",
+    "reader/full_temporal_links.csv": "8866e58cfc2b58feba83fe609b7e788cbe37f138a5a4312fdc1081ed056cace7",
+    "reader/full_temporal_subjects.csv": "5c2dbb52b2a08405a66ac69f965e60632ba187329f67cc30b4157decd6b7ee20",
+    "reader/literature_comparisons.csv": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+    "reader/literature_search.csv": "4b53f7804e3ecd8294e2a0a6b5b5ccbb1e7f1ce9e4b41449dba24fc7c9995ea3",
+    "reader/literature_sources.csv": "5738fffeeff20a561a48f0f0d3a20bdcb8ab6c7e2bcd930a76b9a7c9d8cd1100",
+    "reader/literature_summary.json": "2cdda6342c13a710009cbc64f65cb0efc83a40059c53dc4fadb18abc4e0ecefd",
+    "reader/phosx_assay_time_results.csv": "1040c4bb7eb24f0de023045a27e10779ec6c1adb76b0ce047a8865c39ce060f7",
+    "reader/phosx_time_summary.csv": "d4b795e40c15d85d1b0b1500a9ee9af82ba18d03e3a5afddbcb6951cf11fbad1",
+    "reader/question_map.json": "9951c4c3b75a7768ff7c3fd77a0939dde707e4abd7d7f027c06467e6613f68bb",
+    "reader/selection_audit.json": "1469f665d67bd9db155637555b5db36e0d78a429ae0c83a7984a39c63202746c",
+    "reader/temporal_evidence.json": "d28c818045cc4b6540766b3aeed7bf1a42cc34308c8fe97bc1242f3d94466ab4",
+    "reader/temporal_links.csv": "20c6ba4bedf1ca9d13fb4053284286ec75ef612b354f293e3f53e36d418b38ba",
+    "reader_adapter/form_contrasts.csv": "8cd2a0ffd4f94479c0d983610828406868f468de31326782ac1cc9ef89e1fb09",
+    "reader_adapter/form_identity.csv": "31bd366391f9b87991b15fd6514141b9e0ac68ee388c55b26dad101cd1d7fd43",
+    "reader_adapter/precursor_membership.csv": "c2fee673621c5b23a73f1f676b8fbfda5ad35988e84ca0eeee2c0ade49dc4b01",
+    "reader_adapter/study_metadata.csv": "2d48ee7466c7e9d51537fe558c7c2f012698fe2079ca7eaeef0c2b53facfa2fb",
+    "references/bibliographic_records.json": "2956aa0109a3d70524310104d83deb4767f787e827dd6e7a380b3d2e66c48b2f",
+    "references/context_relations.json": "20749d215a39e73488788d9f10e80749c5fa39d4e295541687d168fb83c7b901",
+    "references/finding_literature_execution.py": "87e9becadb5350dee9608af8c085cf4681ac7b1ae000021e383585f00b7c9cbf",
+    "references/finding_literature_pin.json": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+    "references/literature_comparison_packet.json": "39f99eaa5fab3d6bc1a1731f92c130e14f7026b5a4819a34288facc9eb9a81dd",
+    "references/literature_pin.json": "de95eed8076da7939fc8e70391320e72e92a573113c0ff55a434b045565ccf7c",
+    "references/source_execution.json": "f2780bd15c44379c1015bec42486d5aaa43923b86e6026c1b54281221a3a0108",
+    "references/source_pin.json": "f49b30786ce34ddf219aa5d868623d7eff93277752c7571c68869a55b9ef9b33",
+    "references/source_query_ledger.csv": "a2bc2df3f21b12cc3c01f954b1e28576117f9f649a829b54738331570f33a7ed",
+    "replay.py": "aaed37bf188d899a4b4bdb23fe2fa7449b9b597b0a4c1f5d4f22e7bccbe13a42",
+    "reproducibility/code/ptm_shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "reproducibility/code/ptm_shared/analysis_context.py": "3eba0b7055f5bc583322c5b3abee6ca8624e7fe14882c1b87cb03494ce5c14ad",
+    "reproducibility/code/ptm_shared/annotation_registry.py": "79a95fa3079417cc0d4b613b17e561d1aac6c37237f6211eda295fe9b452ac51",
+    "reproducibility/code/ptm_shared/annotation_species.py": "7c6c7b8f6e4f55960e9d20eb06b7ad3bfd40cedcca833cbc8b1eecbaa047c9ec",
+    "reproducibility/code/ptm_shared/astra_card_inputs.py": "77df49bde1f4fee24e3317109713637043e2c87eebfee5c2e818e095b6fc9b3b",
+    "reproducibility/code/ptm_shared/astra_discovery.py": "dba061da84e508715fc87f866cede264d387e4d1db817a913c9add8ec3b7e853",
+    "reproducibility/code/ptm_shared/astra_evidence.py": "64eef1653b0015355b44c996623cc5d7f0a8a3b77219f072a04040170a8a038e",
+    "reproducibility/code/ptm_shared/astra_evidence_catalog.py": "090623916c7d5de008c25ebbbaeb3605a1b4dced07b074403643c80de01b4b92",
+    "reproducibility/code/ptm_shared/astra_evidence_v6.py": "e3a2f65e8df8e9a9525951570fd62aa702f912230cf0bad9eed2a07ce0906e8c",
+    "reproducibility/code/ptm_shared/astra_figures.py": "dd3c4578259a4526f069344af0aa0ef484ab7396305fd61c02454a0872405ba3",
+    "reproducibility/code/ptm_shared/astra_inputs.py": "a599555fcc076c00b1de25bd377d88100b461e5567a97d83ae72a76fc9679025",
+    "reproducibility/code/ptm_shared/astra_plan.py": "b0eabb0ee618cf3af025c7b3546027801d0f7de70170a44092b56b68da17d974",
+    "reproducibility/code/ptm_shared/astra_reader_full.py": "2610ece15d9d518ea784064761553e42704803a8073def6cb6429c1428b64abd",
+    "reproducibility/code/ptm_shared/astra_reader_temporal.py": "b9932d2ee7df7214eb1531cffcf28eeedfb2f260c3ab4e7358d40df420ccd05a",
+    "reproducibility/code/ptm_shared/astra_science.py": "32f12e1032e2e048603caab136f6b8c49686f55e5b4a76c80d11efcec017706d",
+    "reproducibility/code/ptm_shared/astra_sources.py": "25f1df4025a4f975d43a7d9ed65789793f5bce4caa96473904ca9c0ac3c86bfb",
+    "reproducibility/code/ptm_shared/astra_temporal.py": "19ae5f4d648c20dc449d264812c1b3fb08fd0750a08fbd8ac2a4919c2a07adf3",
+    "reproducibility/code/ptm_shared/contrast_quantification.py": "0f6ffb2776df8ee744469720610d9c681d2593880cbcb3c6671afdc629fb7cf6",
+    "reproducibility/code/ptm_shared/de_novo_representation.py": "f65f35dc1e1d8f6054f8a89e27a0987e1e195bf3639c333d06187a857e26a676",
+    "reproducibility/code/ptm_shared/diann_evidence.py": "8e0a165a249837ba5d64467ba3f0a5e30e5db91f6da3f2adce99d4f089278c14",
+    "reproducibility/code/ptm_shared/directed_temporal_relationship.py": "6296e613ccba22c8f9ef236f16458a6f9b46d9094ecaaebcdae4a77ba2235f9d",
+    "reproducibility/code/ptm_shared/evidence_contracts.py": "3451e5429e26c5bb9090a231fcf7189466e7d8b5f738f5cfe992cdf907f3bb26",
+    "reproducibility/code/ptm_shared/evidence_methods.py": "e6d39dc6c14898581893f1e96b8be68495396084f3ec4083d7e17f56b69d3c2e",
+    "reproducibility/code/ptm_shared/evidence_stage_cache.py": "c600b8338dedab370507183d9956d871798614bb3c93dcaadce9c283cd236f35",
+    "reproducibility/code/ptm_shared/evidence_temporal.py": "e2e63d36040cc681c3d5fb8c7349b6a8de7d51c9c301043b778a9918686aa71e",
+    "reproducibility/code/ptm_shared/feature_identity.py": "e7693224bbfafc7c31537e6cdf473555c145016532e433f063cb166d893c00c7",
+    "reproducibility/code/ptm_shared/generic_kinase.py": "2046c02ed8e351759b962ce296d5284947a73aedc11cc81415374cda42d526d4",
+    "reproducibility/code/ptm_shared/generic_workflow.py": "12ef4d307b533d26ec06eeb2413f5fcf12659cb53b038e49559b55ff00a98c21",
+    "reproducibility/code/ptm_shared/inference_policy.py": "dde6c8faa7237b4bc862c1c22598f518d92400a0d6625994e536b8696dde3fa6",
+    "reproducibility/code/ptm_shared/kea3_evidence.py": "a44cb01c2b5b785397f09987382af99cd3ef80431ebe0ea860f0078e253f77fd",
+    "reproducibility/code/ptm_shared/kinase_family_registry.json": "0bd5c1b8defb0c9ffb6ee774e699a612d3ab5358493c568b5a29d5b587e55f03",
+    "reproducibility/code/ptm_shared/kinase_specificity.py": "2f6b98208f3789505d44371fa96afe5528dd699a87d981bf8766c3c8013a2eb5",
+    "reproducibility/code/ptm_shared/kinase_trajectory_evidence.py": "084ced5ed79d7c76a9b75e050a402c185f06c20177412bb5b5c702be766a6618",
+    "reproducibility/code/ptm_shared/literature_cards.py": "4055cc400eb6bd5324b9e9fe73f0c6ba74225c7f8170a815eb022e81628d4c35",
+    "reproducibility/code/ptm_shared/localization_evidence.py": "4727fe4610e3b27617f95b3ae5ecbb03911c53594b3957c663c7a6d791de366f",
+    "reproducibility/code/ptm_shared/measured_feature_cards.py": "66f4c1ec95454c9bcb8e7e500124c2a452ca18296a11d90f283a3f8b4c41922e",
+    "reproducibility/code/ptm_shared/motif_candidate_calibration.py": "8415bdf297054fbc3b36180fa11b567245cc4770fb162dc544f4e1fc64e93c68",
+    "reproducibility/code/ptm_shared/motif_library.json": "0e6e55fe7bce4d1376beafcf137a7dc83a4014d35b964778191094b2285f7897",
+    "reproducibility/code/ptm_shared/normalization_provenance.py": "ac7e3f553983642522231d58fe48884ea1cd811f6e51a19407ad41ab15eaa8fb",
+    "reproducibility/code/ptm_shared/official_method_tracks.py": "3537000c3504097551db19ddee9c4e2010c50a8c472382d0842289e809e63aed",
+    "reproducibility/code/ptm_shared/official_specificity.py": "87c97b64446c7cd96330d0a37b7714424b968dd0b77924b2c74059713e77372c",
+    "reproducibility/code/ptm_shared/perturbation_validation.py": "f4a738bbbd2960490135ac37144a5f57fb9e87daf682216ec00a39eff09eaaf5",
+    "reproducibility/code/ptm_shared/phosx_activity_adapter.py": "66d4d20ccd2cd26dda7be7f7fd933e0393aa6352c11a83784040d7ccea512722",
+    "reproducibility/code/ptm_shared/probabilistic_cowave.py": "0ea0dd397e5e46f05f3d14d1933ab906f8702fa762fc8d666af1c0b23f902c71",
+    "reproducibility/code/ptm_shared/quantitative_fields.py": "6f7c65e268a0d8fce60a84c991fccd77984943a12c95bbaf96d6df392d0129af",
+    "reproducibility/code/ptm_shared/reader_authoring.py": "aa90fffc9a5f6da88e1b24c4b7bb370f8d0e4a2d532540328c54306dd5917cfb",
+    "reproducibility/code/ptm_shared/reader_observations.py": "3d53ab87d5379b1f9715906beb49f9a98c142311fddb7bbc21f92a4e33e96d4e",
+    "reproducibility/code/ptm_shared/report_compatible_kinase.py": "a9dc4528e60a986780ba291436a7be27b14932d1aa35bcdfdcc43379155adf7d",
+    "reproducibility/code/ptm_shared/report_compatible_quantification.py": "f0e86d1433e49ba5e159f81b2521dd2834266bd76ad92dbea577d64027cbb4af",
+    "reproducibility/code/ptm_shared/research_questions.py": "dbecfbeeba8399ded996ce44bf70d7609d1f15c42dcb129d53f047da4e548420",
+    "reproducibility/code/ptm_shared/science_inference.py": "38b9c49057c2f9b69c3bdcf8b0977cf2b79b56660388acaf913ed58f0b053ac6",
+    "reproducibility/code/ptm_shared/science_reference.py": "0f5191de0b07f66d6156537680eeb1b4feaf818bef2c54cb82a7baccbe29fa1d",
+    "reproducibility/code/ptm_shared/source_acquisition.py": "4e52f29c07d434ecfce38f9986da851a55cb7a9930847937d32ffa611d6a823f",
+    "reproducibility/code/ptm_shared/species_registry.py": "dda947766dc06caaf48107a20f9cc16c474e617008c15645bde6a64bf3bc56af",
+    "reproducibility/code/ptm_shared/study_design.py": "803b7809448af56b974354d58ecdc43a5e0239fec61a60aad24dc9a30902d71a",
+    "reproducibility/code/ptm_shared/study_design.schema.json": "5425f0a24e70416f845945f64946112dbe8a1aa0432c57137332113b3cab2f80",
+    "reproducibility/code/ptm_shared/study_design.v4.schema.json": "988965a49cf7a66062942981e73bcb9d619868ba08dd78531e00ce758a40c742",
+    "reproducibility/code/ptm_shared/study_metadata.py": "de52100f1b870c51347203159975414582887c06bf6df7eaa02344ddd316657e",
+    "reproducibility/code/ptm_shared/study_presets.py": "fb06a85111bd4ee04ab7ece726d6236508041388c6690d1bc4da7544dc42d313",
+    "reproducibility/code/ptm_shared/study_temporal_context.py": "733933876e5dd3fa66f67d2e062bb5cebc6632797fd3d5a56175876784149fa3",
+    "reproducibility/code/ptm_shared/study_temporal_context_resolution.py": "193585c6e2482b26ae90e2d9b2757cb6f1542457fb908ea8f44e5249b7c90b55",
+    "reproducibility/code/ptm_shared/substrate_temporal_dynamics.py": "d0c831b628e7f65dee0ee26fe2a41308deebd9b9c5530f29916a6bb0de727b20",
+    "reproducibility/package_validation.json": "a98ee63e6036cacf8f5838dd0575af9f5f2031ec8c9a58b71897f92a5cc9c3ac",
+    "reproducibility/replay_config.json": "a2c242762e86cb968b22a7f8b17cf27fe1d887cae45f72b8e3c05939f0a7348e",
+    "reproducibility/requirements.txt": "c18cf533df2bb8e131e5e7254bb47840201edafd5a20601cde824945f0fb6a69",
+    "reproducibility/stage_ledger.json": "b0506739d322e548419140c45fdbadfd1795c9d817ea526e003773c5314c7d37",
+    "reproducibility/stage_metrics.json": "6a3e70d1b56564c6dfca03eb520215c9cb65e5da3434dc9198b45b6d7d7314c9",
+    "reproducibility/stage_reuse.json": "630d5cd973573c71742a5389d1f540302a73805378426ba5adf5a08122b5a190",
+    "reproducibility/table_migration.json": "b391041fd44e315d6ea2964c5ae052f841957449842702da394cb7dfba533bcb",
+    "reproducibility/v3_migration.json": "4d13a3fe119101377a7e544003e8f05aba1282e3e0f41ddb7b27a97da6fce519",
+    "science/calibrated_calls.csv": "98c834126bb0d6a1df2a005d78ba3731742de0494d3ce8a528b09416df91d25d",
+    "science/calibration_provenance.csv": "993764d17adaedaea7ce5aa1e21ff9b3a1736877fe3267ba2a78587a580a5b28",
+    "science/evidence_dependency_groups.csv": "2650104b979ff79736d44b2616aacb564a9579e8cf7710146735e66397d2f1e2",
+    "science/group_excluded_anchors.csv": "4029a264f28627a93380c9c2b58940343a2724de7d3981830eb692dea1303e03",
+    "science/inference_results.csv": "c33fd2aefa94beb162555926203a91367e0b7c665b8eb0a5e807a69864da0698",
+    "science/kinase_calls.csv": "c33fd2aefa94beb162555926203a91367e0b7c665b8eb0a5e807a69864da0698",
+    "science/localization_by_contrast.csv": "8a1bc216501a8144f1108f6fd21da50fd263709c55593e1dd8bd03b05e0ab5ec",
+    "science/measurement_observations.csv": "7ec7e26708ae60bac85cf2aacb5b8e7107c76f4e69d793a7c6a974026af5abe5",
+    "science/observation_sites.csv": "dfb5af701edf4a2de9e5e398dd73d7c6ae232f78e6ee2480fb992675f65a5861",
+    "science/official_parity_results.json": "c70468d840c8ae43f8234f575b7ed7b60f8f6859b5bb38fa92039800321fe460",
+    "science/perturbation_validation.csv": "af0d9228f01323a2fb279a06ac2805c3538d6913366e82c65af256d23745a076",
+    "science/reference_inventory.csv": "a1ee6875bce7b09f947ba73e057303e97b351b4d29986dc865ce4104120a3807",
+    "science/replicate_uncertainty.csv": "1c5b7323e799cc78c6479bcd6275de81511c59b3a78470526cdcd346976cc4cc",
+    "science/resource_registry.json": "c219a8f5cb767165f17486ef46c3d82fc8c76644580c1cfe92016cc55db8c607",
+    "science/site_identity_audit.csv": "11efc4b4397c499fe81e7246919fec1411b15d019105100f91da9cb13852f94a",
+    "science/site_report_observations.csv": "a7e15f62ecc51859bb35991978d3aba233d1c012c069257cb578c23b860fb9f9",
+    "science/specificity_scores.csv": "d9280b0b93056dbd90d60eae26da133c329555d467abbd51f184ca196893f7cf",
+    "study/STUDY_BRIEF.md": "6c668d2b77ef405046c1a8b2a32815a206003760747447695b4061e376a85a7a",
+    "study/input_capabilities.json": "8bf3d20013e5702c1e3040a93292c067207330c247bb6c58e2a87c3d541a48bb",
+    "study/input_field_manifest.csv": "804bf64942366221f4545ad1770aa35949cbf27b244a783ba7b8ea2c88c7a77b",
+    "study/input_lineage.csv": "e8a3daae23f6b138a343e642946c3a312a956fca2a6af544bf7c827368f542bd",
+    "study/input_transfer_validation.json": "07aac48763f7e396ccf08f41f5070ac7b9982c34675293468575e3ce244cd767",
+    "study/study_context.json": "a5c933bcadf3edbe37a69056dd7dd6d556de516e52962504f8aa370a96f61ba8",
+    "study/study_design.json": "2aa7e7f0191839ed37d318ae32d4cf1d67093bb3645ca05a24c753a9d2236336",
+    "study/user_input_snapshot.json": "8e771d157fea116fff706a802179c25127a404905b4ffb7c804422f7a9583c4b",
+    "temporal/cross_layer_links.csv": "d0fb151db60fe2e2607880a4638dfbc0784acef2d9e942a26de7bc56c22d4064",
+    "temporal/group_excluded_cowave.csv": "70b3f2372553b51933918248777c6a9bc7995b7280d77daa19d537708b03cc3e",
+    "temporal/interval_contrasts.csv": "893fb3e5ee3d577569216ddb9a02a640f5fc980f63b4f8e604731098f4f8face",
+    "temporal/kinase_fixed_membership.csv": "38f396dd90b2e1d68f1edaf19f6f1d0627f180263c5f8ccb963423f5f0013236",
+    "temporal/kinase_temporal_features.csv": "9f73c90bcdc75f737930e08505a0c7ce71910474fb16a1d9920509b101b62c9f",
+    "temporal/protein_temporal_features.csv": "0d84a0a9a77cafc3beaa3dc85d3d978f048458ea3f007419c0ae3435cfdec70b",
+    "temporal/ptm_temporal_features.csv": "ceb73f8d8819df451e0efe11c15d56dfaf311d72722db4849780bdcbd8139616",
+    "temporal/target_excluded_anchors.csv": "90da84777a22f9842d96a2afcd975138695a3ceb9a42f1f245a6337513ec684e",
+    "temporal/temporal_series.csv": "f22b2f38c12c7abda074d12d33f2b691dcbd7b1bc9ab4f8face16efe70f68109"
+  },
+  "preserved_quant_csv": {
+    "quant/annotation_edges.csv": "ab555595c3f294dd63e65960e46c90744ac81efe49c5ebc9a08e0d8d93fb0bc4",
+    "quant/comparisons.csv": "0936a28fab025b60255290ce4652a1f7274279740a536824b7802dadfa3b3875",
+    "quant/detection.csv": "352228515a2a169aafd4699cce475fdfefb36a2f03c731b226966bf2ba2cbcb7",
+    "quant/emergent_kinase_evidence.csv": "cd8e1ac9670efe6d8ed65373f45780fce6a30fa79f6935f947d092ae84b2034e",
+    "quant/form_evidence_status.csv": "0229daf7ca1f0383d7f15dda2e67973cf07c9f7b17e6092fccc111db6f7c3639",
+    "quant/kinase_injection_omissions.csv": "c7dd60af7fb3ef655ec58ff9aec19d3d02391f30852bb61e3e1b7c456c28446b",
+    "quant/kinase_membership.csv": "0949fcf78cb754c90b43cb3314385934fca46e58f9e6298ccc8c8aca5e352915",
+    "quant/kinase_profiles.csv": "df78178a41f3aa50bc3fd391f6b9750598ed071a0f2a1259b89c467d81e56bee",
+    "quant/kinase_sensitivity.csv": "dd482c1d58e71e4154d9e6f9f9eeea632bff75e4b036724c12a4c9e333d48161",
+    "quant/primary_A_input.csv": "ec2129b23ab4b385fdec8809a2a6a7f075ea04578f4652eee64512dd471143b3",
+    "quant/protein_contrasts.csv": "08fe73c422929d0886cb0afd35b12206f8a867d25350b7d6e2205aa57faceb35",
+    "quant/runlevel.csv": "f9e960ed122fd3ba8773145a091110cf1c1539013ed8328bc1c8fcb88d8406a7",
+    "quant/site_mapping.csv": "2690b405e44bbf3ef56b521fd9cfc3063adff10d00756333721c52cef0807bea",
+    "quant/strict_parent_complete.csv": "8ccd0252df68b63eb67b60a764b8b644451c661afc1a76f453aeb6e25d3cf727",
+    "quant/strict_parent_paired.csv": "c1ced00d455ed75212b199aa5c18f7a6ba59e10e6f2b95ab544011a70b981b64",
+    "quant/strict_parent_peptide_masks.csv": "5bffe52d1722f46852f4945f5d3c3dda8e52c5ec4413a721427090ad2f0a241a",
+    "quant/strict_selected_sequences.csv": "9636bee80af780425c3eeea7720d314523cbda2b0155c0c8481e59f509394184",
+    "quant/strict_unmodified_proteins.csv": "69f8f847fd9e20c411c374f6b13dbbe6568b56dd725e1e13c319a7daf59fa661",
+    "quant/strict_unmodified_sequences.csv": "071cc1d937310233917710b8954305fe1a76055949a2a4567dceee095983846a",
+    "quant/summary.csv": "4d90b48233fb106cf67869f117f9221338846ab3e71a4574faa66e871598d100",
+    "quant/temporal_protein_summary.csv": "173746aff05917a8599bc83739c4fc10a5c449b0e16b12daf0181527570027ae",
+    "quant/validation_panel.csv": "90888a0d560e242d0a8854adf500f06d46fe0c51a7c7668d767e2e200e7bcdcd"
+  },
+  "query_cli": "package-local executed; resolved unselected MAPK1, no retrieval",
+  "reader_replay": {
+    "catalog_available": true,
+    "files": [
+      {
+        "byte_equal": true,
+        "file": "reader/evidence_catalog.json",
+        "sha256": "61ff8ed92c2e3b78d1b1b465ec299a50e5747ca6fc5b4912237e8c165fb08efe"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/evidence_index.csv",
+        "sha256": "b96c04d50c9001fc99704389bc4111971f43867f2163bfa66330fd0d66101b5b"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/evidence_links.csv",
+        "sha256": "86060731dfc4533d7e1e0eca4e781c47ea1b725771a9608618590d1401b5ecaa"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/EVIDENCE_ACCESS.md",
+        "sha256": "55413a7e580a31726b3abea9d0d4f29a70eee5960c30608b20e3147d9de81bce"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/literature_review_subjects.csv",
+        "sha256": "3446690ca6af9da3414bf107eea94b153a7cc2d2a5cf17ce3d0a3a23ebb78491"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/literature_review_plan.json",
+        "sha256": "7e5910f34864030daa8ac3aab739c9141d7cfa300cc3ffeacc0e73249fa720b4"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/LITERATURE_REVIEW_PLAN.md",
+        "sha256": "e0438a43ddd5504e59c04725038bcc43a5774106ba4ffbfbacba860ff29c5a94"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/authoring_packet.json",
+        "sha256": "95574c0d550a9ca01f1e97160fe3c40cac47372fd8fc763d724e0b7b2cc54699"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/READ_ME.md",
+        "sha256": "fc4bd82a3068744916470b16db370199229054d4bd35fd74a725bf9947f2e599"
+      },
+      {
+        "byte_equal": true,
+        "file": "reader/packet.csv",
+        "sha256": "08d0aad022ec6e3987caf2635a09f04f1b097a55d53b3184b3d68ff6ab7474d8"
+      }
+    ],
+    "literature_review_plan_rebuilt": true,
+    "network_requests": 0,
+    "new_model_calls": 0,
+    "passed": true,
+    "previous_reader_interpretation_rebuilt": false,
+    "projection_inputs": null,
+    "repository_code_used": false,
+    "run_id": "g0-d09c6d03835a46248e5bdb6fe9e07e8c",
+    "scientific_requantification": false,
+    "scope": "reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables",
+    "validation": {
+      "scope": "M3 plan from original M1 index/M2 links; no search/model or prior literature reinterpretation"
+    },
+    "whole_evidence_projection_rebuilt": false
+  },
+  "relative_links_checked": 89,
+  "run_id": "g0-d09c6d03835a46248e5bdb6fe9e07e8c",
+  "scientific_recalculation": false,
+  "scope": "M3 planning and input access only; original frozen literature preserved; M4 not performed",
+  "summary_independence": [
+    {
+      "semantic_hash": "ef19b7c3453677a8f6ea1d2dead0670282a7987caae5902d16ac6635a4277ce3",
+      "subjects": 158593,
+      "summary_maximum": 5
+    },
+    {
+      "semantic_hash": "ef19b7c3453677a8f6ea1d2dead0670282a7987caae5902d16ac6635a4277ce3",
+      "subjects": 158593,
+      "summary_maximum": 15
+    },
+    {
+      "semantic_hash": "ef19b7c3453677a8f6ea1d2dead0670282a7987caae5902d16ac6635a4277ce3",
+      "subjects": 158593,
+      "summary_maximum": 50
+    },
+    {
+      "semantic_hash": "ef19b7c3453677a8f6ea1d2dead0670282a7987caae5902d16ac6635a4277ce3",
+      "subjects": 158593,
+      "summary_maximum": 0
+    }
+  ],
+  "typed_citations_validated": 3,
+  "zip_sha256": "ac6d13fc0ee02959833929c2257bf928d4aa375b7742eb39c6cf9b26870b10d3",
+  "code_sha256": {
+    "ptm_shared/astra_literature_review.py": "5c6137428b0709d0b902f32b6d903440317e671165e6c2b3490120a8696ec32d",
+    "ptm_shared/astra_literature.py": "b5e30e2e0616459cd7236bb0d27435c7315b1655a8db76d08cffa0a81364c51c",
+    "ptm_shared/finding_literature.py": "98929fe20c512b6c6cc5ac35078a8644c62d51ab2ed3d586a3fd201f1ee55baa",
+    "ptm_shared/astra_reader.py": "f2e9019ae1d1529da946ed6a95b6fa29a4da05dcec273735a27aa3427b72b987",
+    "ptm_shared/astra_package.py": "e04126700f0d7c7c860b060a5adc55d909249aa85e746908d0271f60ee9075da",
+    "ptm_shared/astra_reader_revision.py": "5eea2e7f17758e676a7effb219a62eca627f19bad6ee617f835543e4f43c1bd7"
+  },
+  "compatibility_reader_replay": {
+    "passed": true,
+    "scope": "reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables",
+    "previous_reader_interpretation_rebuilt": false,
+    "literature_review_plan_rebuilt": false,
+    "new_model_calls": 0,
+    "whole_evidence_projection_rebuilt": true,
+    "projection_inputs": "saved scientific/adapter/card rows and existing question matching; no full_* outputs as inputs",
+    "catalog_available": true,
+    "scientific_requantification": false,
+    "network_requests": 0,
+    "repository_code_used": false,
+    "run_id": "g0-24d53aad7f924819bde2389b8316c241",
+    "files": [
+      {
+        "file": "reader/evidence_catalog.json",
+        "sha256": "6889a73d72682f67f8b395b94cfd432ea2935af409513f17ca6fd029eec068be",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/evidence_index.csv",
+        "sha256": "b96c04d50c9001fc99704389bc4111971f43867f2163bfa66330fd0d66101b5b",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/evidence_links.csv",
+        "sha256": "86060731dfc4533d7e1e0eca4e781c47ea1b725771a9608618590d1401b5ecaa",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/EVIDENCE_ACCESS.md",
+        "sha256": "5fc77b9b059c735c42613b45fed7f767dbb6ea48923a0cf4d2f29bb903dc80ae",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/full_question_links.csv",
+        "sha256": "42d706c7817ff383a37c2164595f8506ba464a7dcb0423b347e9c7956d305b4c",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/full_temporal_links.csv",
+        "sha256": "8866e58cfc2b58feba83fe609b7e788cbe37f138a5a4312fdc1081ed056cace7",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/full_temporal_subjects.csv",
+        "sha256": "5c2dbb52b2a08405a66ac69f965e60632ba187329f67cc30b4157decd6b7ee20",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/full_module_membership.csv",
+        "sha256": "fad0c4a3fc9c594d2357840eb546dc3ab8aae245f0e6bc77657e78b177982810",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/full_evidence_summary.json",
+        "sha256": "1b3e137ffd792266e5eda7d1adeb44bb68e74edf70ee58a385b4925594ac786e",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/FULL_EVIDENCE.md",
+        "sha256": "91aa31eae9f5885be64fd83da2916295070dca763ec4803895b88c4380a0f5a5",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/authoring_packet.json",
+        "sha256": "043219bfe54543531dc2e47ba1e5fdd47c49ed13639309dc023611e813dd64e2",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/question_map.json",
+        "sha256": "9951c4c3b75a7768ff7c3fd77a0939dde707e4abd7d7f027c06467e6613f68bb",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/READ_ME.md",
+        "sha256": "6122ab8b1f217dcd0ce6c7e119886a17226acda9edf086b1383671089410b083",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/cards.csv",
+        "sha256": "c7d1c92f70a3743d0e641b1e2afb29c4cb56ac690b7c08cd83c1d6b25c14440b",
+        "byte_equal": true
+      },
+      {
+        "file": "reader/packet.csv",
+        "sha256": "8a352e7b0da2a07aeef2ddcf1aec0d4df1b9c934dad02f83846b1ff52f2afccd",
+        "byte_equal": true
+      }
+    ],
+    "validation": {
+      "source_rows_checked": 16944,
+      "cards_checked": 14658,
+      "findings_checked": 15,
+      "values_times_NA_masks_ids": "passed"
+    }
+  },
+  "tests": {
+    "unique_passed": 50,
+    "failed": 0,
+    "skipped": 0,
+    "suite": {
+      "passed": 49,
+      "warnings": 12,
+      "seconds": 81.4,
+      "log": "codex-inputs/full-evidence-m3/final-tests.log"
+    },
+    "after_resume_fix": {
+      "passed": 8,
+      "warnings": 1,
+      "seconds": 8.22,
+      "log": "codex-inputs/full-evidence-m3/resume-tests.log"
+    },
+    "overlap": 7,
+    "warnings": "Existing pandas empty/all-NA concat FutureWarning; not parity skips",
+    "actual_vs_fixture": "Actual archive: plan/resolver/citation/replay only. Retrieval/comparison: injected synthetic fixture, no real service/model."
+  },
+  "representative_subjects": [
+    {
+      "form_id": "form_97aa4b58cee5c391",
+      "label": "MAPK1",
+      "subject": {
+        "comparison_status": "not_performed",
+        "eligibility": "eligible_with_source_restrictions",
+        "eligibility_reason": "typed_readout_preserved; eligibility_is_not_scientific_inclusion",
+        "evidence_id": "reader_card_01c224da2d74475143c2",
+        "execution_status": "not_requested",
+        "finding_alias": "finding_567c62cae3b0da09455d",
+        "priority_reason": "existing_question_link",
+        "question_ids_json": "[\"BQ-001\"]",
+        "readout": "observed joint PTM/parent contrasts; U_joint/P_joint/A, log2",
+        "request_reason": "not_requested",
+        "restrictions_json": "{\"interpretation_limits\":[\"Descriptive same-experiment observations; not kinase activation or causal validation.\",\"U_joint, P_joint and A use the recorded joint masks; U_all/P_all remain separate.\",\"Technical injections and substrate counts are not independent biological replicates.\",\"Sequence mapping does not establish MS localization; inspect per-contrast localization.\",\"Same-experiment parent protein is denominator/context evidence, not independent validation.\",\"Literature comparison and independent validation were not performed by this reader stage.\",\"These are measured numeric contrasts. Magnitude alone does not establish biological priority, mechanistic importance, direct regulatory strength, occupancy, or causality.\"]}",
+        "review_subject_id": "review_subject_55b247e34a7048934295",
+        "schema_version": "literature_review_subjects.v1",
+        "scope_json": "{\"arm_id\":\"arm_8ac02a113972dcb9\",\"call_scope\":null,\"method_id\":null,\"method_version\":null,\"pairing\":\"unknown\",\"reference_condition_id\":\"condition_32d7e82082479b8c\",\"series_id\":null,\"track\":null}",
+        "semantic_status": "not_reviewed",
+        "source_key_json": "{\"card_id\":\"reader_card_01c224da2d74475143c2\"}",
+        "source_table": "reader/cards.csv",
+        "status_json": "{\"independent_validation_status\":\"not_performed\",\"mapping_status\":\"single_gene_isoform_coordinates\"}",
+        "subject_type": "observation"
+      }
+    },
+    {
+      "form_id": "form_6618452f34b3cbbc",
+      "label": "GSK3A",
+      "subject": {
+        "comparison_status": "not_performed",
+        "eligibility": "eligible_with_source_restrictions",
+        "eligibility_reason": "typed_readout_preserved; eligibility_is_not_scientific_inclusion",
+        "evidence_id": "reader_card_ce90380fcc2732632381",
+        "execution_status": "not_requested",
+        "finding_alias": "finding_01964496e809a334008f",
+        "priority_reason": "existing_question_link",
+        "question_ids_json": "[\"BQ-001\"]",
+        "readout": "observed joint PTM/parent contrasts; U_joint/P_joint/A, log2",
+        "request_reason": "not_requested",
+        "restrictions_json": "{\"interpretation_limits\":[\"Descriptive same-experiment observations; not kinase activation or causal validation.\",\"U_joint, P_joint and A use the recorded joint masks; U_all/P_all remain separate.\",\"Technical injections and substrate counts are not independent biological replicates.\",\"Sequence mapping does not establish MS localization; inspect per-contrast localization.\",\"Same-experiment parent protein is denominator/context evidence, not independent validation.\",\"Literature comparison and independent validation were not performed by this reader stage.\",\"These are measured numeric contrasts. Magnitude alone does not establish biological priority, mechanistic importance, direct regulatory strength, occupancy, or causality.\"]}",
+        "review_subject_id": "review_subject_093b33f4f8cff43355e7",
+        "schema_version": "literature_review_subjects.v1",
+        "scope_json": "{\"arm_id\":\"arm_8ac02a113972dcb9\",\"call_scope\":null,\"method_id\":null,\"method_version\":null,\"pairing\":\"unknown\",\"reference_condition_id\":\"condition_32d7e82082479b8c\",\"series_id\":null,\"track\":null}",
+        "semantic_status": "not_reviewed",
+        "source_key_json": "{\"card_id\":\"reader_card_ce90380fcc2732632381\"}",
+        "source_table": "reader/cards.csv",
+        "status_json": "{\"independent_validation_status\":\"not_performed\",\"mapping_status\":\"single_gene_consistent_coordinates\"}",
+        "subject_type": "observation"
+      }
+    },
+    {
+      "form_id": "form_eeaed22a5119b2f5",
+      "label": "MAPK3",
+      "subject": {
+        "comparison_status": "not_performed",
+        "eligibility": "eligible_with_source_restrictions",
+        "eligibility_reason": "typed_readout_preserved; eligibility_is_not_scientific_inclusion",
+        "evidence_id": "card_row_b629b5bc0c2130c8eb41",
+        "execution_status": "not_requested",
+        "finding_alias": null,
+        "priority_reason": "available_unlinked_evidence",
+        "question_ids_json": "[]",
+        "readout": "raw form-contrast including withheld/NA; original eligibility only",
+        "request_reason": "not_requested",
+        "restrictions_json": "{\"adapter_restrictions\":[\"quant_comparison_excluded\"],\"exclusion_reasons\":\"mapping_ineligible;parent_ineligible\",\"restriction_reasons\":\"quant_comparison_excluded\"}",
+        "review_subject_id": "review_subject_70c0a0b67f80c422c6c9",
+        "schema_version": "literature_review_subjects.v1",
+        "scope_json": "{\"arm_id\":\"arm_8ac02a113972dcb9\",\"call_scope\":null,\"method_id\":null,\"method_version\":null,\"pairing\":\"unknown\",\"reference_condition_id\":\"condition_32d7e82082479b8c\",\"series_id\":null,\"track\":null}",
+        "semantic_status": "not_reviewed",
+        "source_key_json": "{\"adapter_row_id\":\"card_row_b629b5bc0c2130c8eb41\"}",
+        "source_table": "reader_adapter/form_contrasts.csv",
+        "status_json": "{\"card_input_eligible\":false,\"card_status\":\"withheld\",\"consumer_state_status\":\"raw_only_excluded_finite_contrast\",\"included\":false,\"inference_status\":\"descriptive_only_no_biological_test_implemented\",\"localization_status\":[\"missing_input\"],\"mapping_status\":\"multiple_genes\",\"primary_adjustment_eligible\":false}",
+        "subject_type": "raw_ptm"
+      }
+    },
+    {
+      "form_id": "form_9951a8944f668c17",
+      "label": "IRS1",
+      "subject": {
+        "comparison_status": "not_performed",
+        "eligibility": "eligible_with_source_restrictions",
+        "eligibility_reason": "typed_readout_preserved; eligibility_is_not_scientific_inclusion",
+        "evidence_id": "card_row_9d13f4de43c56271bba7",
+        "execution_status": "not_requested",
+        "finding_alias": null,
+        "priority_reason": "available_unlinked_evidence",
+        "question_ids_json": "[]",
+        "readout": "raw form-contrast including withheld/NA; original eligibility only",
+        "request_reason": "not_requested",
+        "restrictions_json": "{\"adapter_restrictions\":[\"quant_comparison_excluded\"],\"exclusion_reasons\":\"reference_joint_unobserved\",\"restriction_reasons\":\"quant_comparison_excluded\"}",
+        "review_subject_id": "review_subject_7816d0ceaf8bb04a1b92",
+        "schema_version": "literature_review_subjects.v1",
+        "scope_json": "{\"arm_id\":\"arm_8ac02a113972dcb9\",\"call_scope\":null,\"method_id\":null,\"method_version\":null,\"pairing\":\"unknown\",\"reference_condition_id\":\"condition_32d7e82082479b8c\",\"series_id\":null,\"track\":null}",
+        "semantic_status": "not_reviewed",
+        "source_key_json": "{\"adapter_row_id\":\"card_row_9d13f4de43c56271bba7\"}",
+        "source_table": "reader_adapter/form_contrasts.csv",
+        "status_json": "{\"card_input_eligible\":false,\"card_status\":\"withheld\",\"consumer_state_status\":\"see_row_eligibility\",\"included\":false,\"inference_status\":\"descriptive_only_no_biological_test_implemented\",\"localization_status\":[\"missing_input\"],\"mapping_status\":\"single_gene_consistent_coordinates\",\"primary_adjustment_eligible\":true}",
+        "subject_type": "raw_ptm"
+      }
+    },
+    {
+      "form_id": "form_d4f68593541e8e86",
+      "label": "INSR_shared",
+      "subject": {
+        "comparison_status": "not_performed",
+        "eligibility": "eligible_with_source_restrictions",
+        "eligibility_reason": "typed_readout_preserved; eligibility_is_not_scientific_inclusion",
+        "evidence_id": "card_row_e854465540ed84dda6cf",
+        "execution_status": "not_requested",
+        "finding_alias": null,
+        "priority_reason": "available_unlinked_evidence",
+        "question_ids_json": "[]",
+        "readout": "raw form-contrast including withheld/NA; original eligibility only",
+        "request_reason": "not_requested",
+        "restrictions_json": "{\"adapter_restrictions\":[\"mixed_or_unknown_taxon_not_representable\",\"quant_comparison_excluded\"],\"exclusion_reasons\":\"mapping_ineligible;parent_ineligible;reference_joint_unobserved\",\"restriction_reasons\":\"mixed_or_unknown_taxon_not_representable;quant_comparison_excluded\"}",
+        "review_subject_id": "review_subject_15a9fc7b8339338e7097",
+        "schema_version": "literature_review_subjects.v1",
+        "scope_json": "{\"arm_id\":\"arm_8ac02a113972dcb9\",\"call_scope\":null,\"method_id\":null,\"method_version\":null,\"pairing\":\"unknown\",\"reference_condition_id\":\"condition_32d7e82082479b8c\",\"series_id\":null,\"track\":null}",
+        "semantic_status": "not_reviewed",
+        "source_key_json": "{\"adapter_row_id\":\"card_row_e854465540ed84dda6cf\"}",
+        "source_table": "reader_adapter/form_contrasts.csv",
+        "status_json": "{\"card_input_eligible\":false,\"card_status\":\"withheld\",\"consumer_state_status\":\"see_row_eligibility\",\"included\":false,\"inference_status\":\"descriptive_only_no_biological_test_implemented\",\"localization_status\":[\"missing_input\"],\"mapping_status\":\"multiple_genes\",\"primary_adjustment_eligible\":false}",
+        "subject_type": "raw_ptm"
+      }
+    },
+    {
+      "label": "protein",
+      "subject": {
+        "comparison_status": "not_performed",
+        "eligibility": "eligible_with_source_restrictions",
+        "eligibility_reason": "typed_readout_preserved; eligibility_is_not_scientific_inclusion",
+        "evidence_id": "evidence_000074c031c513e94646",
+        "execution_status": "not_requested",
+        "finding_alias": null,
+        "priority_reason": "available_unlinked_evidence",
+        "question_ids_json": "[]",
+        "readout": "protein abundance contrast; not kinase activity",
+        "request_reason": "not_requested",
+        "restrictions_json": "{}",
+        "review_subject_id": "review_subject_76e7f5521880b821cd4b",
+        "schema_version": "literature_review_subjects.v1",
+        "scope_json": "{\"arm_id\":\"arm_8ac02a113972dcb9\",\"call_scope\":null,\"method_id\":null,\"method_version\":null,\"pairing\":\"unknown\",\"reference_condition_id\":\"condition_32d7e82082479b8c\",\"series_id\":null,\"track\":null}",
+        "semantic_status": "not_reviewed",
+        "source_key_json": "{\"contrast_id\":\"contrast_aea4869f398c5584\",\"protein_group\":\"A0A8I6AA00;D3ZSU6\"}",
+        "source_table": "quant/protein_contrasts.csv",
+        "status_json": "{}",
+        "subject_type": "protein"
+      }
+    },
+    {
+      "label": "detection",
+      "subject": {
+        "comparison_status": "not_performed",
+        "eligibility": "eligible_with_source_restrictions",
+        "eligibility_reason": "typed_readout_preserved; eligibility_is_not_scientific_inclusion",
+        "evidence_id": "evidence_000164dca02266f1f698",
+        "execution_status": "not_requested",
+        "finding_alias": null,
+        "priority_reason": "existing_question_link",
+        "question_ids_json": "[\"BQ-001\"]",
+        "readout": "detection counts/pattern; not biological replicate count or fold change",
+        "request_reason": "not_requested",
+        "restrictions_json": "{\"use_restriction\":\"post_reference_only_never_pool_different_references\"}",
+        "review_subject_id": "review_subject_f0f8f6fa2fba1de0502d",
+        "schema_version": "literature_review_subjects.v1",
+        "scope_json": "{\"arm_id\":\"arm_8ac02a113972dcb9\",\"call_scope\":null,\"method_id\":null,\"method_version\":null,\"pairing\":\"unknown\",\"reference_condition_id\":\"condition_32d7e82082479b8c\",\"series_id\":null,\"track\":null}",
+        "semantic_status": "not_reviewed",
+        "source_key_json": "{\"contrast_id\":\"contrast_aea4869f398c5584\",\"form_id\":\"form_ef750444556de391\"}",
+        "source_table": "quant/detection.csv",
+        "status_json": "{\"baseline_status\":\"observed\",\"mapping_status\":\"single_gene_isoform_coordinates\",\"primary_adjustment_eligible\":true,\"primary_mapping_eligible\":true}",
+        "subject_type": "detection"
+      }
+    },
+    {
+      "label": "method_result",
+      "subject": {
+        "comparison_status": "not_performed",
+        "eligibility": "eligible_with_source_restrictions",
+        "eligibility_reason": "typed_readout_preserved; eligibility_is_not_scientific_inclusion",
+        "evidence_id": "method_result_01681853803dc099358b",
+        "execution_status": "not_requested",
+        "finding_alias": null,
+        "priority_reason": "existing_question_link",
+        "question_ids_json": "[\"BQ-001\"]",
+        "readout": "method-specific score/p/q/null/coverage; not biological p/q or activity proof",
+        "request_reason": "not_requested",
+        "restrictions_json": "{}",
+        "review_subject_id": "review_subject_a5a99c3776d407b0bc9c",
+        "schema_version": "literature_review_subjects.v1",
+        "scope_json": "{\"arm_id\":\"arm_8ac02a113972dcb9\",\"call_scope\":null,\"method_id\":\"PhosX_native_functions\",\"method_version\":\"0.23.1\",\"pairing\":\"unknown\",\"reference_condition_id\":\"condition_32d7e82082479b8c\",\"series_id\":null,\"track\":null}",
+        "semantic_status": "not_reviewed",
+        "source_key_json": "{\"method_result_id\":\"method_result_01681853803dc099358b\"}",
+        "source_table": "kinase/method_scores.csv",
+        "status_json": "{\"status\":\"computed_method_enrichment\"}",
+        "subject_type": "method_result"
+      }
+    },
+    {
+      "label": "inference",
+      "subject": {
+        "comparison_status": "not_performed",
+        "eligibility": "eligible_with_source_restrictions",
+        "eligibility_reason": "typed_readout_preserved; eligibility_is_not_scientific_inclusion",
+        "evidence_id": "call_v2_0048b7926811ff692fc4",
+        "execution_status": "not_requested",
+        "finding_alias": null,
+        "priority_reason": "available_unlinked_evidence",
+        "question_ids_json": "[]",
+        "readout": "saved call/no-call and calibration restrictions; no-call is not inactivity",
+        "request_reason": "not_requested",
+        "restrictions_json": "{\"no_call_reasons\":\"insufficient_measurements;membership_turnover;uncalibrated_policy;unresolved_site\",\"restriction_reasons\":\"operational_coverage_is_not_calibrated_accuracy\"}",
+        "review_subject_id": "review_subject_7a186d5d5c2e1c285675",
+        "schema_version": "literature_review_subjects.v1",
+        "scope_json": "{\"arm_id\":\"arm_8ac02a113972dcb9\",\"call_scope\":\"contrast\",\"method_id\":null,\"method_version\":null,\"pairing\":\"unknown\",\"reference_condition_id\":\"condition_32d7e82082479b8c\",\"series_id\":\"series_8bcf2a244a036b564b4c\",\"track\":\"curated_A\"}",
+        "semantic_status": "not_reviewed",
+        "source_key_json": "{\"call_id\":\"call_v2_0048b7926811ff692fc4\"}",
+        "source_table": "science/inference_results.csv",
+        "status_json": "{\"calibration_status\":\"uncalibrated_policy\",\"execution_status\":\"completed\",\"independent_validation_status\":\"not_performed\",\"inference_status\":\"not_evaluable\",\"measurement_status\":\"ambiguous\",\"resolution\":\"no_call\"}",
+        "subject_type": "inference"
+      }
+    }
+  ],
+  "M4": "not_implemented_not_executed",
+  "new_real_literature_searches": 0,
+  "new_real_model_comparisons": 0,
+  "local_commit_receipt": "codex-inputs/full-evidence-m3/LOCAL_COMMIT.json (written after local commit); no push/deploy",
+  "baseline_archive_sha256": "c98a9e2b7b756c93efa3b8d6eb579b69599ccc9d10301707298c2423383a90aa"
+}

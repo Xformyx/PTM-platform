@@ -116,25 +116,39 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
     queries, model_calls = 0, 0
     records, references, search_cache = {}, [], {}
     for card in cards:
-        identity = card.get("feature_identity") or {}
-        fid = card.get("finding_id") or identity["reader_feature_id"]
+        typed = card.get('review_subject_id') is not None
+        identity = (card.get('entity_identity') if typed else card.get("feature_identity")) or {}
+        fid = card.get('review_subject_id') or card.get("finding_id") or identity["reader_feature_id"]
+        identity_id = identity.get('reader_feature_id') if typed else identity['reader_feature_id']
+        readout = card.get('readout', 'PTM protein time course')
         site_query = " ".join(str(v) for v in (identity.get("gene"), identity.get("candidate_residue_annotation"),
                 study.get("cell_type"), study.get("species"), study.get("treatment"), study.get("recorded_conditions_query"), identity.get("modified_sequence"), identity.get("fasta_taxonomy_id"),
-                json.dumps((card.get("literature_input") or {}).get("observed_grid", [])), "PTM protein time course") if v)
+                json.dumps((card.get("literature_input") or {}).get("observed_grid", [])), readout) if v)
+        if typed:site_query+=' '+ ' '.join(str(v) for v in identity.get('entity_tokens',[]))
         opposing_query = " ".join(str(v) for v in (identity.get("gene"), identity.get("candidate_residue_annotation"),
-                study.get("cell_type"), study.get("species"), study.get("recorded_conditions_query"), "PTM conflicting or opposing results") if v)
+                study.get("cell_type"), study.get("species"), study.get("recorded_conditions_query"),
+                (readout+' conflicting or opposing results') if typed else 'PTM conflicting or opposing results') if v)
+        if typed:opposing_query+=' '+ ' '.join(str(v) for v in identity.get('entity_tokens',[]))
         query = site_query
-        record = {"schema_version": VERSION, "reader_feature_id": identity["reader_feature_id"], "finding_id": card.get("finding_id"), "feature_id": identity.get("feature_id"),
+        record = {"schema_version": VERSION, "reader_feature_id": identity_id, "finding_id": card.get("finding_id"), "feature_id": identity.get("feature_id"),
                   "query": query, "queried_at": datetime.now(timezone.utc).isoformat(),
                   "collections": list(getattr(retriever, "collection_names", []) or []),
                   "status": "not_searched", "search_input": {"identity": identity, "observation": card.get("literature_input", card.get("reader_summary")), "study": study}, "retrieved_count": 0, "comparisons": [], "excluded_comparisons": []}
         records[fid] = record
+        if typed:
+            record.update(review_subject_id=fid, subject_type=card['subject_type'], readout=readout)
         layers = [
             ("literature_background", " ".join(str(study.get(k) or "") for k in ("treatment", "cell_type", "species")) + " signaling time course"),
             ("gene_function_context", str(identity.get("gene") or "") + " protein function"),
             ("direct_site_evidence", site_query),
             ("counterevidence", opposing_query),
         ]
+        if typed:
+            entity_query=' '.join(str(v) for v in identity.get('entity_tokens',[]))
+            layers=[(layer, query+' '+entity_query+' '+readout if layer=='gene_function_context' else query) for layer,query in layers]
+        if typed and (not identity.get('candidate_residue_annotation') or card.get('allow_site_comparison') is not True):
+            # Protein/detection/method context must not pose as exact-site evidence.
+            layers = [item for item in layers if item[0] != 'direct_site_evidence']
         record["search_plan"] = [{"layer": layer,"query": query,"quota":LAYER_RESULT_QUOTA[layer]} for layer,query in layers]
         if not record["collections"]:
             record["searches"] = [{"layer":layer,"query":query,"status":"not_run_no_pinned_collection"} for layer,query in layers]
@@ -196,7 +210,7 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
             prompt_study['study_design_ref']='canonical_study (identical recorded design)'
         prompt_observation, definitions = _prompt_observation(card.get('literature_input', card.get('reader_summary')))
         record['prompt_projection']='lossless_trajectory_object_references.v1'
-        prompt = ("Compare this measured feature with the retrieved excerpts. Return JSON only. "
+        prompt = (("Compare this typed evidence subject within its recorded readout and restrictions. It may be withheld, detection-only, a method result or no-call; do not promote it to a measured site or enzyme activity. " if typed else "Compare this measured feature with the retrieved excerpts. ") + "Return JSON only. "
                   "Use exact contiguous source quotes. Paraphrase external_finding within the source scope; do not copy unsupported mechanisms into it. Context fields must be source substrings or empty if unrecorded. "
                   "Do not infer absent species, dose, site or direct regulation. reference_scope is study, pathway, gene or site. "
                   "relationship is known_agreement, disagreement, literature_background, gene_function_context, pathway_context, compatible_pattern, context_difference, direct_site_evidence or contradictory_evidence; condition differences remain context, not proof of a defect. "
@@ -256,17 +270,18 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
             gene = str(identity.get("gene") or "")
             relationship = candidate.get("relationship")
             finding_text = candidate.get("external_finding") or ""
-            valid = (quote and quote in document and (scope in {"study", "pathway"} or gene.lower() in quote.lower())
+            valid = (quote and quote in document and (scope in {"study", "pathway"} or bool(gene) and gene.lower() in quote.lower())
                      and scope in {"study", "pathway", "gene", "site"} and (scope != "site" or site and site.lower() in quote.lower())
                      and relationship in ALLOWED_RELATIONSHIPS
                      and finding_text
                      and (relationship != "direct_site_evidence" or scope == "site")
+                     and (not typed or scope != 'site' or card.get('allow_site_comparison') is True)
                      and (hit.get("doi") or hit.get("pmid"))
                      and all(not candidate.get(k) or candidate[k] in quote for k in CONTEXT_FIELDS))
             if not valid:
                 record["excluded_comparisons"].append({"source_index": index, "reason": "unbound_quote_context_or_scope"})
                 continue
-            comparison = {**candidate, "reader_feature_id": identity["reader_feature_id"], "finding_id": card.get("finding_id"), "feature_id": identity.get("feature_id"),
+            comparison = {**candidate, "reader_feature_id": identity_id, "finding_id": card.get("finding_id"), "feature_id": identity.get("feature_id"),
                           "observation": card.get("reader_summary"), "source_offset": document.index(quote),
                           "source_sha256": hashlib.sha256(document.encode()).hexdigest(),
                           "condition_differences": [f"Source {k}: {candidate[k]}; current study: {((card.get('literature_input') or {}).get('comparison_context',{})).get(k,study.get(k,'unrecorded'))}"
@@ -276,6 +291,7 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
                           "observed_context": study,
                           "comparison_reason": "literal_span_verified; semantic_relation_requires_review",
                           "measurement_limits": card.get("interpretation_limits", [])}
+            if typed: comparison.update(review_subject_id=fid, subject_type=card['subject_type'], readout=readout)
             # Identity, literal anchoring, source faithfulness, and support of the
             # current claim are separate checks. Neither a substring nor model
             # agreement can certify the latter two. Keep paraphrases for review.

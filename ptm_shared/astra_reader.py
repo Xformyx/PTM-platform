@@ -215,6 +215,8 @@ def build_reader_tables(tables, design, snapshot=None):
     attach_access(combined)
     from .astra_reader_full import attach_full
     attach_full(combined)
+    from .astra_literature_review import attach_review_plan
+    attach_review_plan(combined)
     result['reader/cards'] = combined['reader/cards']
     result['reader/packet'] = combined['reader/packet']
     return result
@@ -397,15 +399,24 @@ def write_phosx_time_views(directory, tables):
     return ['reader/PHOSX_TIME_COURSE.md','reader/phosx_time_summary.csv','reader/phosx_assay_time_results.csv']
 
 
-def write_reader(directory, tables, *, source_root=None, access_only=False, whole_only=False):
+def write_reader(directory, tables, *, source_root=None, access_only=False, whole_only=False, review_plan_only=False):
     """Deterministic JSON/Markdown views of the canonical reader tables."""
     from .generic_workflow import json_write
     directory = Path(directory)
     access_artifacts = write_evidence_access(directory, source_root=source_root)
     packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
-    if packet.get('whole_evidence') and not access_only:
+    if packet.get('whole_evidence') and not (access_only or review_plan_only):
         from .astra_reader_full import write_full
         access_artifacts += write_full(directory,tables,source_root=source_root)
+    if packet.get('literature_review_plan') and not access_only:
+        from .astra_literature_review import write_review_plan
+        access_artifacts += write_review_plan(directory,tables,source_root=source_root)
+    if review_plan_only:
+        json_write(directory/'reader/authoring_packet.json',packet)
+        note='\n\n## 전체 문헌 검토 대상 (M3)\n\n[요약과 독립적인 typed 검토 계획](LITERATURE_REVIEW_PLAN.md). 새 검색·비교는 미요청이며 기존 문헌 실행 기록은 보존됩니다.\n'
+        path=directory/'reader/READ_ME.md';original=path.read_text() if path.exists() else ''
+        if note not in original:path.write_text(original+note,encoding='utf-8')
+        return access_artifacts+['reader/authoring_packet.json','reader/READ_ME.md']
     if whole_only:
         json_write(directory/'reader/authoring_packet.json',packet)
         json_write(directory/'reader/question_map.json',packet['research_question_evidence_map'])
@@ -427,6 +438,7 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         json_write(directory/'reader'/f'{name}.json',value)
     coverage = packet['coverage_inventory']
     lines = ['# 주요 관측과 근거 — Astra reader',
+        '[전체 문헌 검토 대상 계획](LITERATURE_REVIEW_PLAN.md): 신규 검색/비교와 독립된 계획이며 기존 문헌 상태를 보존합니다.',
         '[전체 근거 catalog와 미선정·보류·no-call 조회](EVIDENCE_ACCESS.md). 선정 findings는 요약입니다. 전체 접근 가능성과 실제 검토 범위는 다릅니다.',
         '[실험 원문과 설계](../study/STUDY_BRIEF.md) · [원문 snapshot](../study/user_input_snapshot.json) · '
         '[전체 카드](cards.csv) · [전체 행의 보류/선정 사유](coverage.csv) · [구조화 packet](authoring_packet.json)',

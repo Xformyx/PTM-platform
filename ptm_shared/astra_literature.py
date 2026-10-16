@@ -20,12 +20,18 @@ TABLE_KEYS = {'reader/literature_search': ['finding_id'], 'reader/literature_sou
 ARTIFACTS = ['reader/LITERATURE.md', 'reader/literature_summary.json', 'references/finding_literature_pin.json']
 
 
-def inputs(tables, snapshot, literature):
+def inputs(tables, snapshot, literature, *, observation_cards=None):
     packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
-    ids = tables['reader/findings'].finding_id.tolist()
-    cards = cards_for_selected_findings(packet['reader_cards'], ids, key='finding_id')
-    if [c['finding_id'] for c in cards] != ids:
-        raise ValueError('Literature selected finding identity/order mismatch')
+    if observation_cards is None:
+        ids = tables['reader/findings'].finding_id.tolist()
+        cards = cards_for_selected_findings(packet['reader_cards'], ids, key='finding_id')
+        if [c['finding_id'] for c in cards] != ids:
+            raise ValueError('Literature selected finding identity/order mismatch')
+    else:
+        # M3 accepts genuine resolved observation cards, never fabricated raw cards.
+        cards = deepcopy(observation_cards)
+        if any(c.get('category') != 'measured_feature_observation' for c in cards):
+            raise ValueError('Observation adapter requires real observation cards')
     original = (snapshot or {}).get('original', {})
     context = deepcopy(original.get('analysis_context') or {})
     # Retain the stored whole context and original question; no dose/time inference.

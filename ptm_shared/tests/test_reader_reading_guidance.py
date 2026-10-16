@@ -34,7 +34,7 @@ def test_completed_literature_overrides_historical_display_only(reader,tmp_path)
     (tmp_path/'reader').mkdir()
     # This unit fixture has only the literature/card boundary, not a full package.
     # Catalog publication and required-source validation have separate v6 tests.
-    with patch('ptm_shared.astra_reader_full.write_full',return_value=[]), patch('ptm_shared.astra_reader.write_evidence_access',return_value=[]):
+    with patch('ptm_shared.astra_reader_full.write_full',return_value=[]), patch('ptm_shared.astra_literature_review.write_review_plan',return_value=[]), patch('ptm_shared.astra_reader.write_evidence_access',return_value=[]):
         write_reader(tmp_path,tables)
     text=(tmp_path/'reader/READ_ME.md').read_text()
     assert 'Literature comparison and independent validation were not performed by this reader stage.' not in text
