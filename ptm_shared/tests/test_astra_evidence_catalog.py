@@ -165,6 +165,9 @@ def test_normal_v6_generation_and_reader_only_replay(config,tmp_path):
     root=tmp_path/'out/enrichment_free_runs'/result['run_id']
     c=access.EvidenceCatalog(root);assert c.query()['total_count']>0
     assert 'astra_evidence_catalog.py' in result['provenance']['code_sha256']
+    assert 'astra_reader_full.py' in result['provenance']['code_sha256']
+    assert (root/'reader/full_question_links.csv').is_file()
+    assert (root/'reader/full_temporal_links.csv').is_file()
     completed=subprocess.run([sys.executable,'scripts/replay_astra_reader.py','--package',str(root),'--output',str(tmp_path/'replay')],capture_output=True,text=True)
     assert completed.returncode==0,completed.stderr
     report=json.loads((tmp_path/'replay/READER_REPLAY_VALIDATION.json').read_text())
@@ -176,13 +179,17 @@ def test_normal_v6_generation_and_reader_only_replay(config,tmp_path):
         with pytest.raises(ValueError,match='bad access revision'):
             revise_temporal(root,revision_root,access_only=True)
     assert pointer.read_text()=='previous_success'
+    with patch('ptm_shared.astra_reader_full.write_full',side_effect=ValueError('bad full revision')):
+        with pytest.raises(ValueError,match='bad full revision'):
+            revise_temporal(root,revision_root,whole_only=True)
+    assert pointer.read_text()=='previous_success'
 
 
 def test_access_code_does_not_invalidate_scientific_fingerprints(config):
     from ptm_shared import astra_evidence_v6 as engine
     context=config['experimental_context'];before=engine.resolve_plan(context)
     original=engine.digest
-    with patch.object(engine,'digest',side_effect=lambda p:'changed_reader_code' if Path(p).name=='astra_evidence_catalog.py' else original(p)):
+    with patch.object(engine,'digest',side_effect=lambda p:'changed_reader_code' if Path(p).name in {'astra_evidence_catalog.py','astra_reader_full.py'} else original(p)):
         after=engine.resolve_plan(context)
     assert before['fingerprints']==after['fingerprints']
 

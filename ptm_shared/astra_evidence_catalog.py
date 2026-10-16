@@ -75,11 +75,21 @@ def access_contract():
 def attach_access(tables):
     packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
     packet['evidence_access'] = access_contract()
+    if packet.get('whole_evidence'):
+        packet['evidence_access']['limits'] = 'Whole question/module/temporal access is available. Literature review execution remains the frozen original scope (M3/M4 deferred).'
     packet['authoring_rules']['whole_evidence_access'] = (
         'reader_cards and selected_findings are a summary preview. Query the evidence catalog for '
         'unselected, withheld and no-call evidence; resolve exact source keys before citing values. '
         'Index availability is not evidence of reading, literature comparison or biological review.')
     tables['reader/packet'].loc[tables['reader/packet'].index[0], 'packet_json'] = json.dumps(packet, ensure_ascii=False, sort_keys=True)
+
+
+def evidence_id_for(name, key):
+    """Shared typed identity for indexed and catalog-only canonical rows."""
+    keys = list(key)
+    if name != 'reader/coverage.csv' and len(keys) == 1 and keys[0].endswith('_id') and key[keys[0]] is not None:
+        return str(key[keys[0]])
+    return stable_id('evidence', [name, key])
 
 
 def _key(row, keys):
@@ -185,9 +195,7 @@ def build_evidence_index(root, dictionary):
             tokens = _tokens(identity.get('gene'), identity.get('protein_group'), r.get('gene'), r.get('Genes'),
                 r.get('protein_group'), r.get('Protein.Group'), candidate.get('tokens', []))
             taxa = _tokens(identity.get('taxa', []), candidate.get('taxa', []))
-            eid = str(row[keys[0]]) if len(keys) == 1 and keys[0].endswith('_id') and row[keys[0]] is not None else stable_id('evidence', [name, key])
-            # adapter ID is also the coverage key: one ID cannot refer to two representations.
-            if name == 'reader/coverage.csv': eid = stable_id('evidence', [name, key])
+            eid = evidence_id_for(name, key)
             state = {k: r.get(k, identity.get(k)) for k in STATES if k in r or k in identity}
             if name == 'reader_adapter/form_contrasts.csv': state['card_status'] = coverage[row['adapter_row_id']]['card_status']
             selected = (r.get('selected') is True) if name == 'reader/cards.csv' else (fid, cid) in selected_pairs

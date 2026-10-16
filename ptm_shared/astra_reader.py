@@ -90,6 +90,10 @@ def _questions(snapshot, metadata):
     return raw, questions
 
 
+def finding_id_for_card(card_id):
+    return stable_id('finding', [VERSION, card_id])
+
+
 def build_reader_tables(tables, design, snapshot=None):
     """Consume Round06 projections. Every source row receives one disposition."""
     projected = tables['reader_adapter/form_contrasts']
@@ -112,7 +116,7 @@ def build_reader_tables(tables, design, snapshot=None):
     all_cards = observations + comparisons
     selected_ids = {c['card_id'] for c in selected}
     selected_states = {c['consumer_state_id'] for c in selected}
-    finding_ids = {c['card_id']: stable_id('finding', [VERSION, c['card_id']]) for c in selected}
+    finding_ids = {c['card_id']: finding_id_for_card(c['card_id']) for c in selected}
     raw_questions, questions = _questions(snapshot, metadata)
     question_map = build_question_map(questions, observations)
     for q in question_map['questions']:
@@ -125,7 +129,7 @@ def build_reader_tables(tables, design, snapshot=None):
     for card in all_cards:
         card['question_ids'] = [q['question_id'] for q in question_map['questions'] if card['card_id'] in q['evidence_ids']]
         if card['category'] == 'quantitation_comparison':
-            card['question_ids'] = sorted({q for c in selected if c['consumer_state_id'] == card['consumer_state_id'] for q in c['question_ids']})
+            card['question_ids'] = sorted({q for c in observations if c['consumer_state_id'] == card['consumer_state_id'] for q in c['question_ids']})
     # The full grid, including missing points, remains in every observation card.
     # Source-row IDs, not copies of the same card, express opposite signed levels.
     for card in observations:
@@ -209,6 +213,9 @@ def build_reader_tables(tables, design, snapshot=None):
     attach_temporal(combined)
     attach_reading_guidance(combined)
     attach_access(combined)
+    from .astra_reader_full import attach_full
+    attach_full(combined)
+    result['reader/cards'] = combined['reader/cards']
     result['reader/packet'] = combined['reader/packet']
     return result
 
@@ -232,6 +239,9 @@ def attach_reading_guidance(tables):
         'Calculation completion, partial references, literature retrieval/comparison and missing localization are separate states.',
         'PSSM percentile is not correctness probability; native method p/q is not biological replicate significance.',
         'Keep literature proposals distinct from semantically reviewed claims; preserve no-call and uncertainty.']
+    if packet.get('whole_evidence'):
+        from .astra_reader_full import reading_order
+        packet['authoring_rules']['reading_order']=reading_order()
     tables['reader/packet'].loc[tables['reader/packet'].index[0],'packet_json']=json.dumps(packet,ensure_ascii=False,sort_keys=True)
 
 
@@ -387,12 +397,22 @@ def write_phosx_time_views(directory, tables):
     return ['reader/PHOSX_TIME_COURSE.md','reader/phosx_time_summary.csv','reader/phosx_assay_time_results.csv']
 
 
-def write_reader(directory, tables, *, source_root=None, access_only=False):
+def write_reader(directory, tables, *, source_root=None, access_only=False, whole_only=False):
     """Deterministic JSON/Markdown views of the canonical reader tables."""
     from .generic_workflow import json_write
     directory = Path(directory)
     access_artifacts = write_evidence_access(directory, source_root=source_root)
     packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
+    if packet.get('whole_evidence') and not access_only:
+        from .astra_reader_full import write_full
+        access_artifacts += write_full(directory,tables,source_root=source_root)
+    if whole_only:
+        json_write(directory/'reader/authoring_packet.json',packet)
+        json_write(directory/'reader/question_map.json',packet['research_question_evidence_map'])
+        note='## 전체 근거 읽기 (M2)\n\n전체 분모 → 질문별 근거·미연결 → 필요한 원본 → 요약 → 시간·방법·기존 문헌. [전체 연결 및 typed 인용](FULL_EVIDENCE.md). 기존 findings는 preview입니다.\n\n'
+        path=directory/'reader/READ_ME.md';original=path.read_text() if path.exists() else ''
+        if not original.startswith(note):path.write_text(note+original,encoding='utf-8')
+        return access_artifacts+['reader/authoring_packet.json','reader/question_map.json','reader/READ_ME.md']
     if access_only:
         # A reader revision must not reinterpret newer archived literature/cards
         # with an older checkout. Keep all existing interpretation bytes intact.
@@ -410,7 +430,7 @@ def write_reader(directory, tables, *, source_root=None, access_only=False):
         '[전체 근거 catalog와 미선정·보류·no-call 조회](EVIDENCE_ACCESS.md). 선정 findings는 요약입니다. 전체 접근 가능성과 실제 검토 범위는 다릅니다.',
         '[실험 원문과 설계](../study/STUDY_BRIEF.md) · [원문 snapshot](../study/user_input_snapshot.json) · '
         '[전체 카드](cards.csv) · [전체 행의 보류/선정 사유](coverage.csv) · [구조화 packet](authoring_packet.json)',
-        '읽기 순서: **연구 질문·[준비 상태](../evidence/readiness.json) → 아래 선정 관측 → 시간·방법·문헌 근거 → 필요한 원본 행**. '
+        '읽기 순서: **[전체 분모·질문별 연결과 미연결](FULL_EVIDENCE.md) → 필요한 원본 → 요약 → 시간·방법·문헌 근거**. '
         '큰 source pin 전체를 먼저 읽을 필요는 없습니다. research_full은 요청 정책이며 참조 수집 완료를 뜻하지 않습니다.',
         f"전체 {coverage['total_forms']} forms / {coverage['total_form_contrasts']} form×contrast. "
         f"카드 {coverage['card_forms']} forms / 수치 관측 {coverage['card_numeric_rows']}행 / 결측 시점 {coverage['card_missing_timepoints']}행. "

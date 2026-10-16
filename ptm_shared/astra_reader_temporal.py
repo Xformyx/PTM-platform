@@ -66,7 +66,19 @@ def source_row(value):
     return row
 
 
-def project_temporal(tables, packet):
+def validate_feature_scope(row, series, design):
+    """Check saved identity and observed grid; never derive a temporal feature."""
+    conditions={r['condition_id']:r for r in design['conditions']}
+    contrasts={r['contrast_id']:r for r in design['contrasts']}
+    ordered=sorted(_parts(series['contrast_ids']),key=lambda cid:(conditions[contrasts[cid]['target_condition_id']]['time']['minutes'],cid))
+    if (row['arm_id'],row['reference_condition_id'])!=(series['arm_id'],series['reference_condition_id']):
+        raise ValueError('Temporal feature scope conflict: '+row['feature_id'])
+    if json.loads(row['times_minutes'])!=[conditions[contrasts[cid]['target_condition_id']]['time']['minutes'] for cid in ordered]:
+        raise ValueError('Temporal feature grid conflict: '+row['feature_id'])
+    return ordered
+
+
+def project_temporal(tables, packet, *, subjects=None, links_only=False):
     """Return a deterministic row projection and a deduplicated evidence crosswalk.
 
     Duplicate source keys are rejected. Nonunique series or feature scope is
@@ -79,12 +91,20 @@ def project_temporal(tables, packet):
         if len(frame) and frame.duplicated(keys).any():
             raise ValueError('Duplicate temporal reader source key: ' + name)
 
+    # Reuse exact-key lookups across the complete subject population. This is a
+    # projection index only; no temporal values are estimated or cached anew.
+    lookups = {}
     def rows(name, **where):
-        frame = tables.get(name, pd.DataFrame())
-        if frame.empty: return []
-        for key, value in where.items():
-            frame = frame.loc[frame[key].eq(value)]
-        return sorted((source_row(r) for r in frame.to_dict('records')), key=lambda r: encode([r[k] for k in KEYS[name]]))
+        fields = tuple(where)
+        lookup_key = (name, fields)
+        if lookup_key not in lookups:
+            lookup = {}
+            for raw in tables.get(name, pd.DataFrame()).to_dict('records'):
+                row = source_row(raw)
+                lookup.setdefault(tuple(row[k] for k in fields), []).append(row)
+            for group in lookup.values(): group.sort(key=lambda r: encode([r[k] for k in KEYS[name]]))
+            lookups[lookup_key] = lookup
+        return lookups[lookup_key].get(tuple(where.values()), [])
 
     def bind(finding, name, row, role):
         key = {k: row[k] for k in KEYS[name]}
@@ -98,12 +118,18 @@ def project_temporal(tables, packet):
 
     cards = {c['card_id']: c for c in packet['reader_cards']}
     findings = []
-    for f in tables['reader/findings'].to_dict('records'):
-        fid, form = f['finding_id'], f['form_id']
-        card = cards[f['card_id']]
+    if subjects is None:
+        subjects = [dict(cards[f['card_id']], subject_id=f['finding_id'])
+                    for f in tables['reader/findings'].to_dict('records')]
+    member_lookup = {}
+    members = tables.get(CONTRIBUTION, pd.DataFrame())
+    for n, r in enumerate(members.to_dict('records')):
+        for form in _parts(r['form_ids']): member_lookup.setdefault(form, []).append(n)
+    for card in subjects:
+        fid, form = card['subject_id'], card['form_id']
         bindings = card['source_bindings']
         scopes = {(b['arm_id'], b['reference_condition_id'], b['pairing']) for b in bindings}
-        item = {'finding_id': fid, 'card_id': f['card_id'], 'form_id': form,
+        item = {'finding_id': fid, 'card_id': card.get('card_id'), 'form_id': form,
                 'label': card['feature_label'], 'status': 'unlinked', 'reasons': [],
                 'features': [], 'intervals': [], 'candidates': [], 'source_observations': []}
         findings.append(item)
@@ -144,10 +170,7 @@ def project_temporal(tables, packet):
             for r in selected:
                 if counts[r['track']] != 1:
                     item['reasons'].append('ambiguous_feature_scope:' + role + ':' + r['track']); continue
-                if (r['arm_id'], r['reference_condition_id']) != (arm, reference):
-                    raise ValueError('Temporal feature scope conflict: ' + r['feature_id'])
-                if json.loads(r['times_minutes']) != [conditions[contrasts[cid]['target_condition_id']]['time']['minutes'] for cid in ordered]:
-                    raise ValueError('Temporal feature grid conflict: ' + r['feature_id'])
+                validate_feature_scope(r,series,design)
                 entry = bind(fid, name, r, role)
                 entry['role'] = role
                 entry['contrast_ids'] = ordered
@@ -176,8 +199,8 @@ def project_temporal(tables, packet):
                 raise ValueError('Adjacent interval outside series: ' + r['interval_id'])
             item['intervals'].append(bind(fid, INTERVAL, r, 'adjacent_joint_contrast'))
 
-        members = tables.get(CONTRIBUTION, pd.DataFrame())
-        selected = members.loc[members.form_ids.map(lambda value: form in _parts(value)) & members.contrast_id.isin(ordered)] if len(members) else members
+        selected = members.iloc[member_lookup.get(form, [])] if len(members) else members
+        if len(selected): selected = selected.loc[selected.contrast_id.isin(ordered)]
         for (candidate, track), group in selected.groupby(['candidate_id', 'track'], sort=True) if len(selected) else []:
             cm = [source_row(r) for r in group.to_dict('records')]
             evidence = {'candidate_id': candidate, 'series_id': sid, 'track': track,
@@ -211,6 +234,10 @@ def project_temporal(tables, packet):
         item['status'] = 'ambiguous' if any('ambiguous_' in r for r in item['reasons']) else 'linked' if any(r['role'] == 'ptm' for r in item['features']) else 'unlinked'
         if item['status'] == 'unlinked': item['reasons'].append('no_saved_ptm_feature')
         item['reasons'] = sorted(set(item['reasons']))
+        if links_only:
+            # Full access keeps locators, not a second copy of every time vector.
+            for key in ('features', 'intervals', 'candidates', 'source_observations', 'series', 'form_identity'):
+                item.pop(key, None)
     inventory = [{'table': name + '.csv', 'total_rows': len(tables.get(name, [])), 'linked_unique_rows': len(used[name]),
                   'outside_reader_rows': len(tables.get(name, [])) - len(used[name]), 'retained': 'full_source_table'} for name in KEYS if name in tables]
     return {'version': VERSION, 'interpretation_limits': LIMITS, 'findings': findings,

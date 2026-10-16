@@ -19,8 +19,8 @@ def test_guidance_keeps_literature_status_questions_and_exact_packet_bytes(reade
     packet=json.loads(after)
     assert packet['literature']==prior['literature']
     assert packet['original_questions']==prior['original_questions']
-    assert packet['authoring_rules']['reading_order'][0]['paths'][0]=='study/STUDY_BRIEF.md'
-    assert 'references/source_pin.json' in packet['authoring_rules']['reading_order'][-1]['paths']
+    assert packet['authoring_rules']['reading_order'][0]['paths'][0]=='reader/FULL_EVIDENCE.md'
+    assert 'reader/LITERATURE.md' in packet['authoring_rules']['reading_order'][-1]['paths']
 
 
 def test_completed_literature_overrides_historical_display_only(reader,tmp_path):
@@ -34,7 +34,7 @@ def test_completed_literature_overrides_historical_display_only(reader,tmp_path)
     (tmp_path/'reader').mkdir()
     # This unit fixture has only the literature/card boundary, not a full package.
     # Catalog publication and required-source validation have separate v6 tests.
-    with patch('ptm_shared.astra_reader.write_evidence_access',return_value=[]):
+    with patch('ptm_shared.astra_reader_full.write_full',return_value=[]), patch('ptm_shared.astra_reader.write_evidence_access',return_value=[]):
         write_reader(tmp_path,tables)
     text=(tmp_path/'reader/READ_ME.md').read_text()
     assert 'Literature comparison and independent validation were not performed by this reader stage.' not in text

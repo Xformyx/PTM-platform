@@ -80,7 +80,7 @@ def test_saved_values_na_scope_links_questions_and_writer(saved, tmp_path):
     # Hard guards: nothing in this boundary may calculate or retrieve.
     with patch('ptm_shared.astra_package.compute_science', side_effect=AssertionError('calculation')), \
          patch('ptm_shared.astra_literature.collect', side_effect=AssertionError('retrieval')), \
-         patch('ptm_shared.astra_reader.write_evidence_access', return_value=[]):
+         patch('ptm_shared.astra_reader_full.write_full', return_value=[]), patch('ptm_shared.astra_reader.write_evidence_access', return_value=[]):
         temporal.attach_temporal(saved)
         temporal.validate_temporal(saved)
         write_reader(tmp_path, saved)
@@ -185,7 +185,7 @@ def test_immutable_revision_failure_keeps_pointer_and_source(saved, tmp_path):
     json_write(source/'manifest.json', {'files':manifest})
     output=tmp_path/'out';output.mkdir();pointer=output/'enrichment_free_current.json';pointer.write_text('previous_success')
     with patch('ptm_shared.astra_package.validate_package'), patch('ptm_shared.astra_reader_revision.read_tables',return_value=saved), \
-         patch('ptm_shared.astra_reader.validate_reader'), patch('ptm_shared.astra_reader.write_evidence_access',return_value=[]), \
+         patch('ptm_shared.astra_reader.validate_reader'), patch('ptm_shared.astra_reader_full.write_full',return_value=[]), patch('ptm_shared.astra_reader.write_evidence_access',return_value=[]), \
          patch('ptm_shared.astra_package.seal_archive',side_effect=RuntimeError('write failure')):
         with pytest.raises(RuntimeError,match='write failure'): revise_temporal(source,output)
     assert pointer.read_text() == 'previous_success'

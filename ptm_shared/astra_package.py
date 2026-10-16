@@ -31,7 +31,7 @@ from .annotation_registry import digest
 from .generic_kinase import fasta_taxonomy
 
 VERSION='astra_analysis_package.v4'
-READER_CODE_FILES=['astra_evidence_catalog.py']
+READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py']
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
     'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py']))
@@ -252,7 +252,8 @@ def validate_science(tables,design):
             keys=keys or science_engine.ADDITIONAL_KEYS.get(name)
         if name.startswith('reader/'):
             from .astra_evidence_catalog import TABLE_KEYS as ACCESS_KEYS
-            keys=keys or ACCESS_KEYS.get(name)
+            from .astra_reader_full import TABLE_KEYS as FULL_KEYS
+            keys=keys or ACCESS_KEYS.get(name) or FULL_KEYS.get(name)
         if keys and (any(k not in df for k in keys) or df.duplicated(keys).any()):raise ValueError('Duplicate/missing row key: '+name)
         if not len(df.columns):raise ValueError('Missing header: '+name)
         for column,universe in [('form_id',forms),('contrast_id',contrasts),('candidate_id',candidates),('condition_id',conditions),('reference_condition_id',conditions),('series_id',series),('source_evidence_id',feature_ids),('target_evidence_id',feature_ids)]:
@@ -295,6 +296,9 @@ def write_tables(tables,directory):
             keys=science_engine.KEYS.get(short)
         elif science_engine and hasattr(science_engine,'ADDITIONAL_KEYS'):
             keys=keys or science_engine.ADDITIONAL_KEYS.get(name)
+        if name.startswith('reader/'):
+            from .astra_reader_full import TABLE_KEYS as FULL_KEYS
+            keys=keys or FULL_KEYS.get(name)
         dictionary[name+'.csv']={'rows':len(frame),'columns':list(frame),'unique_key':keys,
             'dtypes':{k:str(v) for k,v in frame.dtypes.items()},'nullable':True,
             'missing':'unobserved/unavailable; never zero; status/reasons accompany quantities',
@@ -310,7 +314,7 @@ def start_here(snapshot,counts,readiness):
     original=snapshot['original']
     method_path='reader/PHOSX_TIME_COURSE.md' if readiness.get('native_method_runtime') else 'kinase/method_executions.csv'
     return '\n\n'.join(['# START HERE — Astra analysis package',f"Project: {original.get('project_name')} | Order: {original.get('order_code')}",
-        (f'1. Read the original questions and design in [STUDY_BRIEF](study/STUDY_BRIEF.md), [question coverage](reader/READ_ME.md#저장된-연구-질문) and [actual readiness](evidence/readiness.json).\n\n2. Read [selected observations and withheld coverage](reader/READ_ME.md).\n\n3. Follow the saved [temporal](reader/TEMPORAL_EVIDENCE.md), [PhosX]({method_path}) and [literature](reader/LITERATURE.md) evidence.\n\n4. Trace individual claims to source row keys. Consult [source queries](references/source_query_ledger.csv) and the large source pin only when a specific claim requires them.' if readiness.get('reader') else
+        (f'1. Read [whole denominators, question links and typed citation instructions](reader/FULL_EVIDENCE.md), then the original questions and design in [STUDY_BRIEF](study/STUDY_BRIEF.md), [question coverage](reader/READ_ME.md#저장된-연구-질문) and [actual readiness](evidence/readiness.json).\n\n2. Resolve question-linked originals and unresolved scopes through the catalog, then read [summary observations and withheld coverage](reader/READ_ME.md).\n\n3. Follow the saved [temporal](reader/TEMPORAL_EVIDENCE.md), [PhosX]({method_path}) and [literature](reader/LITERATURE.md) evidence.\n\n4. Trace individual claims to source row keys. Consult [source queries](references/source_query_ledger.csv) and the large source pin only when a specific claim requires them.' if readiness.get('reader') else
          'First read [STUDY_BRIEF](study/STUDY_BRIEF.md), [design](study/study_design.json) and [readiness](evidence/readiness.json). Consult individual source queries and the large source pin only when needed.'),
         'Stage status: '+json.dumps({'calculation':readiness.get('completion_status'),'reference':readiness.get('source_execution',{}).get('status'),'incomplete_reference_queries':len(readiness.get('source_execution',{}).get('incomplete_queries',[])),
             'literature':readiness.get('literature',{}).get('status'),'site_attribution':readiness.get('strict_attribution',{}).get('status')},ensure_ascii=False)+
