@@ -336,6 +336,13 @@ def test_completed_empty_comparison_is_not_pending(reader):
     assert summary['comparison_executed_findings']==summary['selected_findings']
     assert summary['status']=='compared_no_supported_relationship'
     assert summary['semantically_verified_comparable_findings']==0
+    stages=summary['review_stages']
+    assert stages['search']=='completed'
+    assert stages['model_comparison']=='completed'
+    assert stages['citation_evidence_verification']=='not_verified'
+    assert stages['biological_meaning_review']=='not_performed'
+    assert stages['approved_relationships']==0
+    assert stages['external_delivery']=='source_text_recorded_review_still_required'
 
 
 def test_repeated_reader_revision_keeps_original_literature_execution_proof(reader,tmp_path):

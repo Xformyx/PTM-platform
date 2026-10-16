@@ -15,7 +15,7 @@ from .measured_feature_cards import (build_feature_observation_cards,
     build_quantitation_comparison_cards, select_finding_cards)
 from .research_questions import build_question_map
 from .reader_authoring import build_authoring_packet
-from .astra_reader_temporal import (attach_temporal, validate_temporal, write_temporal,
+from .astra_reader_temporal import (attach_temporal, validate_temporal, write_temporal, _parts,
                                     SOURCE_TABLES as TEMPORAL_SOURCE_TABLES)
 from .astra_evidence_catalog import attach_access, write_evidence_access
 
@@ -223,15 +223,21 @@ def build_reader_tables(tables, design, snapshot=None):
 
 
 def attach_reading_guidance(tables):
-    """Extend the existing authoring contract without selecting or calculating."""
+    """선정 관측과 문헌 단계, PhosX 실행 여부를 서로 다른 안내로 남긴다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «문헌 검토 단계»
+    사전등록: 2026-10-13. 선정 규칙과 문헌 승인 조건은 바꾸지 않는다.
+    해석 한계: 안내는 읽기 범위다. 선정 finding 수나 z-score 행 수가 PhosX 실행이나 cascade 구성이 아니다.
+    주장 금지: 15개 관측이나 repository_measured_gene_zscore로 kinase 귀속 정확도를 논하지 않는다.
+    """
     packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
     executions=tables.get('kinase/method_executions',pd.DataFrame())
     method_path='reader/PHOSX_TIME_COURSE.md' if len(executions) else 'kinase/method_executions.csv'
     packet['authoring_rules']['reading_order']=[
         {'step':1,'purpose':'Original questions, design and actual stage readiness',
          'paths':['study/STUDY_BRIEF.md','reader/READ_ME.md#저장된-연구-질문','evidence/readiness.json']},
-        {'step':2,'purpose':'Selected observations and withheld/unselected coverage',
-         'paths':['reader/READ_ME.md','reader/findings.csv','reader/coverage_summary.json']},
+        {'step':2,'purpose':'Selected observations are not the full signaling network. Do not build a cascade from the selected findings or from an expected insulin pathway. Choose card_id values from findings.csv and question_map.json; do not read all of cards.csv or authoring_packet.json. Precursor membership_ids are not kinase-candidate contributions; count those from substrate_contributions form_id tokens. Continue to the full emergence, protein, and kinase tables.',
+         'paths':['reader/READ_ME.md','reader/findings.csv','reader/question_map.json','reader/coverage_summary.json','evidence/emergence_evidence.csv','quant/protein_contrasts.csv','kinase/substrate_contributions.csv','science/inference_results.csv']},
         {'step':3,'purpose':'Saved temporal, native method and literature evidence with limits',
          'paths':['reader/TEMPORAL_EVIDENCE.md',method_path,'reader/LITERATURE.md']},
         {'step':4,'purpose':'Trace a claim to exact source row keys; large source pin only as needed',
@@ -240,7 +246,11 @@ def attach_reading_guidance(tables):
         'research_full is an acquisition policy, not evidence of completed collection; inspect source_execution.',
         'Calculation completion, partial references, literature retrieval/comparison and missing localization are separate states.',
         'PSSM percentile is not correctness probability; native method p/q is not biological replicate significance.',
-        'Keep literature proposals distinct from semantically reviewed claims; preserve no-call and uncertainty.']
+        'Keep literature proposals distinct from semantically reviewed claims; preserve no-call and uncertainty.',
+        'Search completion, model comparison, citation verification, biological review, and external delivery are separate literature stages. packet mode citation_complete only means reference cards exist.',
+        'repository_measured_gene_zscore rows are not PhosX. PhosX results require method_id PhosX_native_functions and rows in kinase/method_executions.csv.',
+        'PhosX execution and method_scores row counts are not significant kinase-activity detection. insufficient_coverage is not inactivity, and a no-call is not evidence that v6 was not applied.',
+        'Precursor membership_ids on source bindings are not kinase-candidate contributions.']
     if packet.get('whole_evidence'):
         from .astra_reader_full import reading_order
         packet['authoring_rules']['reading_order']=reading_order()
@@ -375,6 +385,7 @@ def write_phosx_time_views(directory, tables):
         'Method p/q는 해당 contrast의 공식 rank permutation 및 다중 검정 결과이며 biological p/q나 전체 시간축의 통합 FDR가 아닙니다.',
         'Assay label은 검증된 enzyme accession/rat orthology를 대신하지 않습니다. Human assay와 substrate taxon은 구분됩니다. '
         '자원의 지원 범위 밖 residue는 비활성이 아닙니다. 미측정 localization, 기술 반복, calibration 및 no-call 제한은 유지됩니다. '
+        + stored_method_limit_sentence(tables['kinase/method_scores']) + ' '
         'NA는 미평가/결측입니다. 공식 native_score가 coverage 부족에서 0을 반환한 경우 CSV 원문은 보존하되 아래 점수는 NA로 표시합니다. '
         'Control 점수를 추가하거나 시점 사이를 보간하지 않습니다.',
         '## 시점별 입력·실행',
@@ -397,6 +408,119 @@ def write_phosx_time_views(directory, tables):
                        for i,line in enumerate(lines)).lstrip()+'\n'
     (directory/'PHOSX_TIME_COURSE.md').write_text(rendered,encoding='utf-8')
     return ['reader/PHOSX_TIME_COURSE.md','reader/phosx_time_summary.csv','reader/phosx_assay_time_results.csv']
+
+
+def _id_tokens(value):
+    if isinstance(value, list):
+        return [str(item) for item in value if item is not None and str(item) not in {'', 'nan', 'None'}]
+    return [part for part in _parts(value) if part not in {'', 'nan', 'None'}]
+
+
+def selected_kinase_contribution_summary(selected_findings, contributions=None, *, precursor_membership=None, temporal_findings=None):
+    """precursor membership과 저장된 후보 기여도를 범위가 해소된 행에서만 따로 센다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «저장된 결과의 reader 연결»
+    사전등록: 2026-10-13. g7에서 membership_ids가 선정 관측 15개 모두에 있어 kinase 연결로 집계된 것을 본 뒤. 탐색적. primary 승격 금지.
+    해석 한계: project_temporal이 검증한 후보를 우선한다. 표가 없으면 0개로 바꾸지 않는다. 새 kinase 점수가 아니다.
+    주장 금지: 후보 수로 kinase 귀속 정확도, AKT 활성, 또는 AKT 비활성을 논하지 않는다.
+    """
+    if precursor_membership is None:
+        precursor_status, precursor_count = 'absent', None
+    elif 'membership_id' not in precursor_membership.columns:
+        precursor_status, precursor_count = 'unreadable', None
+    else:
+        known = {str(item) for item in precursor_membership.membership_id.dropna()}
+        precursor_count = sum(1 for card in selected_findings if any(
+            token in known for binding in card.get('source_bindings') or [] for token in _id_tokens(binding.get('membership_ids'))))
+        precursor_status = 'counted'
+    links, candidates, contribution_status = [], set(), 'counted'
+    if temporal_findings is not None:
+        by_finding = {item.get('finding_id'): item for item in temporal_findings}
+        for card in selected_findings:
+            item = by_finding.get(card.get('finding_id'))
+            if item is None or item.get('status') == 'ambiguous':
+                contribution_status = 'not_evaluable'
+                break
+            matched = sorted({str(candidate.get('candidate_id')) for candidate in item.get('candidates') or [] if candidate.get('candidate_id')})
+            if matched:
+                candidates.update(matched)
+                links.append({'finding_id': card.get('finding_id'), 'feature_label': card.get('feature_label'),
+                              'form_id': card.get('form_id'), 'candidate_count': len(matched)})
+        if contribution_status != 'counted':
+            links, candidates = [], set()
+    elif contributions is None:
+        contribution_status = 'absent'
+    elif not {'form_ids', 'candidate_id', 'contrast_id'} <= set(contributions.columns):
+        contribution_status = 'unreadable'
+    else:
+        for card in selected_findings:
+            form = str(card.get('form_id') or '')
+            bindings = card.get('source_bindings') or []
+            contrasts = {binding.get('contrast_id') for binding in bindings if binding.get('contrast_id')}
+            scopes = {(binding.get('arm_id'), binding.get('reference_condition_id'), binding.get('pairing')) for binding in bindings}
+            if not form or not contrasts or len(scopes) != 1:
+                contribution_status = 'not_evaluable'
+                break
+            matched = contributions.loc[contributions.form_ids.map(lambda value, form_id=form: form_id in _parts(value))
+                                        & contributions.contrast_id.isin(contrasts)]
+            arm, reference, pairing = next(iter(scopes))
+            for column, expected in (('arm_id', arm), ('reference_condition_id', reference), ('pairing', pairing)):
+                if column in matched.columns:
+                    matched = matched.loc[matched[column].astype(str).eq(str(expected))]
+            matched_candidates = sorted({str(candidate) for candidate in matched.candidate_id.dropna() if str(candidate) not in {'', 'nan'}})
+            if matched_candidates:
+                candidates.update(matched_candidates)
+                links.append({'finding_id': card.get('finding_id'), 'feature_label': card.get('feature_label'),
+                              'form_id': form, 'candidate_count': len(matched_candidates)})
+        if contribution_status != 'counted':
+            links, candidates = [], set()
+    return {'selected_findings': len(selected_findings), 'precursor_status': precursor_status,
+            'precursor_linked_findings': precursor_count, 'contribution_status': contribution_status,
+            'contribution_linked_findings': len(links) if contribution_status == 'counted' else None,
+            'candidate_count': len(candidates) if contribution_status == 'counted' else None, 'links': links}
+
+
+def kinase_link_sentence(summary):
+    """저장된 집계를 문장으로 옮긴다. 세 연결을 하나의 수로 합치지 않는다."""
+    if summary['precursor_status'] == 'counted':
+        precursor = f"precursor membership이 있는 선정 관측은 {summary['precursor_linked_findings']}개입니다. 이 ID는 kinase 후보가 아닙니다."
+    elif summary['precursor_status'] == 'unreadable':
+        precursor = 'precursor_membership 표에서 membership_id를 읽지 못해 precursor 연결 수는 확인하지 않았습니다.'
+    else:
+        precursor = 'precursor_membership 표가 없어 precursor 연결 수는 확인하지 않았습니다.'
+    if summary['contribution_status'] == 'counted':
+        detail = ''
+        if summary['links']:
+            detail = ' 연결: ' + '; '.join(f"{item['feature_label']} 후보 {item['candidate_count']}개" for item in summary['links']) + '.'
+        contribution = (f"저장된 후보 기여도가 연결된 선정 관측은 {summary['contribution_linked_findings']}개이고, "
+                        f"서로 다른 candidate_id는 {summary['candidate_count']}개입니다. 후보 수는 활성 확정이 아닙니다.{detail}")
+    elif summary['contribution_status'] == 'unreadable':
+        contribution = 'substrate contribution 표에서 form_ids와 contrast_id를 읽지 못해 후보 연결 수는 확인하지 않았습니다.'
+    elif summary['contribution_status'] == 'not_evaluable':
+        contribution = '후보 기여도는 카드의 contrast 범위가 하나로 해소되지 않아 확인하지 않았습니다.'
+    else:
+        contribution = '저장된 후보 기여도 표가 없어 후보 연결 수는 확인하지 않았습니다.'
+    return (f"선정 관측 {summary['selected_findings']}개. {precursor} {contribution} "
+            'precursor membership, substrate contribution, PhosX native membership은 하나의 연결 수로 합치지 않습니다.')
+
+
+def stored_method_limit_sentence(scores=None):
+    """저장된 method 상태 개수를 옮긴다. 새 q 임계는 적용하지 않는다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «저장된 결과의 reader 연결»
+    사전등록: 2026-10-13. g7에서 PhosX 실행과 method q 결과를 본 뒤. 탐색적. primary 승격 금지.
+    해석 한계: executed와 행 수는 활성 검출이 아니고, insufficient_coverage는 비활성이 아니다.
+    주장 금지: 이 문장으로 AKT 활성, AKT 비활성, 또는 v6 미적용을 결론내지 않는다.
+    """
+    text = ('method_executions의 executed와 method_scores 행 수는 유의한 kinase 활성 검출이 아닙니다. '
+            'status가 insufficient_coverage인 행은 그 kinase가 비활성이라는 뜻이 아닙니다. '
+            'method q로 특정 kinase의 활성 또는 비활성을 결론내지 않습니다. '
+            'no-call은 v6가 적용되지 않았다는 증거가 아닙니다.')
+    if scores is None or not len(scores) or 'method_id' not in scores.columns or 'status' not in scores.columns:
+        return text
+    totals = [f'{method} {int(count)}행' for method, count in scores.groupby('method_id', dropna=False).size().sort_index().items()]
+    parts = [f'{method}/{status} {int(count)}행' for (method, status), count in scores.groupby(['method_id', 'status'], dropna=False).size().sort_index().items()]
+    return text + f" method_scores 전체 {len(scores)}행: " + ', '.join(totals) + '. 상태: ' + ', '.join(parts) + '.'
 
 
 def write_reader(directory, tables, *, source_root=None, access_only=False, whole_only=False, review_plan_only=False, review_execution=None):
@@ -442,11 +566,18 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
             ('question_map',packet['research_question_evidence_map']),('selection_audit',packet['observation_selection_audit'])]:
         json_write(directory/'reader'/f'{name}.json',value)
     coverage = packet['coverage_inventory']
+    selected_findings = [c for c in packet['reader_cards'] if c.get('category')=='measured_feature_observation' and c.get('finding_id')]
+    temporal = packet.get('temporal_evidence') or {}
+    kinase_summary = selected_kinase_contribution_summary(
+        selected_findings, tables.get('kinase/substrate_contributions'),
+        precursor_membership=tables.get('reader_adapter/precursor_membership'),
+        temporal_findings=temporal.get('findings'))
     lines = ['# 주요 관측과 근거 — Astra reader',
         '[전체 문헌 검토 대상 계획](LITERATURE_REVIEW_PLAN.md): 신규 검색/비교와 독립된 계획이며 기존 문헌 상태를 보존합니다.',
         '[전체 근거 catalog와 미선정·보류·no-call 조회](EVIDENCE_ACCESS.md). 선정 findings는 요약입니다. 전체 접근 가능성과 실제 검토 범위는 다릅니다.',
         '[실험 원문과 설계](../study/STUDY_BRIEF.md) · [원문 snapshot](../study/user_input_snapshot.json) · '
         '[전체 카드](cards.csv) · [전체 행의 보류/선정 사유](coverage.csv) · [구조화 packet](authoring_packet.json)',
+        'cards.csv는 전체 카드 저장소이며 authoring_packet.json의 reader_cards는 요약 preview입니다. [전체 catalog](EVIDENCE_ACCESS.md)와 [질문 연결](FULL_EVIDENCE.md)에서 필요한 원본·card_id를 조회하세요. 큰 파일 전체를 먼저 읽을 필요는 없습니다.',
         '읽기 순서: **[전체 분모·질문별 연결과 미연결](FULL_EVIDENCE.md) → 필요한 원본 → 요약 → 시간·방법·문헌 근거**. '
         '큰 source pin 전체를 먼저 읽을 필요는 없습니다. research_full은 요청 정책이며 참조 수집 완료를 뜻하지 않습니다.',
         f"전체 {coverage['total_forms']} forms / {coverage['total_form_contrasts']} form×contrast. "
@@ -465,9 +596,14 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         '[서열 점수](../science/specificity_scores.csv) → [기질 기여도](../kinase/substrate_contributions.csv) → '
         '[native membership](../kinase/method_membership.csv) → [방법 결과](../kinase/method_scores.csv)는 별도 근거입니다. '
         'PSSM percentile은 정답 확률이 아니며 method p/q는 생물학적 반복의 p/q가 아닙니다. '
-        '서열 적합성으로 미측정 localization이나 개별 kinase 활성·인과를 확정하지 마세요.',
+        '서열 적합성으로 미측정 localization이나 개별 kinase 활성·인과를 확정하지 마세요. '
+        + stored_method_limit_sentence(tables.get('kinase/method_scores')),
         '선정: 기존 select_finding_cards의 quality/parent/pattern diversity 및 stable ID 기준, 최대 15개. '
-        '질문 연결은 선정 이후 수행하며 경로 기대를 점수에 사용하지 않습니다.', '## 저장된 연구 질문']
+        '질문 연결은 선정 이후 수행하며 경로 기대를 점수에 사용하지 않습니다. '
+        + kinase_link_sentence(kinase_summary) + ' '
+        '이 선정만으로 insulin cascade를 구성하지 마세요. 전체 emergence, protein, kinase 표로 범위를 넓히세요. '
+        'method_id가 repository_measured_gene_zscore인 행은 PhosX 결과가 아닙니다. PhosX_native_functions와 method_executions가 있을 때만 PhosX로 읽습니다.',
+        '## 저장된 연구 질문']
     for q in packet['research_question_evidence_map']['questions']:
         lines.extend([f"### {q['question_id']}", q['original_text'], f"상태: {q['answer_status']}; {q['answer_scope']}",
                       '연결 결과: '+(', '.join(q['finding_ids']) or '없음'), '부족한 근거: '+' '.join(q['missing_evidence'])])

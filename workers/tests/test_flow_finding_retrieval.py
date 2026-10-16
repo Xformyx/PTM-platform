@@ -72,7 +72,8 @@ def test_fabricated_quote_cannot_become_a_literature_comparison():
     result = retrieve_finding_literature(build_feature_observation_cards(finding_state()), Retriever(), {}, llm=Model(quote="invented finding"))
     record = next(iter(result["records"].values()))
     assert not record["comparisons"]
-    assert record["excluded_comparisons"][0]["reason"] == "unbound_quote_context_or_scope"
+    assert record["excluded_comparisons"][0]["reason"] == "quote_not_in_retrieved_chunk"
+    assert record["excluded_comparisons"][0]["exclusion_class"] == "citation_mismatch"
 
 
 @pytest.mark.parametrize("finding", ["insulin directly activates this site", "An increase at S7 was reported"])

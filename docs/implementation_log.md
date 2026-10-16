@@ -3519,3 +3519,70 @@
 - **해석 한계:** 패키지가 나와도 미완료 조회는 채워지지 않는다. STRING·iPTMnet 결과를 site-resolved curated kinase edge로 올리지 않는다.
 - **결정성:** 새 seed·solver 없음. 새 측정 임계 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_astra_source_policy.py`.
 
+### [2026-10-12] Astra 새 주문 — 빈 Reference ID는 선언된 종별 등록본
+
+- **분류:** 구현
+- **대상:** `ptm_shared/species_sequence_reference.py`, `scripts/register_species_sequence_references.py`, `docs/astra_science_upgrade/operations_KO.md` «등록된 종별 sequence reference»
+- **구현 대상 설계:** 같은 절. 2026-10-12 선언. human, mouse, rat, rat_hir의 파일명을 등록 ID로 고정했다.
+- **사전등록 상태:** 결과 열람 전 확정. 주문 결과로 파일을 고른 것이 아니라, 이미 종 폴더에 있던 FASTA의 파일명을 실행 전에 선언했다.
+- **내용:** Astra 새 주문에서 Reference ID가 비어 있고 분석 FASTA가 없으면 선언된 ID의 manifest를 쓴다. 명시 ID는 바꾸지 않는다. 분석 FASTA를 올리면 그 파일이 우선이며 종 등록 ID로 표시하지 않는다. 설치는 선언된 파일명만 hard link하고 sha256을 고정한다. 다른 sha256이 있으면 덮어쓰지 않는다. 종 폴더를 정렬해 첫 파일을 고르지 않는다. `rat_hir`은 rat 등록본이 아니다.
+- **논문에서의 용도:** methods (참조 서열의 신원). 결과 비교에는 쓰지 않는다.
+- **해석 한계:** 등록은 서열 파일의 신원이다. kinase 귀속 정확도가 올라갔다고 하지 않는다. manifest가 없는 기계에서는 분석 FASTA 업로드가 필요하다.
+- **결정성:** 새 seed·solver 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_species_sequence_reference.py`.
+
+### [2026-10-13] 문헌 제외 사유와 검토 단계 — 승인 기준은 유지
+
+- **분류:** 구현
+- **대상:** `ptm_shared/finding_literature.py` `quote_binding_failure`, `ptm_shared/astra_literature.py` `literature_review_stages`, `ptm_shared/astra_reader.py` `attach_reading_guidance`, `ptm_shared/astra_evidence_v6.py` `report_addendum`, `ptm_shared/phosx_registered_resource.py` `locate_declared_phosx_manifest`
+- **구현 대상 설계:** `docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md` «문헌 검토 단계». 2026-10-13 선언. 승인 조건은 결과 열람 전의 v6 조건과 같다.
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). 비교 제안이 `unbound_quote_context_or_scope`로만 거절되고 승인 0건인 패키지를 본 뒤, 거절 사유와 상태 이름을 나누기로 했다. 승인 임계는 새로 만들지 않았다.
+- **내용:** 거절된 비교만 인용 불일치, 범위, 조건 비교로 나눈다. 통과 조건과 `claim_support_status=not_verified`는 바꾸지 않는다. 검색, 모델 비교, 인용 검증, 생물학적 검토, 외부 전달을 `review_stages`에 따로 적는다. `citation_complete`는 reference card 존재를 뜻한다. 원문 본문이 없으면 DOI·PMID·위치·접근 제한을 남긴다. 선정 finding만으로 신호망을 설명하지 않고, `repository_measured_gene_zscore`를 PhosX로 읽지 말라고 적는다. 회차 09 행렬 해시가 맞는 파일을 `REFERENCE_DIR/phosx-0.23.1-b556f59`에 두었고, 기존 v6 연결이 그 manifest를 읽는다. wrapper sha256은 `1f0f262e684276d95672f33ba79f7e2ff7e1d6b8f7a8d5d6cddce2874380a605`이며 원본 manifest sha `12eff82d…`와 다르다. 전처리 worker의 현재 컨테이너에 PhosX 0.23.1 commit `b556f59c`를 설치했다. 합성 서열 1건은 `official_pssm_scored`, 303행이었다. 여섯 시간점 native 실행은 시작하지 않았다. 완료된 pin은 바꾸지 않았다.
+- **논문에서의 용도:** methods (문헌 비교가 승인되지 않았다는 한계). 결과의 kinase 귀속에는 쓰지 않는다.
+- **해석 한계:** 사유를 나누어도 승인 건수는 늘지 않는다. z-score 행은 PhosX가 아니다. Localization 미측정, 기술 반복, 독립 calibration 부재는 그대로다.
+- **결정성:** 새 seed·solver 없음. 새 측정 임계 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_quote_binding.py ptm_shared/tests/test_astra_literature.py::test_completed_empty_comparison_is_not_pending workers/tests/test_flow_finding_retrieval.py`.
+
+### [2026-10-13] worker 이미지에 PhosX 패키지를 포함
+
+- **분류:** 구현
+- **대상:** `docker-compose.yml` `INSTALL_ASTRA_OFFICIAL`, `workers/pyproject.toml` extra `astra-official`
+- **구현 대상 설계:** `docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md` «PhosX 등록 자원»
+- **사전등록 상태:** 결과 열람 전 확정된 패키지 pin `b556f59c39f099b5f3fcb574a8a70856c3fdc82c`. 새 점수 임계 없음.
+- **내용:** 전처리, RAG, report, beat가 같은 `ptm-workers` 이미지를 쓴다. 그 이미지 빌드가 PhosX 0.23.1을 설치한다. 행렬 HDF5는 이미지에 넣지 않는다. API duckdb는 기존 `api-server/pyproject.toml` 의존성이다.
+- **논문에서의 용도:** methods (실행 환경). kinase 귀속 결과에는 쓰지 않는다.
+- **해석 한계:** 패키지가 이미지에 있어도 method_executions가 없으면 PhosX를 실행한 것이 아니다. pandas는 PhosX 요구에 따라 3 미만이다.
+- **결정성:** 새 seed·solver 없음. 이미지 빌드는 이 기록 시점에 실행하지 않았다.
+
+### [2026-10-13] 저장 reader 표시 — 후보 연결, 기록된 시간, 문헌 출처
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_reader.py` `selected_kinase_contribution_summary`, `ptm_shared/measured_feature_cards.py` `project_recorded_time_order`, `ptm_shared/astra_reader_revision.py` `revise_temporal`, `ptm_shared/astra_literature.py` `retrieved_source_guidance`
+- **구현 대상 설계:** `docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md` «저장된 결과의 reader 연결»
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). Order 89 g7 `g7-a5b8edc4f48c4345b7afc25c15244cb3`의 표시를 본 뒤. 새 측정 임계 없음.
+- **내용:** precursor membership, substrate contribution, PhosX native membership을 한 수로 합치지 않는다. 후보 수는 `project_temporal()`의 고유 `candidate_id`다. 조건 목록은 기록된 분 단위가 하나일 때만 숫자 순으로 투영하고, 카드 생성과 저장 revision이 그 함수를 함께 쓴다. 문헌 안내는 `literature_sources`의 `source_key`별 DOI·PMID·위치다. 발행 g7 ZIP과 성공 pointer는 유지했다. 검토용 revision은 `g0-bd49d52af1004494887cb0edd6399b1f`, 출력 `data/review/g7-reader-display`. `scientific_recalculation` false, literature query 0. 정량·PhosX·문헌 검색·LLM 비교는 다시 실행하지 않았다.
+- **논문에서의 용도:** limitation (저장된 표시). kinase 귀속 결과에는 쓰지 않는다.
+- **해석 한계:** 후보 9개는 활성 확정이 아니다. 승인된 문헌 비교는 0건이다. PhosX 1,818행은 method_scores 전체 1,859행이 아니다. 15개 관측으로 insulin cascade를 구성하지 않는다.
+- **결정성:** 새 seed·solver 없음. 회귀 검사는 `PYTHONPATH=.:workers python -m pytest ptm_shared/tests/test_reader_stored_links.py ptm_shared/tests/test_reader_reading_guidance.py ptm_shared/tests/test_astra_literature.py`. g7 재생성 패키지에서 15/1/9, 시간순 1→180, 구간 28·논문 6·승인 0을 확인했다.
+
+### [2026-10-13] 저장된 reader 연결 — kinase 기여도, 조건 시간, 문헌 출처
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_reader.py` `selected_kinase_contribution_summary`, `ptm_shared/measured_feature_cards.py` `_condition_order_key`, `ptm_shared/astra_literature.py` `retrieved_source_guidance`
+- **구현 대상 설계:** `docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md` «저장된 결과의 reader 연결»
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). Order 89 g7에서 membership_ids를 kinase 연결로 세고, condition_grid가 15→180→1→30→5→60분이며, LITERATURE.md가 pin documents의 빈 DOI를 적은 것을 본 뒤.
+- **내용:** precursor membership과 substrate_contributions의 form_id 토큰 일치를 따로 센다. 조건 목록은 기록된 time_minutes가 하나일 때만 숫자 순이다. 문헌 확인 위치는 literature_sources의 DOI·PMID·위치다. PhosX executed와 method 상태 개수는 활성 검출이 아니라고 적는다. 승인 조건과 q 임계는 바꾸지 않았다. 정량과 PhosX는 다시 계산하지 않았고 발행된 g7 패키지는 바꾸지 않았다.
+- **논문에서의 용도:** limitation (저장된 표시의 한계). kinase 귀속 결과에는 쓰지 않는다.
+- **해석 한계:** 후보 연결 수는 활성이나 비활성이 아니다. 시간 순서는 선정 점수를 바꾸지 않는다. DOI를 보여도 승인된 비교는 늘지 않는다. 15개 관측으로 insulin cascade를 구성하지 않는다.
+- **결정성:** 새 seed·solver 없음. 새 측정 임계 없음. 회귀 검사는 `PYTHONPATH=.:workers python -m pytest ptm_shared/tests/test_reader_stored_links.py ptm_shared/tests/test_reader_reading_guidance.py ptm_shared/tests/test_astra_literature.py`.
+
+### [2026-10-14] method_scores 저장 순서 — canonical minutes
+
+- **분류:** 정정
+- **대상:** `ptm_shared/astra_package.py` `order_method_scores`, `write_tables`
+- **구현 대상 설계:** `docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md` «method_scores 저장 순서»
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). g8 `g8-b94289df62a5497c931b7f6476ab86a9`의 method_scores가 contrast ID 순인 것을 본 뒤. 새 측정 임계 없음.
+- **내용:** `write_tables()`가 method_scores를 쓰기 전에 설계 또는 `quant/comparisons`의 canonical minutes로 행 순서만 바꾼다. 정상 생성과 replay가 그 writer에 design을 전달한다. 계산 파일과 cache fingerprint는 바꾸지 않았다. 발행 g8 ZIP은 유지했다. 검토용 CSV는 `data/review/g8-method-score-order`.
+- **논문에서의 용도:** limitation (저장 순서). kinase 귀속 결과에는 쓰지 않는다.
+- **해석 한계:** 시간순 저장은 활성이나 비활성이 아니다. 미기록 시간을 0분으로 만들지 않는다. repository z-score 행은 PhosX가 아니다.
+- **결정성:** 새 seed·solver 없음. 회귀 검사는 `PYTHONPATH=.:workers python -m pytest ptm_shared/tests/test_method_score_order.py`. g8 1,859행을 method_result_id로 맞춰 셀이 같음을 확인했다. 정량·PhosX·문헌 검색·LLM은 실행하지 않았다.
+
+

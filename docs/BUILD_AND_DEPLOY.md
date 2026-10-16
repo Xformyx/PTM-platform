@@ -116,7 +116,8 @@ RAG → Report 사이에 canonical temporal sidecar를 만드는 큐는 `product
 배포 규칙:
 
 - `./scripts/dev-deploy.sh`와 `./scripts/deploy.sh`는 소스 변경이 없어도 `docker compose up -d production-tmm-worker`를 실행한다.
-- 이미 떠 있는 워커는 재시작하지 않는다. 실행 중 analysis job을 끊지 않기 위함이다.
+- 이미 떠 있는 production-tmm-worker는 재시작하지 않는다. 실행 중 analysis job을 끊지 않기 위함이다.
+- `dev-deploy.sh`에서 마운트된 Python 변경은 `docker compose restart`로 프로세스를 다시 띄운다. `docker compose up -d`만 하면 이미 실행 중인 컨테이너가 예전 프로세스를 유지한다. 이미지를 새로 만든 서비스와 compose·env 변경은 `up -d --force-recreate`로 컨테이너를 교체한다.
 - 이미지 `ptm-production-tmm-worker:$VERSION`이 없으면 같은 Dockerfile인 `ptm-api-server:$VERSION`을 tag한다.
 
 ### 5.1 TMM `parent_generation`과 Explorer DuckDB (2026-09-21)

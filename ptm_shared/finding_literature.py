@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Mapping
 
 
-VERSION = "finding_retrieval.v6"
+VERSION = "finding_retrieval.v7"
 PROMPT_VERSION = "finding_comparison.v6.2"
 FINDING_RETRIEVAL_BACKOFF_SECONDS = 0.25
 """Bounded pause between retrieval layers.
@@ -97,6 +97,41 @@ def _prompt_observation(observation):
     projected = deepcopy(observation)
     if 'trajectory' in projected: projected['trajectory'] = project(trajectory)
     return projected, definitions
+
+
+def quote_binding_failure(candidate, hit, identity):
+    """기존 승인 조건을 통과하지 못한 제안의 첫 실패 지점을 이름만 붙인다.
+
+    구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «문헌 검토 단계»
+    사전등록: 2026-10-13. 승인 조건은 finding_retrieval.v6와 같다. 이 함수는 거절된 행만 분류한다.
+    해석 한계: 분류는 인용 불일치, 범위, 조건 비교 중 어디가 먼저 깨졌는지이다. 승인이나 생물학적 의미가 아니다.
+    주장 금지: 사유를 세분했다고 승인 건수가 늘었다고 하지 않는다. 기준을 낮춰 승인하지 않는다.
+    """
+    quote = str(candidate.get("quote") or "")
+    document = str(hit.get("document") or "")
+    scope = candidate.get("reference_scope")
+    gene = str(identity.get("gene") or "")
+    site = str(identity.get("candidate_residue_annotation") or "")
+    relationship = candidate.get("relationship")
+    if not quote or quote not in document:
+        return "quote_not_in_retrieved_chunk", "citation_mismatch"
+    if not (hit.get("doi") or hit.get("pmid")):
+        return "citation_identifier_missing", "citation_mismatch"
+    if scope not in {"study", "pathway", "gene", "site"}:
+        return "scope_not_declared", "scope"
+    if scope not in {"study", "pathway"} and gene.lower() not in quote.lower():
+        return "scope_identifier_absent_from_quote", "scope"
+    if scope == "site" and not (site and site.lower() in quote.lower()):
+        return "scope_site_absent_from_quote", "scope"
+    if relationship not in ALLOWED_RELATIONSHIPS:
+        return "relationship_not_allowed", "scope"
+    if relationship == "direct_site_evidence" and scope != "site":
+        return "direct_site_scope_mismatch", "scope"
+    if not candidate.get("external_finding"):
+        return "claim_text_missing", "scope"
+    if any(candidate.get(k) and candidate[k] not in quote for k in CONTEXT_FIELDS):
+        return "condition_context_not_in_quote", "condition_comparison"
+    return "unbound_quote_context_or_scope", "unclassified"
 
 
 def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=None):
@@ -259,7 +294,7 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
                            for e in generation.get('transport',[])])
         for candidate in candidates:
             if not isinstance(candidate, dict) or not all(isinstance(candidate.get(k), str) for k in PROPERTIES):
-                record["excluded_comparisons"].append({"reason": "invalid_comparison_schema"})
+                record["excluded_comparisons"].append({"reason": "invalid_comparison_schema", "exclusion_class": "schema"})
                 continue
             index = candidate.get("source_index")
             hit = hits[index] if isinstance(index, int) and 0 <= index < len(hits) else {}
@@ -279,7 +314,9 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
                      and (hit.get("doi") or hit.get("pmid"))
                      and all(not candidate.get(k) or candidate[k] in quote for k in CONTEXT_FIELDS))
             if not valid:
-                record["excluded_comparisons"].append({"source_index": index, "reason": "unbound_quote_context_or_scope"})
+                reason, exclusion_class = quote_binding_failure(candidate, hit, identity)
+                record["excluded_comparisons"].append({
+                    "source_index": index, "reason": reason, "exclusion_class": exclusion_class})
                 continue
             comparison = {**candidate, "reader_feature_id": identity_id, "finding_id": card.get("finding_id"), "feature_id": identity.get("feature_id"),
                           "observation": card.get("reader_summary"), "source_offset": document.index(quote),

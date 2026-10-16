@@ -2,16 +2,31 @@
 
 기본 제품 경로는 Astra v5이다. 별도의 `Experimental science validation` 항목과 체크박스 없이 실행한다. 기존 v4 주문의 Copy/Rerun도 새 v5 실행으로 처리하며, 완료된 패키지는 변경하지 않는다. 주문에 이미 있는 species, sample/condition/material, reference, 정규화와 질문을 재사용한다.
 
-새 주문에서는 PR/PG와 분석 FASTA 업로드 또는 등록 Reference ID를 사용한다. 측정 근거 파일은 필요할 때 추가한다. 기존 주문의 Copy/Rerun은 저장된 경로와 canonical design을 승계한다. DIA-NN 원본이 있을 때만 정확한 version을 입력한다. 보고서 Run과 matrix column이 정확히 다르면 `Run,input_column,injection_id` crosswalk를 제공한다. 비시계열은 Design axis를 cross-sectional로 지정하며 time=null이 허용된다. Protein-only는 proteomics와 PG를 사용한다. 현재 U-only PTM 분석은 입력 오류로 명시적으로 거절한다.
+새 주문에서는 PR/PG와 분석 FASTA 업로드 또는 등록 Reference ID를 사용한다. Reference ID를 비워 두면 «등록된 종별 sequence reference»의 선언 ID를 넣는다. 분석 FASTA를 올리면 그 파일이 우선이며 종 등록 ID로 표시하지 않는다. 측정 근거 파일은 필요할 때 추가한다. 기존 주문의 Copy/Rerun은 저장된 경로와 canonical design을 승계한다. DIA-NN 원본이 있을 때만 정확한 version을 입력한다. 보고서 Run과 matrix column이 정확히 다르면 `Run,input_column,injection_id` crosswalk를 제공한다. 비시계열은 Design axis를 cross-sectional로 지정하며 time=null이 허용된다. Protein-only는 proteomics와 PG를 사용한다. 현재 U-only PTM 분석은 입력 오류로 명시적으로 거절한다.
 
 Results의 Astra 분석 패키지 카드에서 패키지, 전달 지침, 판단·보류 근거, 측정 audit, 단백질 비교를 받는다. 카드의 recorded run과 provenance는 완료 시점 값이며 현재 form 변경으로 덮어쓰지 않는다. 패키지의 experimental/uncalibrated 표기는 과학적 검증 상태이며 기능 활성화 스위치가 아니다. 아직 calibration된 kinase call을 생성하지 않는다.
+
+## 등록된 종별 sequence reference
+
+2026-10-12에 선언했다. 주문 실행 결과가 나오기 전이며, 이미 쓰이던 종별 FASTA의 파일명을 등록 ID로 고정한 것이다. 실행 시 디렉터리를 정렬해 첫 파일을 고르지 않는다. `rat_hir`은 rat 등록본으로 대체하지 않는다.
+
+설치는 `python scripts/register_species_sequence_references.py`이다. 선언된 파일을 `sequence_references/<reference_id>/`에 hard link하고 manifest의 sha256을 그 바이트에 고정한다. 이미 다른 sha256이 있으면 덮어쓰지 않는다. manifest가 없으면 Astra 새 주문은 그 ID로 만들어지지 않으며, 분석 FASTA 업로드가 대신 필요하다.
+
+| species | reference_id | version | 선언된 파일 |
+| --- | --- | --- | --- |
+| human | `human-uniprotkb-up000005640-2025-10-23` | `uniprotkb.2025-10-23` | `human/uniprotkb_proteome_homo_sapiense_UP000005640_AND_revi_2025_10_23.fasta` |
+| mouse | `mouse-uniprotkb-2025-07-24` | `uniprotkb.2025-07-24` | `mouse/uniprotkb_organism_name_Mus_musculus_AN_2025_07_24.fasta` |
+| rat | `rat-uniprotkb-2026-07-11` | `uniprotkb.2026-07-11` | `rat/uniprotkb_proteome_Rat_2026_07_11.fasta` |
+| rat_hir | `rat-hir-uniprotkb-human-insr-2026-08-14` | `uniprotkb.rat-plus-human-insr.2026-08-14` | `rat_hir/uniprotkb_proteome_Rat_add_human_INSR.fasta` |
+
+human 파일명의 `sapiense`는 원본 파일명이다. `rat_hir`은 rat reference에 human INSR(`GN=INSR`, `OX=9606`)을 더한 서열이다. 이 등록은 서열 파일의 신원이다. kinase 귀속 정확도가 올라갔다는 뜻이 아니다.
 
 ## 배포 전 순서
 
 1. API/worker/frontend를 같은 Git release로 빌드한다. API/worker pyproject에 pyarrow가 포함된다. 실제 환경 dependency resolver/lock과 이미지 digest를 배포 기록에 고정한다.
 2. 운영 DB 백업 후 orders의 8개 nullable scientific input 경로, nullable PR, proteomics enum migration을 적용한다. Startup migration은 격리 MySQL에서 사용했으며 운영에서는 미실행이다. 구 app으로 rollback하더라도 컬럼과 완료 패키지를 삭제하지 않는다.
 3. API와 worker에 동일 input/output/reference volume을 마운트한다. 원자료 파일과 FASTA hash를 두 서비스에서 대조한다. 단순 코드 push는 이 작업을 수행하지 않는다.
-4. 새 sequence reference는 `sequence_references/<reference_id>/manifest.json`에 ID, version, file, sha256를 고정한다. 종별 폴더의 첫 파일 선택은 v5에서 사용하지 않는다. 실제 biological FASTA inventory와 Order 종을 preflight한다. taxonomy mapping 파일은 source/release/accessions 및 SHA를 보존한다. reviewed/isoform/strain/custom construct 설명은 등록 manifest에 기록한다.
+4. 새 sequence reference는 `sequence_references/<reference_id>/manifest.json`에 ID, version, file, sha256를 고정한다. 아래 선언표의 파일명만 설치한다. 종별 폴더의 첫 파일 선택은 v5에서 사용하지 않는다. 실제 biological FASTA inventory와 Order 종을 preflight한다. taxonomy mapping 파일은 source/release/accessions 및 SHA를 보존한다. reviewed/isoform/strain/custom construct 설명은 등록 manifest에 기록한다.
 5. Frozen annotation/source pin은 기존 content-addressed registry를 유지한다. 신규 run의 provider 요청은 taxon round-robin 예산 정책을 기록한다. 기존 source pin을 복사·재실행할 때는 그대로 재사용한다. Production registry/live provider readiness는 별도 운영 확인 대상이다.
 6. 제공 가능한 specificity resource의 manifest와 matrix/background checksum 및 라이선스를 검증한다. `redistribution_status=permitted`만 portable package에 원 행렬을 포함한다. 그 외는 메타데이터·해시와 미실행 사유를 보존하고 정량은 계속한다. 로컬 scorer interface 사용과 portable export 권한은 별개다.
 7. 아래 격리 검증을 배포 대상 이미지에서 반복하고, 새 주문의 archive와 다운로드 SHA를 확인한다. 운영 주문을 test fixture로 사용하지 않는다.

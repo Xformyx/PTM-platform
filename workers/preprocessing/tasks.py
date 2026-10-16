@@ -297,6 +297,8 @@ def run_preprocessing(self, order_id: int, config: dict):
                 "Astra package: " + evidence.get("analysis_readiness", {}).get("completion_status", "completed"))
             update_order_status(order_id, "completed", current_stage="completed", progress_pct=100,
                 stage_detail="Astra package: " + evidence.get("analysis_readiness", {}).get("completion_status", "completed"), result_files=files)
+            send_step_webhook(order_id, "preprocessing", "completed")
+            send_step_webhook(order_id, "order", "completed")
             return {"order_id": order_id, "status": "completed", "run_id": evidence["run_id"],
                     "provenance_id": evidence["provenance"]["provenance_id"]}
 

@@ -15,6 +15,41 @@ from .generic_workflow import json_write, object_hash
 from . import astra_literature as literature_stage
 
 
+def _card_without_display_order(card):
+    card = deepcopy(card)
+    grid = card.get('condition_grid')
+    conditions = list(grid.get('conditions') or []) if isinstance(grid, dict) else []
+    if isinstance(grid, dict):
+        grid.pop('time_order_status', None)
+        grid.pop('conditions', None)
+    bindings = card.pop('source_bindings', None) or []
+    trajectory = card.pop('trajectory', None) or []
+    return card, conditions, bindings, trajectory
+
+
+def _row_multiset(rows):
+    return sorted(json.dumps(row, ensure_ascii=False, sort_keys=True, default=str) for row in rows)
+
+
+def assert_reader_time_projection_only(source_csv, revised_csv):
+    """cards.csv may change only by a recorded-time permutation and its unresolved flag."""
+    before = pd.read_csv(source_csv, low_memory=False)
+    after = pd.read_csv(revised_csv, low_memory=False)
+    if list(before.card_id.astype(str)) != list(after.card_id.astype(str)):
+        raise ValueError('Reader card identity changed')
+    if list(before.form_id.astype(str)) != list(after.form_id.astype(str)):
+        raise ValueError('Reader card form changed')
+    if list(before.selected.astype(str).str.lower()) != list(after.selected.astype(str).str.lower()):
+        raise ValueError('Reader selection changed')
+    for raw_before, raw_after in zip(before.card_json, after.card_json):
+        left, left_conditions, left_bindings, left_trajectory = _card_without_display_order(json.loads(raw_before))
+        right, right_conditions, right_bindings, right_trajectory = _card_without_display_order(json.loads(raw_after))
+        if left != right or set(left_conditions) != set(right_conditions):
+            raise ValueError('Reader card changed beyond recorded time order')
+        if _row_multiset(left_bindings) != _row_multiset(right_bindings) or _row_multiset(left_trajectory) != _row_multiset(right_trajectory):
+            raise ValueError('Reader time-row values changed')
+
+
 def read_tables(root):
     from .astra_evidence_catalog import read_source
     dictionary=json.loads((Path(root)/'reproducibility/data_dictionary.json').read_text())
@@ -71,6 +106,8 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
             snapshot,json.loads((source/'references/literature_pin.json').read_text()))
     if not (access_only or whole_only or review_plan_only):
         attach_temporal(tables);attach_reading_guidance(tables)
+        from .measured_feature_cards import apply_recorded_time_order
+        apply_recorded_time_order(tables)
     if not review_plan_only:attach_access(tables)
     if review_plan_only:
         from .astra_literature_review import attach_review_plan
@@ -84,12 +121,23 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     validate_reader(tables)
     baseline=json.loads((source/'reproducibility/data_dictionary.json').read_text())
     dictionary=deepcopy(baseline)
-    update=write_tables({k:tables[k] for k in (['reader/packet','reader/cards'] if whole_only else ['reader/packet'])},directory)
-    update['reader/packet.csv'].update(unique_key=baseline['reader/packet.csv']['unique_key'],row_grain=baseline['reader/packet.csv']['row_grain'])
+    changed=['reader/packet']
+    if whole_only or not (access_only or review_plan_only):changed.append('reader/cards')
+    update=write_tables({k:tables[k] for k in changed},directory)
+    for name in changed:
+        key=name+'.csv'
+        update[key].update(unique_key=baseline[key]['unique_key'],row_grain=baseline[key]['row_grain'])
     dictionary.update(update);json_write(directory/'reproducibility/data_dictionary.json',dictionary)
     artifacts=write_reader(directory,tables,access_only=access_only,whole_only=whole_only,review_plan_only=review_plan_only,review_execution=review_execution)
-    # No source table, card, selection, literature result or figure may change.
+    if not (access_only or whole_only or review_plan_only):
+        if 'reader/literature_sources' in tables and json.loads(tables['reader/packet'].iloc[0].packet_json).get('literature'):
+            literature_stage.write(directory,tables,pins=False)
+            artifacts=sorted(set(artifacts+['reader/LITERATURE.md']))
+        assert_reader_time_projection_only(source/'reader/cards.csv',directory/'reader/cards.csv')
+    # Source values and selection stay fixed; ordinary temporal revisions may
+    # permute cards by recorded time. M1/M3/M4 retain the original card bytes.
     allowed={'reader/packet.csv',INDEX,LINKS}
+    if not (access_only or whole_only or review_plan_only):allowed.add('reader/cards.csv')
     if whole_only:
         from .astra_reader_full import TABLE_KEYS as FULL_KEYS
         allowed|={'reader/cards.csv',*[k+'.csv' for k in FULL_KEYS]}

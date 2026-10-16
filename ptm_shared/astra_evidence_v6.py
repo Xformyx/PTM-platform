@@ -344,6 +344,13 @@ def write_artifacts(directory,scientific,context,inputs,sources,readiness):
 
 
 def report_addendum(scientific,readiness):
+    """v6 보고서 덧글. PhosX 실행 행이 없으면 z-score 행을 PhosX로 읽지 말라고 적는다.
+
+    구현 대상: docs/astra_evidence_integration/ROUND09B_KO.md 와 MIGRATION_AND_OPERATIONS_KO.md «문헌 검토 단계»
+    사전등록: 2026-10-13. 점수 계산과 승인 임계는 바꾸지 않는다.
+    해석 한계: 문장은 실행 기록의 범위다. 여섯 시간점 실행을 만들지 않는다.
+    주장 금지: repository_measured_gene_zscore를 PhosX 또는 official KSEA로 설명하지 않는다.
+    """
     lines=['\n## Evidence integration v6 (experimental)',
         'Read study/input_capabilities.json and study/input_lineage.csv first. Inputs are DIA-NN matrices, not raw/mzML spectra. No spectrum re-search was performed.',
         'science/inference_results.csv preserves method signals even when calibrated_calls.csv is empty. No-call is neither inactive nor a failed quantitative analysis.',
@@ -366,4 +373,10 @@ def report_addendum(scientific,readiness):
             'Other contrasts are not implied to have executed. '+
             f'Native method results: {len(method)}; evaluable enrichment results: {int(method.status.eq("computed_method_enrichment").sum())}. '+
             'Inspect kinase/method_membership.csv for exact measurement groups and A ranks, science/specificity_scores.csv for selected/unselected sequences, and kinase/substrate_contributions.csv for descriptive footprint inputs. Upstream activation evidence was not executed.')
+    else:
+        scores=scientific.get('kinase/method_scores', pd.DataFrame())
+        zrows=int(scores.method_id.eq('repository_measured_gene_zscore').sum()) if 'method_id' in getattr(scores,'columns',[]) else 0
+        lines.append('PhosX was not executed in this package. kinase/method_executions.csv and kinase/method_membership.csv contain no PhosX rows. '
+            f'kinase/method_scores.csv contains {zrows} repository_measured_gene_zscore rows. Those rows are the repository gene z-score baseline, not PhosX activity, not official KSEA, and not a six-contrast PhosX result. '
+            'Read a row as PhosX only when methods/method_registry.json status is executed and method_id is PhosX_native_functions.')
     return '\n'.join(lines)+'\n'

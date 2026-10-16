@@ -39,3 +39,47 @@ query cache는 검증된 성공/no_hit만 재사용한다. 실패·partial은 �
 격리 로컬 환경에서 API 8016, UI 5176, 기존 검증용 MySQL 13366의 새 주문, Redis 16386 DB9 및 별도 output/reference directory를 사용했다. 운영 주문이나 무관한 volume을 삭제하지 않았다. 별도 DB 생성 권한이 없어 이미 격리된 검증 DB에서 새 주문만 만들었다. 이는 운영 URL/production mount 확인이 아니다.
 
 배포 시 동일 commit으로 API/worker/frontend를 빌드하고 additive column migration, shared reference digest, 기능 flag, 신규 테스트 주문을 확인한다. rollback은 v6 flag를 해제하고 이전 image를 복원한다. nullable column과 이미 완료된 run/archive는 보존한다. Git push는 배포가 아니다. 이번 작업에서 운영 배포·운영 URL 확인은 수행하지 않았다.
+
+## 문헌 검토 단계
+
+2026-10-13 선언. 승인 조건은 `finding_retrieval.v6`와 같다. 인용문이 검색 구간에 있고, 범위와 조건 문자열이 그 인용문에 있으며, DOI 또는 PMID가 있을 때만 비교 후보로 남긴다. 이 조건을 낮춰 승인 건수를 늘리지 않는다. `semantically_verified_comparable_findings`는 0이다. 통과한 행도 `claim_support_status=not_verified`, `relationship=literature_background`로 유지한다.
+
+거절된 제안만 기존 조건의 첫 실패 지점으로 나눈다.
+
+- `citation_mismatch`: 인용문이 검색 구간에 없거나 DOI·PMID가 없다.
+- `scope`: 범위가 선언되지 않았거나, gene·site·허용 관계가 인용문과 맞지 않거나, 주장 문장이 비어 있다.
+- `condition_comparison`: species, cell type, dose, time, readout, perturbation 중 모델이 적은 값이 인용문에 없다.
+
+검색 완료, 모델 비교 완료, 인용 근거 검증, 생물학적 의미 검토, 외부 전달은 `review_stages`에 따로 적는다. packet `mode=citation_complete`는 reference card가 있다는 뜻이며 인용 검증이나 외부 전달 승인이 아니다. 원문 구간을 패키지에 넣지 않으면 DOI, PMID, 원문 위치, 접근 제한을 `LITERATURE.md`에 남긴다.
+
+선정 finding은 전체 신호망이 아니다. insulin 경로 기대에 맞춰 고르지 않는다. `cards.csv`와 `authoring_packet.json` 전체를 읽지 않고 `findings.csv`와 `question_map.json`의 card_id만 고른다. 전체 emergence, protein, kinase 표로 범위를 넓힌다. `repository_measured_gene_zscore` 행은 PhosX 실행 결과가 아니다. PhosX는 `method_id=PhosX_native_functions`이고 `method_executions`가 있을 때만 그렇게 읽는다.
+
+## 저장된 결과의 reader 연결
+
+2026-10-13 선언. Order 89 g7 패키지를 본 뒤의 탐색적 표시 규칙이다. primary 승격 금지. 새 측정 임계는 없다. 정량과 PhosX를 다시 계산하지 않는다.
+
+- `source_bindings.membership_ids`는 precursor 카드 멤버다. kinase 후보 기여도가 아니다. precursor 연결 수는 `reader_adapter/precursor_membership.csv`의 `membership_id`와 맞는 선정 관측이다. 표가 없으면 0개로 적지 않는다.
+- 후보 기여도는 `project_temporal()`이 카드의 contrast, arm, reference, pairing 범위에서 연결한 `candidates`의 고유 `candidate_id`다. `candidates` 배열 길이를 후보 수로 쓰지 않는다. 이 투영이 없으면 `substrate_contributions.csv`의 `form_ids`를 `;`로 나눈 토큰이 `form_id`와 같고 `contrast_id`가 카드 범위 안인 행만 센다. `form_1`과 `form_10`은 다른 ID다. PhosX native membership은 이 수와 합치지 않는다.
+- `condition_grid.conditions`와 카드의 trajectory, source_bindings는 기록된 `time_minutes` 또는 `time_min`이 조건마다 하나일 때 그 숫자 순이다. 조건 문자열로 시간을 추정하지 않는다. 시간이 없거나 충돌하면 기존 목록을 두고 `time_order_status=unresolved_recorded_time`으로 남긴다. 이 투영은 카드 생성과 저장 reader revision이 함께 호출한다. revision은 `build_feature_observation_cards()`를 다시 실행하지 않는다. 이미 숫자 시간순인 그림, PhosX 표, temporal 배열은 다시 쓰지 않는다.
+- `LITERATURE.md`의 구간 안내는 `literature_sources.csv`의 `source_key`, title, DOI, PMID, `evidence_location`이다. `source_key` 순으로 구간을 각각 남기고, 고유 논문 수와 구간 수를 따로 적는다. pin documents의 빈 DOI는 그 목록에 넣지 않는다. 승인 조건은 «문헌 검토 단계»와 같다.
+- `method_executions`의 executed와 `method_scores` 행 수는 유의한 kinase 활성 검출이 아니다. `insufficient_coverage`는 비활성이 아니다. method q로 특정 kinase의 활성 또는 비활성을 결론내지 않는다. no-call은 v6 미적용의 증거가 아니다. 이 문장은 저장된 상태 개수를 옮길 뿐 새 q 임계를 적용하지 않는다.
+
+## method_scores 저장 순서
+
+2026-10-14 선언. g8 `g8-b94289df62a5497c931b7f6476ab86a9`의 `kinase/method_scores.csv`가 contrast ID 문자열 순으로 저장된 것을 본 뒤의 탐색적 출력 규칙이다. primary 승격 금지. 새 측정 임계는 없다. 점수, p/q, membership, 선정, no-call을 바꾸지 않는다.
+
+`write_tables()`가 `kinase/method_scores`를 쓰기 전에 `order_method_scores()`로 행 순서만 바꾼다. 시간은 `ContrastEstimator.metadata()` 또는 `quant/comparisons`의 `KEY_COLUMNS`에 이미 있는 canonical minutes다. label, contrast ID, 시점 목록으로 시간을 추정하지 않고, minutes를 다시 단위 변환하지 않는다. 정렬 키는 `method_id`, `method_version`, `arm_id`, `reference_condition_id`, `pairing`, 스키마에 있는 `track`, `time_min`, `contrast_id`, `candidate_id`, `score_name`, `method_result_id`다. 같은 시각의 contrast는 합치지 않는다. 미기록 시간은 그 범위의 유한 시간 뒤에 두고 0으로 채우지 않는다. metadata 충돌, 알 수 없는 contrast, 무한대·단위 문자열은 발행을 막는다. metadata가 없으면 기존 ID순 CSV를 발행하지 않는다. 빈 표는 그대로 둔다.
+
+이 정렬은 계산 순회를 바꾸지 않는다. `evidence_methods.py`, `official_method_tracks.py`, `astra_evidence_v6.py`의 cache fingerprint를 이 출력 순서 때문에 바꾸지 않는다. 정상 생성과 replay는 같은 writer에 설계를 전달한다. 이미 발행된 패키지 ZIP은 다시 서명하지 않는다.
+
+## PhosX 등록 자원
+
+2026-10-13 선언. 회차 09에서 실행 전에 고정한 행렬 해시를 그대로 쓴다. PSSM `7d18a78d6efc45925aacae9c62ea26c5d7c22519eb856b2891debeed0ea42c6d`, background `487beac611126c973c36b3b01161991a7c01d08e8d00f764136eb2c45aac1c11`, metadata `ab48c161eb8f35225cc410331c71cd0d35c1fd198a828a6eb78069d3fc341952`. 코드 commit `b556f59c39f099b5f3fcb574a8a70856c3fdc82c`.
+
+`ptm-workers` 이미지 빌드는 PhosX 0.23.1 commit `b556f59c`를 포함한다. RAG, report, beat도 같은 이미지 태그를 쓰므로 이 패키지를 뺀 빌드가 그 태그를 덮어쓰면 안 된다. 행렬 HDF5는 이미지에 넣지 않고 reference 마운트에 둔다. API 이미지의 duckdb는 `api-server/pyproject.toml` 의존성이다.
+
+`REFERENCE_DIR/phosx-0.23.1-b556f59/manifest.json`이 있고 위 행렬 해시가 맞을 때만 기존 v6 specificity 연결이 그 파일을 읽는다. 서버 환경변수로 다른 manifest를 지정하면 그 값이 우선이다. 파일이 없거나 해시가 다르면 기존처럼 PhosX를 실행하지 않고 `resource_unavailable`로 남긴다. 원본 manifest 파일 `12eff82db554b22355169115f39fc4ba0ce65584f26aac4dcccf9b4b999dfa0a`는 이 작업 공간에 없다. 로컬 wrapper의 sha256은 `1f0f262e684276d95672f33ba79f7e2ff7e1d6b8f7a8d5d6cddce2874380a605`이며 그 파일과 같지 않다. 같은 것은 행렬과 background 바이트다.
+
+이 연결은 여섯 시간점 실행 기록이 아니다. 실행은 주문의 선언된 contrast 전부이며, 시간 목록을 코드에 새로 넣지 않는다. `method_executions.csv`에 `executed` 행이 생기기 전에는 PhosX 결과라고 적지 않는다. 원본 HDF5는 패키지에 넣지 않는다.
+
+

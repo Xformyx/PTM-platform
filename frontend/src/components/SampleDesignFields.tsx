@@ -35,7 +35,7 @@ export default function SampleDesignFields({ context, onChange, samples, seconda
         <p className="text-xs text-muted-foreground">종: {species}. 측정·서열 근거와 분석 가능한 범위를 패키지에 함께 기록합니다.</p>
         <label className="block text-sm">Design axis<select aria-label="Design axis" value={String(context.design_axis??'time_course')} onChange={e=>put('design_axis',e.target.value)}><option value="time_course">Time course</option><option value="cross_sectional">Condition contrasts without time</option></select></label>
         <label className="block text-sm">DIA-NN version (only when a report is provided)<Input value={String(science.diann_version??'')} onChange={e=>put('science',{...science,diann_version:e.target.value})}/></label>
-        <label className="block text-sm">등록 Reference ID (FASTA를 업로드하지 않는 새 주문)<Input value={String((science.reference as Record<string,unknown>|undefined)?.reference_id??'')} onChange={e=>put('science',{...science,reference:{...((science.reference??{}) as Record<string,unknown>),reference_id:e.target.value}})}/></label>
+        <label className="block text-sm">등록 Reference ID (비우면 이 종의 선언된 등록본, 분석 FASTA를 올리면 그 파일)<Input value={String((science.reference as Record<string,unknown>|undefined)?.reference_id??'')} onChange={e=>put('science',{...science,reference:{...((science.reference??{}) as Record<string,unknown>),reference_id:e.target.value}})}/></label>
       </div>}
       <details><summary className="cursor-pointer text-sm">Advanced normalization override</summary>
         <p className="text-xs">New Astra studies preserve supplied intensities. This does not establish upstream DIA-NN normalization. The alternative scaling track is calculated automatically.</p>

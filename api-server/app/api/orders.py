@@ -265,6 +265,7 @@ async def get_reference_status(
     settings = get_settings()
     species_context = _require_species_context(species)
     fasta_path = _resolve_fasta(settings.REFERENCE_DIR, species_context.label)
+    from ptm_shared.species_sequence_reference import astra_reference_status
     return {
         "species": species_context.label,
         "analysis_species": species_context.analysis_species,
@@ -272,6 +273,7 @@ async def get_reference_status(
         "reference_subdir": species_context.reference_subdir,
         "ready": bool(fasta_path),
         "fasta_filename": Path(fasta_path).name if fasta_path else None,
+        **astra_reference_status(settings.REFERENCE_DIR, species_context.label),
         "message": (
             f"Reference FASTA ready: {Path(fasta_path).name}"
             if fasta_path
@@ -1279,10 +1281,10 @@ async def create_order(
         posted_context = current_astra_context(_safe_json_loads(analysis_context))
         science=posted_context.get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'}
         registered_mapping=None
-        if science and not fasta_file:
-            from ptm_shared.science_reference import bind_registered_reference
-            try:fasta_path,posted_context,registered_mapping=bind_registered_reference(settings.REFERENCE_DIR,posted_context)
-            except ValueError as error:raise HTTPException(status_code=422,detail={'code':getattr(error,'code','reference_invalid'),'message':str(error)}) from error
+        if science:
+            from ptm_shared.species_sequence_reference import prepare_astra_reference
+            try:fasta_path,posted_context,registered_mapping=prepare_astra_reference(settings.REFERENCE_DIR,posted_context,species_context.label,bool(fasta_file))
+            except ValueError as error:raise HTTPException(status_code=422,detail={'code':getattr(error,'code','reference_invalid'),'message':getattr(error,'detail',None) or str(error)}) from error
         else:fasta_path = None if fasta_file else _resolve_fasta(settings.REFERENCE_DIR, species_context.label)
         if not fasta_path and not fasta_file:
             raise HTTPException(
