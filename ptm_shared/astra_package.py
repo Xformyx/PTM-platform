@@ -650,6 +650,9 @@ def validate_package(directory):
         if (directory/'reader/literature_review_plan.json').is_file():
             from .astra_literature_review import validate_plan
             validate_plan(catalog)
+        if (directory/'references/literature_subject_execution_pin.json').is_file():
+            from .astra_literature_review import validate_execution
+            validate_execution(catalog)
     print(json.dumps({'manifest_files':len(manifest['files']),'scientific_tables':len(tables),'validated':True}))
     return checks
 

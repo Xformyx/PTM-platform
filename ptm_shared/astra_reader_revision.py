@@ -33,7 +33,7 @@ def _copy_package(source, root):
     return run_id,directory
 
 
-def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=False, whole_only=False, review_plan_only=False, checkpoint=lambda:None):
+def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=False, whole_only=False, review_plan_only=False, review_execution=None, checkpoint=lambda:None):
     """Reader-only revision of saved temporal rows, without literature collection.
 
     The source and its successful pointer are never modified. Publication to the
@@ -44,12 +44,21 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     from .astra_reader import write_reader, validate_reader, attach_reading_guidance
     from .astra_reader_temporal import attach_temporal, VERSION
     from .astra_evidence_catalog import attach_access, VERSION as ACCESS_VERSION, INDEX, LINKS
+    if review_execution is not None:
+        if refresh_figures or access_only or whole_only:raise ValueError('Review execution revision cannot refresh other stages')
+        review_plan_only=True
     if review_plan_only and (refresh_figures or access_only or whole_only):raise ValueError('Review planning revision only; no other refresh')
     if whole_only and (access_only or refresh_figures):raise ValueError('Whole reader revision cannot refresh figures or use access-only mode')
     if access_only and refresh_figures: raise ValueError('Evidence-access revision cannot refresh figures')
     source=Path(source).resolve();root=Path(output_dir).resolve()
     if root==source or source in root.parents:raise ValueError('Revision must not edit source package')
     validate_package(source)
+    if review_execution is not None:
+        from .astra_literature_review import project_review
+        from .astra_evidence_catalog import EvidenceCatalog
+        _,scope=project_review(review_execution,EvidenceCatalog(source))
+        if not scope['requested_subjects'] or scope['requested_scope_status']!='completed':
+            raise ValueError('Incomplete requested literature scope; previous success retained')
     if json.loads((source/'reproducibility/replay_config.json').read_text())['engine_profile']!=engine.PROFILE:
         raise ValueError('Temporal reader revision requires v6')
     tables=read_tables(source)
@@ -66,6 +75,9 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     if review_plan_only:
         from .astra_literature_review import attach_review_plan
         attach_review_plan(tables)
+        if review_execution is not None:
+            from .astra_literature_review import attach_review_execution
+            attach_review_execution(tables,review_execution,EvidenceCatalog(source))
     if whole_only:
         from .astra_reader_full import attach_full
         attach_full(tables)
@@ -75,7 +87,7 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     update=write_tables({k:tables[k] for k in (['reader/packet','reader/cards'] if whole_only else ['reader/packet'])},directory)
     update['reader/packet.csv'].update(unique_key=baseline['reader/packet.csv']['unique_key'],row_grain=baseline['reader/packet.csv']['row_grain'])
     dictionary.update(update);json_write(directory/'reproducibility/data_dictionary.json',dictionary)
-    artifacts=write_reader(directory,tables,access_only=access_only,whole_only=whole_only,review_plan_only=review_plan_only)
+    artifacts=write_reader(directory,tables,access_only=access_only,whole_only=whole_only,review_plan_only=review_plan_only,review_execution=review_execution)
     # No source table, card, selection, literature result or figure may change.
     allowed={'reader/packet.csv',INDEX,LINKS}
     if whole_only:
@@ -124,6 +136,13 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
         from .astra_literature_review import VERSION as REVIEW_VERSION
         revision.update(operation='literature_review_plan_revision',version=REVIEW_VERSION,refreshed_code_files=sorted(refreshed_code),
             new_model_calls=0,replay_scope='M3_subject_plan_from_M1_M2_saved_rows; no retrieval/comparison/science execution')
+    if review_execution is not None:
+        revision.update(operation='literature_subject_execution_revision',version=review_execution['schema_version'],
+            literature_queries=review_execution['current_cost']['queries'],new_model_calls=review_execution['current_cost']['model_calls'],
+            execution_pin_sha256=review_execution['sha256'],
+            effective_literature_selection_sha256=object_hash(review_execution['literature_selection']),
+            publication_policy=scope['publication_policy'],whole_review_status=scope['status'],
+            replay_scope='frozen typed retrieval/comparison projection; no retrieval, model or scientific replay')
     json_write(directory/'reproducibility/temporal_reader_revision.json',revision)
     provenance=deepcopy(origin);provenance.update(run_id=run_id,parent_package_run_id=origin['run_id'],
         parent_manifest_sha256=revision['parent_manifest_sha256'],operation=revision['operation'],scientific_recalculation=False,
@@ -131,6 +150,9 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
         stage_reuse={'scientific_tables':{'status':'reused_from_validated_package','run_id':origin['run_id']},
                     'literature':{'status':'frozen_results_reused','run_id':origin['run_id']}})
     provenance['reader_revision_sha256']=object_hash(revision)
+    if review_execution is not None:
+        provenance['stage_reuse']['typed_literature']={'status':scope['status'],'requested_scope_status':scope['requested_scope_status'],
+            'pin_sha256':review_execution['sha256'],'execution':'explicit_separate_stage_frozen_before_revision'}
     provenance['provenance_id']=object_hash({k:v for k,v in provenance.items() if k!='provenance_id'})
     json_write(directory/'provenance.json',provenance)
     json_write(directory/'reproducibility/parent_reader_provenance.json',origin)
@@ -159,6 +181,10 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
         (directory/'START_HERE_ASTRA.md').write_text('Read [whole evidence denominators, question links and citation instructions](reader/FULL_EVIDENCE.md) before summary findings.\n\n'+(source/'START_HERE_ASTRA.md').read_text(),encoding='utf-8')
     if review_plan_only:
         (directory/'START_HERE_ASTRA.md').write_text((source/'START_HERE_ASTRA.md').read_text()+'\n\n[Whole-evidence literature review subjects](reader/LITERATURE_REVIEW_PLAN.md): new plan only, no new search or model comparison. Existing literature results remain authoritative.\n',encoding='utf-8')
+    if review_execution is not None:
+        (directory/'START_HERE_ASTRA.md').write_text('[Actual typed literature retrieval/comparison and partial coverage](reader/LITERATURE_SUBJECT_REVIEW.md). '
+            'M3 plan availability is separate from actual execution. Legacy literature and scientific results are unchanged.\n\n'+
+            (source/'START_HERE_ASTRA.md').read_text(),encoding='utf-8')
     (directory/'evidence_report.html').write_text((source/'evidence_report.html').read_text()+
         '\n<p><a href="reader/TEMPORAL_EVIDENCE.md">Saved temporal observations and sensitivity evidence</a></p>\n',encoding='utf-8')
     checkpoint()

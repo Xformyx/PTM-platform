@@ -399,7 +399,7 @@ def write_phosx_time_views(directory, tables):
     return ['reader/PHOSX_TIME_COURSE.md','reader/phosx_time_summary.csv','reader/phosx_assay_time_results.csv']
 
 
-def write_reader(directory, tables, *, source_root=None, access_only=False, whole_only=False, review_plan_only=False):
+def write_reader(directory, tables, *, source_root=None, access_only=False, whole_only=False, review_plan_only=False, review_execution=None):
     """Deterministic JSON/Markdown views of the canonical reader tables."""
     from .generic_workflow import json_write
     directory = Path(directory)
@@ -411,9 +411,14 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
     if packet.get('literature_review_plan') and not access_only:
         from .astra_literature_review import write_review_plan
         access_artifacts += write_review_plan(directory,tables,source_root=source_root)
+    if review_execution is not None:
+        from .astra_literature_review import write_review_execution
+        access_artifacts += write_review_execution(directory,tables,review_execution,source_root=source_root)
     if review_plan_only:
         json_write(directory/'reader/authoring_packet.json',packet)
         note='\n\n## 전체 문헌 검토 대상 (M3)\n\n[요약과 독립적인 typed 검토 계획](LITERATURE_REVIEW_PLAN.md). 새 검색·비교는 미요청이며 기존 문헌 실행 기록은 보존됩니다.\n'
+        if review_execution is not None:
+            note='\n\n## 전체 근거의 실제 문헌 실행 (M4)\n\n[명시적 대상의 검색·비교와 미실행 범위](LITERATURE_SUBJECT_REVIEW.md)를 확인하세요. M3는 대상 계획이며 실제 상태는 M4 실행표가 기준입니다. 원래 15개 findings와 문헌 결과는 보존됩니다.\n'
         path=directory/'reader/READ_ME.md';original=path.read_text() if path.exists() else ''
         if note not in original:path.write_text(original+note,encoding='utf-8')
         return access_artifacts+['reader/authoring_packet.json','reader/READ_ME.md']

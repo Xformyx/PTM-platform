@@ -23,6 +23,12 @@ META = 'reader/literature_review_plan.json'
 GUIDE = 'reader/LITERATURE_REVIEW_PLAN.md'
 TABLE_KEYS = {PLAN[:-4]: ['review_subject_id']}
 ARTIFACTS = [PLAN, META, GUIDE]
+EXECUTION_PIN = 'references/literature_subject_execution_pin.json'
+EXECUTION = 'reader/literature_subject_execution.csv'
+SUBJECT_LINKS = 'reader/literature_subject_links.csv'
+SUMMARY = 'reader/literature_subject_summary.json'
+EXECUTION_GUIDE = 'reader/LITERATURE_SUBJECT_REVIEW.md'
+TABLE_KEYS.update({EXECUTION[:-4]: ['review_subject_id'], SUBJECT_LINKS[:-4]: ['link_id']})
 # A disposition row is not another measurement. Its original restrictions remain
 # accessible through M1 links. All other indexed representations remain explicit.
 READOUTS = {
@@ -140,6 +146,8 @@ def write_review_plan(directory, tables, *, source_root=None):
             'max_subjects': 'execution only, independent of retrieval layer quotas and max_queries/max_model_calls',
             'resume': 'deferred_subject_ids from frozen execution pin'},
         'review_status': 'not_recorded', 'M4': 'not_performed'}
+    if packet.get('literature_subject_execution'):
+        meta.update(M4='separate_frozen_execution', execution_authority=SUMMARY)
     json_write(root/META, meta)
     (root/GUIDE).write_text('''# 전체 근거의 문헌 검토 대상 계획 (M3)
 
@@ -160,6 +168,10 @@ subject ID, 질문, 요청 이유와 실행 예산을 기록해야 검색 경로
 원문 anchor, 제안된 관계, 의미 승인, 독립 검증을 구분하세요. 검색 실패는 no_hit이 아닙니다.
 M4 실제 새 검색/비교는 미수행입니다. 기존 source/reference pin과 문헌 선택 pin은 별개입니다.
 ''', encoding='utf-8')
+    if packet.get('literature_subject_execution'):
+        text=(root/GUIDE).read_text().replace('M4 실제 새 검색/비교는 미수행입니다.',
+            '이번 M4의 실제 검색/비교와 미실행 범위는 [별도 실행 기록](LITERATURE_SUBJECT_REVIEW.md)을 따릅니다.')
+        (root/GUIDE).write_text(text,encoding='utf-8')
     return ARTIFACTS
 
 
@@ -257,6 +269,9 @@ def execute_review(catalog, plan, subject_ids, tables, snapshot, literature, *, 
         raise ValueError('Invalid execution budget')
     contract = legacy._execution_contract(options, settings)
     contract.update(review_subject_schema=VERSION, adapter_sha256=digest(Path(__file__)), budget=policy)
+    if settings.get('runtime_identity'):
+        contract['runtime_identity']=deepcopy(settings['runtime_identity'])
+    contract['publication_policy']='require_complete_requested_scope; whole population remains partial'
     requested = list(subject_ids)
     eligible = [sid for sid in requested if index.loc[sid,'eligibility']=='eligible_with_source_restrictions']
     scheduled = eligible[:max_subjects]
@@ -343,7 +358,148 @@ def replay_review(pin, catalog):
             quote=c.get('quote','');offset=c.get('source_offset',-1)
             if not quote or source.get('document','')[offset:offset+len(quote)]!=quote or c.get('source_sha256')!=source['source_sha256']: raise ValueError('Comparison anchor mismatch')
             if c.get('measured_relation') or c.get('claim_support_status')!='not_verified': raise ValueError('Unreviewed semantic promotion')
+    deferred=[]
+    for sid,r in pin['retrieval']['records'].items():
+        raw=r.get('record',{})
+        if (r['execution_status'] in {'budget_deferred','not_searched','retrieval_failed','unsupported_subject_type'} or
+            (r['execution_status']=='retrieved' and r['comparison_status']!='completed') or
+            raw.get('partial_retrieval_failure') or any(s.get('status')=='budget_exhausted' for s in raw.get('searches',[]))):
+            deferred.append(sid)
+    if set(deferred)!=set(pin['deferred_subject_ids']):raise ValueError('Review deferred status mismatch')
     return deepcopy(pin['retrieval'])
+
+
+def project_review(pin, catalog):
+    """Frozen M4 results, separately from the unchanged whole eligibility plan.
+
+    Counts describe actual retrieval/comparison, never semantic approval. A chunk
+    shared by subjects is counted once and linked N:M by its pinned identity.
+    """
+    result = replay_review(pin, catalog)
+    records = result['records']
+    sources = {}
+    for ref in result['references']:
+        key = (ref.get('collection'), ref.get('collection_version'), ref.get('source_id'), ref['source_sha256'])
+        sources[key] = ref
+    rows, links = [], []
+    for sid in pin['requested_subject_ids']:
+        r = records[sid]; raw = r.get('record', {}); evidence = pin['subject_evidence'][sid]
+        rows.append({'review_subject_id': sid, **{k:v for k,v in evidence.items() if k != 'source_key'},
+            'source_key_json': encode(evidence['source_key']), 'execution_status': r['execution_status'],
+            'comparison_status': r['comparison_status'], 'semantic_status': r['semantic_status'],
+            'deferred': sid in pin['deferred_subject_ids'], 'request_reason': pin['request_reason'],
+            'retrieved_chunks': raw.get('retrieved_count', 0),
+            'exclusion_reasons_json': encode(raw.get('excluded_comparisons', [])),
+            'record_json': encode(r), 'schema_version': pin['schema_version']})
+        for c in raw.get('coverage', []):
+            key = (c.get('collection'), c.get('collection_version'), c.get('source_id'), c['source_sha256'])
+            if key not in sources: raise ValueError('Review coverage/source FK mismatch')
+            ref = sources[key]
+            links.append({'link_id': stable_id('review_link', [sid, key]), 'review_subject_id': sid,
+                'evidence_id': evidence['evidence_id'], 'source_key': stable_id('lit_source', list(key)),
+                'collection': key[0], 'collection_version': key[1], 'chunk_id': key[2], 'source_sha256': key[3],
+                'export_status': ref['export_status'], 'schema_version': pin['schema_version']})
+    docs = pin['literature_selection'].get('documents', [])
+    read_ids = {str((s.get('metadata') or {}).get('doc_id', (s.get('metadata') or {}).get('document_id'))) for s in sources.values()}
+    external = {d['sha256'] for d in docs if str(d.get('document_id')) in read_ids and
+                (d.get('DOI') or d.get('doi') or d.get('PMID') or d.get('pmid')) and
+                d.get('doc_type') not in {'user_method_note', 'same_experiment_manuscript'} and
+                d.get('role') != 'user_supplied_research_attachment'}
+    requested = len(records); population = len(catalog.index.loc[catalog.index.evidence_type.ne('disposition')])
+    comparisons = {object_hash(c) for s in result['references'] for c in s.get('feature_comparisons', [])}
+    summary = {'schema_version': pin['schema_version'], 'pin_sha256': pin['sha256'],
+        'status': 'partial' if pin['deferred_subject_ids'] or requested < population else 'completed',
+        'requested_scope_status': 'partial' if pin['deferred_subject_ids'] else 'completed',
+        'eligible_representation_count': population, 'requested_subjects': requested,
+        'not_requested_subjects': population-requested, 'deferred_subject_ids': pin['deferred_subject_ids'],
+        'execution_status_counts': dict(Counter(r['execution_status'] for r in records.values())),
+        'comparison_executed_subjects': sum(r['comparison_status']=='completed' for r in records.values()),
+        'retrieved_unique_chunks': len(sources), 'retrieved_documents': len(read_ids),
+        'external_publications_with_retrieved_chunks': len(external), 'read_scope': 'retrieved_chunks_only; not whole papers',
+        'exported_anchored_proposals': len(comparisons), 'semantically_approved_subjects': 0,
+        'semantic_status': 'review_required; source anchors are not scientific approval',
+        'external_astra_review_status': 'not_recorded', 'current_cost': pin['current_cost'],
+        'model': pin['execution_contract']['resolved_model'],
+        'literature_selection_sha256': object_hash(pin['literature_selection']),
+        'publication_policy': 'require_complete_requested_scope; whole population remains partial',
+        'limits': 'Overlapping representations; no independent observation count. Scientific restrictions and legacy literature unchanged.'}
+    frames = {EXECUTION[:-4]: pd.DataFrame(rows, columns=['review_subject_id','evidence_id','source_table','source_key_json',
+        'execution_status','comparison_status','semantic_status','deferred','request_reason','retrieved_chunks',
+        'exclusion_reasons_json','record_json','schema_version']),
+        SUBJECT_LINKS[:-4]: pd.DataFrame(links, columns=['link_id','review_subject_id','evidence_id','source_key',
+        'collection','collection_version','chunk_id','source_sha256','export_status','schema_version']).drop_duplicates('link_id')}
+    return frames, summary
+
+
+def attach_review_execution(tables, pin, catalog):
+    frames, summary = project_review(pin, catalog)
+    from .literature_cards import _literature_cards
+    packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
+    packet['literature_subject_execution'] = {'pin_path': EXECUTION_PIN, 'summary': summary,
+        'execution_table': EXECUTION, 'source_links': SUBJECT_LINKS, 'guide': EXECUTION_GUIDE,
+        'reference_cards': _literature_cards(pin['retrieval']['references']),
+        'scope': 'explicit typed subjects; legacy selected findings/results unchanged'}
+    packet['authoring_rules']['literature_review_subjects'] = (
+        'Use whole review plan and explicit subject execution, not summary selection, to find literature. '
+        'Cite review_subject_id + M1 evidence_id/source key + pinned chunk/source hash. '
+        'Only exported source anchors are inspectable offline; metadata-only internal retrieval is recorded separately. '
+        'Proposed relationships are not verified claims. Preserve withheld/no-call/localization and readout restrictions. '
+        'Unrequested/deferred subjects are not reviewed. External Astra review is not_recorded.')
+    # Preserve old question matching and finding literature status. This is an
+    # independent access/execution extension, not a new question-routing engine.
+    packet['literature_review_plan']['limits'] = 'Eligibility plan only; actual typed execution is in literature_subject_execution. Legacy results preserved.'
+    packet['evidence_access']['limits'] = 'Whole evidence access and M2 links; actual typed literature execution is explicitly bounded and recorded separately.'
+    tables['reader/packet'].loc[:, 'packet_json'] = encode(packet)
+    tables.update(frames)
+    return summary
+
+
+def write_review_execution(directory, tables, pin, *, source_root=None):
+    """Writer and offline replay share this projection; no RAG/model discovery."""
+    from .astra_package import write_tables
+    root=Path(directory); catalog=EvidenceCatalog(source_root or root)
+    frames,summary=project_review(pin,catalog)
+    metadata=write_tables(frames,root)
+    if source_root is None:
+        path=root/'reproducibility/data_dictionary.json';dictionary=json.loads(path.read_text())
+        dictionary.update(metadata);json_write(path,dictionary)
+    path=root/CATALOG;content=json.loads(path.read_text())
+    for name,descriptor in metadata.items():
+        content['sources'][name]={**descriptor,'sha256':digest(root/name),'descriptor_schema_version':pin['schema_version'],
+            'availability':'available' if descriptor['rows'] else 'available_empty','role':'literature_subject_execution',
+            'indexed':False,'access':'registered_source_and_canonical_key','independent_observation_count':None}
+    content['catalog_id']=object_hash({k:v for k,v in content.items() if k!='catalog_id'});json_write(path,content)
+    json_write(root/EXECUTION_PIN,pin);json_write(root/SUMMARY,summary)
+    lines=['# 전체 근거 중 명시적으로 실행한 문헌 검토 (M4)',
+        '[대상별 상태/원본 key](literature_subject_execution.csv) · [subject→문헌 구간](literature_subject_links.csv) · '
+        '[분모와 실행 요약](literature_subject_summary.json) · [고정 결과](../'+EXECUTION_PIN+') · '
+        '[전체 대상 계획](LITERATURE_REVIEW_PLAN.md) · [원본 조회](EVIDENCE_ACCESS.md) · [질문·시간·인용](FULL_EVIDENCE.md)',
+        f"전체 {summary['eligible_representation_count']}개 표현 중 {summary['requested_subjects']}개 요청; "
+        f"비교 실행 {summary['comparison_executed_subjects']}개. 전체 검토는 {summary['status']}, 요청 범위는 {summary['requested_scope_status']}입니다.",
+        f"실제 반환 본문은 외부 논문 {summary['external_publications_with_retrieved_chunks']}편을 포함한 "
+        f"{summary['retrieved_unique_chunks']}개 고유 구간입니다. 논문 전체를 읽었다는 뜻은 아닙니다.",
+        'Source anchor 검사와 의미 승인은 다릅니다. 현재 승인 0건, 외부 Astra 검토 로그 not_recorded. '
+        '검색 실패/no_hit/미실행을 반대 결과로 해석하지 마세요. 같은 실험 첨부물과 방법 메모는 독립 외부 검증이 아닙니다.',
+        'Local RAG에서 읽은 범위와 패키지 재배포 허용 범위는 별도입니다. metadata_only 구간은 hash와 위치만 참조하고 원문을 읽었다고 주장하지 마세요. '
+        '문헌 결과는 localization 미측정, 기술 반복, no-call 및 protein/method readout의 제한을 해소하지 않습니다.',
+        '| review subject | 실행 | 비교 | 의미 상태 | 원본 evidence |','|---|---|---|---|---|']
+    for r in frames[EXECUTION[:-4]].itertuples():
+        lines.append(f'| {r.review_subject_id} | {r.execution_status} | {r.comparison_status} | {r.semantic_status} | {r.evidence_id} |')
+    (root/EXECUTION_GUIDE).write_text('\n\n'.join(lines[:6])+'\n\n'+'\n'.join(lines[6:])+'\n',encoding='utf-8')
+    return [EXECUTION,SUBJECT_LINKS,SUMMARY,EXECUTION_GUIDE,EXECUTION_PIN]
+
+
+def validate_execution(catalog):
+    path=catalog.root/EXECUTION_PIN
+    if not path.is_file():return {'available':False,'reason':'legacy_or_unrequested'}
+    pin=json.loads(path.read_text());frames,summary=project_review(pin,catalog)
+    for name,expected in frames.items():
+        actual=read_source(catalog.root,name+'.csv',catalog.catalog['sources'][name+'.csv'])
+        if encode(actual.to_dict('records'))!=encode(expected.to_dict('records')):raise ValueError('Review execution projection mismatch: '+name)
+    if json.loads((catalog.root/SUMMARY).read_text())!=summary:raise ValueError('Review execution summary mismatch')
+    packet=json.loads(read_source(catalog.root,'reader/packet.csv',catalog.catalog['sources']['reader/packet.csv']).iloc[0].packet_json)
+    if packet['literature_subject_execution']['summary']!=summary:raise ValueError('Review execution packet mismatch')
+    return {'available':True,**summary}
 
 
 def main():

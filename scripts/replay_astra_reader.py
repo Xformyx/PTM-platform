@@ -29,12 +29,16 @@ dictionary=json.loads((root/'reproducibility/data_dictionary.json').read_text())
 access_revision=False
 whole_revision=False
 review_revision=False
+execution_revision=False
+review_execution=None
 revision_path=root/'reproducibility/temporal_reader_revision.json'
 if revision_path.is_file():
     operation=json.loads(revision_path.read_text()).get('operation')
     access_revision=operation=='whole_evidence_access_revision'
     whole_revision=operation=='whole_reader_evidence_revision'
     review_revision=operation=='literature_review_plan_revision'
+    execution_revision=operation=='literature_subject_execution_revision'
+    review_revision=review_revision or execution_revision
 names=['quant/summary','quant/comparisons','science/inference_results',
        'reader_adapter/form_identity','reader_adapter/form_contrasts',
        'reader_adapter/precursor_membership','reader_adapter/study_metadata']
@@ -56,6 +60,12 @@ snapshot=json.loads((root/'study/user_input_snapshot.json').read_text())
 if review_revision:
     from ptm_shared.astra_literature_review import attach_review_plan
     attach_review_plan(tables);reader={'reader/packet':tables['reader/packet']}
+    if execution_revision:
+        from ptm_shared.astra_literature_review import attach_review_execution,EXECUTION_PIN
+        from ptm_shared.astra_evidence_catalog import EvidenceCatalog
+        review_execution=json.loads((root/EXECUTION_PIN).read_text())
+        attach_review_execution(tables,review_execution,EvidenceCatalog(root))
+        reader={'reader/packet':tables['reader/packet']}
 elif access_revision:
     from ptm_shared.astra_evidence_catalog import attach_access
     reader={'reader/packet':tables['reader/packet'].copy()};attach_access(reader)
@@ -72,10 +82,12 @@ if not (access_revision or whole_revision or review_revision) and (root/'referen
     apply(reader,pin,snapshot,selection)
 validation=({'scope':'M3 plan from original M1 index/M2 links; no search/model or prior literature reinterpretation'} if review_revision else {'scope':'M1 catalog/index/links from saved sources; prior interpretation not replayed'} if access_revision else validate_reader({**tables,**reader}))
 output.mkdir(parents=True,exist_ok=False);write_tables(reader,output)
+if execution_revision:(output/'references').mkdir(exist_ok=True)
 if access_revision or whole_revision or review_revision:shutil.copyfile(root/'reader/READ_ME.md',output/'reader/READ_ME.md')
 options={'source_root':root,'access_only':access_revision} if hasattr(sys.modules['ptm_shared.astra_reader'],'write_evidence_access') else {}
 if whole_revision:options['whole_only']=True
 if review_revision:options['review_plan_only']=True
+if execution_revision:options['review_execution']=review_execution
 files=write_reader(output,{**tables,**reader},**options)+[name+'.csv' for name in reader]
 results=[]
 for name in files:
@@ -85,6 +97,7 @@ for name in files:
 result={'passed':True,'scope':('M1_access_projection_from_saved_sources' if access_revision else 'reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables'),
         'previous_reader_interpretation_rebuilt':not (access_revision or whole_revision or review_revision),
         'literature_review_plan_rebuilt':review_revision,
+        'frozen_typed_literature_rebuilt':execution_revision,
         'new_model_calls':0,
         'whole_evidence_projection_rebuilt':whole_revision,
         'projection_inputs':'saved scientific/adapter/card rows and existing question matching; no full_* outputs as inputs' if whole_revision else None,
