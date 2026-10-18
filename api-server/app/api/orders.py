@@ -444,6 +444,17 @@ def _attach_enrichment_free_profile(order, config):
             # Preserve the previous hash even on refresh; the worker decides
             # whether to reuse or acquire from the existing refresh flag.
             config['source_pin_sha256']=context.get('astra_source_pin_sha256')
+            from ptm_shared.astra_literature_review import review_request, registered_execution
+            try:
+                review=review_request(context)
+                if review['mode']!='not_requested' and context['quantitation_export_mode']!='astra_analysis.v6':
+                    raise ValueError('Literature subject review requires v6')
+                if review['mode']=='reuse_frozen':
+                    # Order access is checked by the existing endpoint. A request
+                    # may reference only this Order's immutable run, never a path.
+                    registered_execution(Path(get_settings().OUTPUT_DIR)/order.order_code,review['pin_ref'])
+            except (ValueError,KeyError,OSError) as error:
+                raise HTTPException(status_code=422,detail={'code':'literature_subject_request_invalid','message':str(error)}) from error
             from ptm_shared.astra_sources import requested_acquisition_policy
             requested_acquisition_policy(context)
         elif context.get('quantitation_export_mode')=='enrichment_free_timecourse.v3':

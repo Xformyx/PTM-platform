@@ -28,6 +28,9 @@ EXECUTION = 'reader/literature_subject_execution.csv'
 SUBJECT_LINKS = 'reader/literature_subject_links.csv'
 SUMMARY = 'reader/literature_subject_summary.json'
 EXECUTION_GUIDE = 'reader/LITERATURE_SUBJECT_REVIEW.md'
+BINDING = 'references/literature_subject_binding.json'
+REQUEST_FIELD = 'literature_subject_review'
+EXECUTION_ARTIFACTS = [EXECUTION_PIN, EXECUTION, SUBJECT_LINKS, SUMMARY, EXECUTION_GUIDE]
 TABLE_KEYS.update({EXECUTION[:-4]: ['review_subject_id'], SUBJECT_LINKS[:-4]: ['link_id']})
 # A disposition row is not another measurement. Its original restrictions remain
 # accessible through M1 links. All other indexed representations remain explicit.
@@ -47,6 +50,152 @@ COLUMNS = ['review_subject_id', 'evidence_id', 'source_table', 'source_key_json'
            'finding_alias', 'question_ids_json', 'request_reason', 'eligibility', 'eligibility_reason',
            'priority_reason', 'execution_status', 'comparison_status', 'semantic_status',
            'scope_json', 'status_json', 'restrictions_json', 'readout', 'schema_version']
+
+
+def review_request(context):
+    """Public JSON contract: IDs and budgets, never a caller-supplied file path."""
+    import re
+    raw = deepcopy((context or {}).get(REQUEST_FIELD) or {'mode': 'not_requested'})
+    if not isinstance(raw, dict) or set(raw)-{'mode','requested_subject_ids','request_reason','max_subjects','budget','pin_ref'}:
+        raise ValueError('Invalid literature subject review fields')
+    mode = raw.get('mode', 'not_requested')
+    if mode not in {'not_requested','reuse_frozen','execute'}:
+        raise ValueError('Invalid literature subject review mode')
+    if mode == 'not_requested':
+        if set(raw)-{'mode'}: raise ValueError('Unrequested review cannot carry execution inputs')
+        return {'mode': mode}
+    ids = raw.get('requested_subject_ids')
+    if not isinstance(ids,list) or not ids or any(not isinstance(s,str) or not re.fullmatch(r'review_subject_[0-9a-f]{20}',s) for s in ids) or len(set(ids))!=len(ids):
+        raise ValueError('Explicit unique review subject IDs required')
+    if not isinstance(raw.get('request_reason'),str) or not raw['request_reason'].strip():
+        raise ValueError('Explicit review request reason required')
+    if type(raw.get('max_subjects')) is not int or raw['max_subjects']<0:
+        raise ValueError('Explicit subject budget required')
+    budget=raw.get('budget')
+    if not isinstance(budget,dict) or set(budget)!={'max_queries','max_model_calls','max_prompt_bytes'} or any(type(v) is not int or v<0 for v in budget.values()):
+        raise ValueError('Explicit query/model/prompt budgets required')
+    ref=raw.get('pin_ref')
+    if mode=='reuse_frozen':
+        if not isinstance(ref,dict) or set(ref)!={'run_id','sha256'} or not re.fullmatch(r'g\d+-[0-9a-f]{32}',str(ref.get('run_id',''))) or not re.fullmatch(r'[0-9a-f]{64}',str(ref.get('sha256',''))):
+            raise ValueError('Registered same-order run and pin hash required')
+    elif ref is not None: raise ValueError('Execute and frozen pin reuse are distinct requests')
+    return raw
+
+
+def registered_execution(output_root, pin_ref):
+    """Resolve only an immutable archive in the already-authorized Order root."""
+    from .astra_evidence_catalog import safe_path
+    import re
+    run=str(pin_ref.get('run_id',''))
+    if not re.fullmatch(r'g\d+-[0-9a-f]{32}',run):raise ValueError('Invalid review source run')
+    source=safe_path(output_root,'enrichment_free_runs/'+run)
+    path=safe_path(source,EXECUTION_PIN)
+    manifest=json.loads(safe_path(source,'manifest.json').read_text())
+    entry=manifest['files'].get(EXECUTION_PIN)
+    if not entry or entry['sha256']!=digest(path) or entry['bytes']!=path.stat().st_size:
+        raise ValueError('Registered review pin manifest mismatch')
+    pin=json.loads(path.read_text())
+    if pin.get('sha256')!=pin_ref.get('sha256') or object_hash({k:v for k,v in pin.items() if k!='sha256'})!=pin.get('sha256'):
+        raise ValueError('Registered review pin hash mismatch')
+    if json.loads((source/'provenance.json').read_text())['run_id']!=run:
+        raise ValueError('Registered review source run mismatch')
+    return pin,source
+
+
+def validate_frozen_request(pin, request, catalog, tables, snapshot, literature, source):
+    """Historical execution is replayed as historical, not as current-model cache."""
+    replay_review(pin,catalog)
+    if pin['requested_subject_ids']!=request['requested_subject_ids']:
+        raise ValueError('Review requested subject scope mismatch')
+    selection_match=frozen_selection_match(pin['literature_selection'],literature)
+    contract=pin.get('execution_contract') or {}
+    if (pin.get('review_subject_schema')!=VERSION or not contract.get('code') or
+        not contract.get('prompt_version') or not contract.get('retrieval_version') or
+        not contract.get('resolved_model') or not contract.get('adapter_sha256')):
+        raise ValueError('Review execution provenance incomplete')
+    if request['budget']!=contract.get('budget') or request['max_subjects']!=pin.get('max_subjects'):
+        raise ValueError('Review execution budget/policy mismatch')
+    if set(pin.get('source_value_hashes',{}))!=set(request['requested_subject_ids']):
+        raise ValueError('Review source value hashes incomplete')
+    # A frozen result may predate newer writer code. Compare source inputs and
+    # study against its validated source archive, not today's model/code versions.
+    prior=EvidenceCatalog(source)
+    replay_review(pin,prior)
+    config=json.loads((Path(source)/'reproducibility/replay_config.json').read_text())
+    old_tables={'reader/packet':read_source(source,'reader/packet.csv',prior.catalog['sources']['reader/packet.csv'])}
+    old_plan=build_plan(prior);new_plan=build_plan(catalog)
+    previous,old_study=resolve_subjects(prior,old_plan,request['requested_subject_ids'],old_tables,config['snapshot'],pin['literature_selection'])
+    current,new_study=resolve_subjects(catalog,new_plan,request['requested_subject_ids'],tables,snapshot,pin['literature_selection'])
+    # source_ref contains a source-file hash, which changes with unrelated rows or
+    # summary flags. Canonical key and resolved_source_sha256 bind the used values.
+    def semantic(payload):
+        payload=deepcopy(payload)
+        payload['literature_input']['source_ref']={k:v for k,v in payload['literature_input']['source_ref'].items() if k in {'table','key'}}
+        return payload
+    if object_hash([semantic(p) for p in previous])!=object_hash([semantic(p) for p in current]) or object_hash(old_study)!=object_hash(new_study):
+        raise ValueError('Review source input/study/question mismatch')
+    return selection_match
+
+
+def frozen_selection_match(frozen, current):
+    """Cross-environment catalog IDs are not identity; frozen corpus stays historical.
+
+    Only explicit frozen reuse allows matching catalog-only inventory by exact
+    document hashes. This does not certify the current live search index or grant
+    new export permission, and must never be used for a new-execution cache hit.
+    """
+    if object_hash(frozen)==object_hash(current):return {'status':'identical_selection_and_corpus'}
+    old=frozen.get('documents',[]);new=current.get('documents',[])
+    a=[d.get('sha256') for d in old];b=[d.get('sha256') for d in new]
+    if not a or any(not h for h in a+b) or len(set(a))!=len(a) or len(set(b))!=len(b) or sorted(a)!=sorted(b):
+        raise ValueError('Review literature selection/corpus mismatch')
+    snapshots=lambda s:sorted(c.get('version','') for c in s.get('collections',[]) if c.get('version_scope')=='immutable_index_snapshot')
+    if not snapshots(frozen) or (snapshots(current) and snapshots(current)!=snapshots(frozen)):
+        raise ValueError('Review immutable corpus mismatch')
+    return {'status':'same_document_bytes_frozen_historical_corpus_only',
+        'current_index_verified':False,'new_execution_cache_compatible':False,
+        'frozen_corpus_versions':snapshots(frozen),
+        'documents':[{'sha256':d['sha256'],'source_document_id':next(x.get('document_id') for x in old if x['sha256']==d['sha256']),
+                      'consumer_document_id':d.get('document_id')} for d in new],
+        'export_policy':'retained frozen permission provenance; no new text or permission granted'}
+
+
+def run_requested_review(directory, tables, context, snapshot, literature, *, output_root, run_id, settings=None):
+    """Explicit calculation-stage hook. Writers/resolvers never discover runtimes."""
+    request=review_request(context)
+    if request['mode']=='not_requested':return None,None
+    catalog=EvidenceCatalog(directory)
+    if request['mode']=='reuse_frozen':
+        pin,source=registered_execution(output_root,request['pin_ref'])
+        selection_match=validate_frozen_request(pin,request,catalog,tables,snapshot,literature,source)
+        cost={'queries':0,'model_calls':0}
+        source_run=request['pin_ref']['run_id']
+    else:
+        pin=execute_review(catalog,build_plan(catalog),request['requested_subject_ids'],tables,snapshot,literature,
+            reason=request['request_reason'],max_subjects=request['max_subjects'],
+            settings={**(settings or {}),'budget':request['budget']},cache_root=Path(output_root)/'.astra_stage_cache')
+        source_run=run_id;cost=pin['current_cost']
+        selection_match={'status':'current_explicit_execution'}
+    _,summary=project_review(pin,catalog)
+    binding={'schema_version':'literature_subject_binding.v1','request':request,
+        'requested_mode':request['mode'],'effective_mode':'frozen_results_reused' if request['mode']=='reuse_frozen' else 'explicit_execution',
+        'source_run_id':source_run,'consumer_run_id':run_id,'pin_sha256':pin['sha256'],
+        'literature_selection_sha256':object_hash(pin['literature_selection']),
+        'consumer_literature_selection_sha256':object_hash(literature),'selection_match':selection_match,
+        'execution_contract_sha256':object_hash(pin['execution_contract']),
+        'current_cost':cost,'requested_scope_status':summary['requested_scope_status'],
+        'whole_scope_status':summary['status'],'model_provenance':'frozen_original_execution',
+        'fingerprint':object_hash({'request':request,'source_value_hashes':pin['source_value_hashes'],
+            'literature':literature,'execution_contract':pin['execution_contract'],'request_hashes':pin['request_hashes']})}
+    json_write(Path(directory)/BINDING,binding)
+    if summary['requested_scope_status']!='completed':
+        json_write(Path(directory)/EXECUTION_PIN,pin)
+        raise ValueError('Incomplete requested literature scope; previous success retained')
+    attach_review_execution(tables,pin,catalog)
+    packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
+    packet['literature_subject_execution']['binding']=binding
+    tables['reader/packet'].loc[:,'packet_json']=encode(packet)
+    return pin,binding
 
 
 def attach_review_plan(tables):
@@ -147,14 +296,20 @@ def write_review_plan(directory, tables, *, source_root=None):
             'resume': 'deferred_subject_ids from frozen execution pin'},
         'review_status': 'not_recorded', 'M4': 'not_performed'}
     if packet.get('literature_subject_execution'):
-        meta.update(M4='separate_frozen_execution', execution_authority=SUMMARY)
+        execution=packet['literature_subject_execution']
+        cost=execution.get('binding',{}).get('current_cost',{'queries':0,'model_calls':0})
+        meta.update(M4='frozen_execution_available', execution_authority=SUMMARY,
+            current_execution='see_subject_execution',current_queries=cost['queries'],current_model_calls=cost['model_calls'],
+            requested_scope_status=execution['summary']['requested_scope_status'],
+            whole_scope_status=execution['summary']['status'],
+            plan_row_semantics='not_requested is eligibility-plan state; execution table takes precedence')
     json_write(root/META, meta)
     (root/GUIDE).write_text('''# 전체 근거의 문헌 검토 대상 계획 (M3)
 
 [전체 대상](literature_review_subjects.csv) · [계획/분모](literature_review_plan.json) · [원본 조회](EVIDENCE_ACCESS.md) · [질문·시간·인용](FULL_EVIDENCE.md)
 
 선정 findings는 요약입니다. 미선정 관측, 보류 원본, protein, detection, method, no-call도 별도 typed 대상으로 접근합니다.
-이 계획은 새 검색/LLM 비교를 수행하지 않습니다. 각 행의 not_requested는 이번 확장 실행 상태입니다.
+이 계획은 새 검색/LLM 비교를 수행하지 않습니다. 각 행의 not_requested는 대상 계획 상태이며 별도 실행표를 덮어쓰지 않습니다.
 기존 실제 문헌 실행과 승인 상태는 [기존 검색 기록](literature_search.csv)과 [기존 문헌](LITERATURE.md)을 따릅니다.
 여러 행은 같은 근거의 표현일 수 있으며 독립 관측으로 합산하지 않습니다. 과학적 보류를 문헌 eligibility로 해제하지 않습니다.
 
@@ -448,6 +603,7 @@ def attach_review_execution(tables, pin, catalog):
     # Preserve old question matching and finding literature status. This is an
     # independent access/execution extension, not a new question-routing engine.
     packet['literature_review_plan']['limits'] = 'Eligibility plan only; actual typed execution is in literature_subject_execution. Legacy results preserved.'
+    packet['literature_review_plan']['execution'] = 'see_literature_subject_execution'
     packet['evidence_access']['limits'] = 'Whole evidence access and M2 links; actual typed literature execution is explicitly bounded and recorded separately.'
     tables['reader/packet'].loc[:, 'packet_json'] = encode(packet)
     tables.update(frames)
@@ -469,6 +625,7 @@ def write_review_execution(directory, tables, pin, *, source_root=None):
             'availability':'available' if descriptor['rows'] else 'available_empty','role':'literature_subject_execution',
             'indexed':False,'access':'registered_source_and_canonical_key','independent_observation_count':None}
     content['catalog_id']=object_hash({k:v for k,v in content.items() if k!='catalog_id'});json_write(path,content)
+    (root/'references').mkdir(exist_ok=True)
     json_write(root/EXECUTION_PIN,pin);json_write(root/SUMMARY,summary)
     lines=['# 전체 근거 중 명시적으로 실행한 문헌 검토 (M4)',
         '[대상별 상태/원본 key](literature_subject_execution.csv) · [subject→문헌 구간](literature_subject_links.csv) · '
@@ -478,7 +635,7 @@ def write_review_execution(directory, tables, pin, *, source_root=None):
         f"비교 실행 {summary['comparison_executed_subjects']}개. 전체 검토는 {summary['status']}, 요청 범위는 {summary['requested_scope_status']}입니다.",
         f"실제 반환 본문은 외부 논문 {summary['external_publications_with_retrieved_chunks']}편을 포함한 "
         f"{summary['retrieved_unique_chunks']}개 고유 구간입니다. 논문 전체를 읽었다는 뜻은 아닙니다.",
-        'Source anchor 검사와 의미 승인은 다릅니다. 현재 승인 0건, 외부 Astra 검토 로그 not_recorded. '
+        f"Source anchor 검사와 의미 승인은 다릅니다. 의미 승인 대상 {summary['semantically_approved_subjects']}건, 외부 Astra 검토 로그 {summary['external_astra_review_status']}. "
         '검색 실패/no_hit/미실행을 반대 결과로 해석하지 마세요. 같은 실험 첨부물과 방법 메모는 독립 외부 검증이 아닙니다.',
         'Local RAG에서 읽은 범위와 패키지 재배포 허용 범위는 별도입니다. metadata_only 구간은 hash와 위치만 참조하고 원문을 읽었다고 주장하지 마세요. '
         '문헌 결과는 localization 미측정, 기술 반복, no-call 및 protein/method readout의 제한을 해소하지 않습니다.',
@@ -486,20 +643,72 @@ def write_review_execution(directory, tables, pin, *, source_root=None):
     for r in frames[EXECUTION[:-4]].itertuples():
         lines.append(f'| {r.review_subject_id} | {r.execution_status} | {r.comparison_status} | {r.semantic_status} | {r.evidence_id} |')
     (root/EXECUTION_GUIDE).write_text('\n\n'.join(lines[:6])+'\n\n'+'\n'.join(lines[6:])+'\n',encoding='utf-8')
+    binding=json.loads(tables['reader/packet'].iloc[0].packet_json).get('literature_subject_execution',{}).get('binding')
+    if binding:
+        with (root/EXECUTION_GUIDE).open('a',encoding='utf-8') as handle:
+            handle.write(f"\n원 실행 run: {binding['source_run_id']}; 소비 run: {binding['consumer_run_id']}. "
+                f"이번 소비의 신규 query/model 호출: {binding['current_cost']['queries']}/{binding['current_cost']['model_calls']}. "
+                'summary.current_cost와 pin의 모델·corpus는 고정된 원 실행 기록입니다. 현재 환경의 새 검색이나 모델 결과가 아닙니다. '
+                '[요청·재사용 대응](../'+BINDING+').\n')
     return [EXECUTION,SUBJECT_LINKS,SUMMARY,EXECUTION_GUIDE,EXECUTION_PIN]
 
 
-def validate_execution(catalog):
+def validate_execution(catalog, *, required=False):
     path=catalog.root/EXECUTION_PIN
-    if not path.is_file():return {'available':False,'reason':'legacy_or_unrequested'}
+    packet=json.loads(read_source(catalog.root,'reader/packet.csv',catalog.catalog['sources']['reader/packet.csv']).iloc[0].packet_json)
+    required=required or bool(packet.get('literature_subject_execution'))
+    if not path.is_file():
+        if required:raise ValueError('Required literature subject execution pin missing')
+        return {'available':False,'reason':'legacy_or_unrequested'}
+    if any(not (catalog.root/name).is_file() for name in EXECUTION_ARTIFACTS):raise ValueError('Required literature subject artifacts missing')
     pin=json.loads(path.read_text());frames,summary=project_review(pin,catalog)
+    if summary['requested_scope_status']!='completed':raise ValueError('Incomplete requested literature scope')
     for name,expected in frames.items():
         actual=read_source(catalog.root,name+'.csv',catalog.catalog['sources'][name+'.csv'])
         if encode(actual.to_dict('records'))!=encode(expected.to_dict('records')):raise ValueError('Review execution projection mismatch: '+name)
     if json.loads((catalog.root/SUMMARY).read_text())!=summary:raise ValueError('Review execution summary mismatch')
-    packet=json.loads(read_source(catalog.root,'reader/packet.csv',catalog.catalog['sources']['reader/packet.csv']).iloc[0].packet_json)
     if packet['literature_subject_execution']['summary']!=summary:raise ValueError('Review execution packet mismatch')
+    binding_path=catalog.root/BINDING
+    context_path=catalog.root/'study/study_context.json'
+    request=review_request(json.loads(context_path.read_text())) if context_path.is_file() else {'mode':'not_requested'}
+    if request['mode']!='not_requested' and not binding_path.is_file():raise ValueError('Required review request binding missing')
+    if binding_path.is_file():
+        binding=json.loads(binding_path.read_text())
+        if packet['literature_subject_execution'].get('binding')!=binding:raise ValueError('Review execution binding mismatch')
+        if binding['pin_sha256']!=pin['sha256'] or binding['execution_contract_sha256']!=object_hash(pin['execution_contract']) or binding['literature_selection_sha256']!=object_hash(pin['literature_selection']):
+            raise ValueError('Review execution provenance binding mismatch')
+        if binding['request']['requested_subject_ids']!=pin['requested_subject_ids']:raise ValueError('Review request scope mismatch')
+        if request['mode']!='not_requested' and request!=binding['request']:raise ValueError('Review context/request binding mismatch')
+        selection_path=catalog.root/'references/literature_pin.json'
+        if selection_path.is_file() and object_hash(json.loads(selection_path.read_text()))!=binding['consumer_literature_selection_sha256']:
+            raise ValueError('Review consumer literature selection mismatch')
+        provenance=catalog.root/'provenance.json'
+        if provenance.is_file() and json.loads(provenance.read_text())['run_id']!=binding['consumer_run_id']:raise ValueError('Review consumer run mismatch')
+    if required:
+        authoring=json.loads((catalog.root/'reader/authoring_packet.json').read_text())
+        if authoring.get('literature_subject_execution')!=packet['literature_subject_execution']:
+            raise ValueError('Review authoring packet mismatch')
     return {'available':True,**summary}
+
+
+def restore_execution(tables, source, *, consumer_run_id=None):
+    """Restore the archived consumer binding; no runtime, current clock or model."""
+    root=Path(source);path=root/EXECUTION_PIN
+    context_path=root/'study/study_context.json'
+    requested=context_path.is_file() and review_request(json.loads(context_path.read_text()))['mode']!='not_requested'
+    if not path.is_file():
+        if requested:raise ValueError('Requested literature execution missing from archive')
+        return None
+    catalog=EvidenceCatalog(root);validate_execution(catalog,required=requested)
+    pin=json.loads(path.read_text());attach_review_execution(tables,pin,catalog)
+    if (root/BINDING).is_file():
+        packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
+        binding=json.loads((root/BINDING).read_text())
+        if consumer_run_id:
+            binding.update(consumer_run_id=consumer_run_id, effective_mode='frozen_results_reused', current_cost={'queries':0,'model_calls':0})
+        packet['literature_subject_execution']['binding']=binding
+        tables['reader/packet'].loc[:,'packet_json']=encode(packet)
+    return pin
 
 
 def main():

@@ -80,14 +80,17 @@ if not (access_revision or whole_revision or review_revision) and (root/'referen
     pin=json.loads((root/'references/finding_literature_pin.json').read_text())
     selection=json.loads((root/'references/literature_pin.json').read_text())
     apply(reader,pin,snapshot,selection)
+if (root/'references/literature_subject_execution_pin.json').is_file() and hasattr(sys.modules.get('ptm_shared.astra_literature_review'),'restore_execution'):
+    from ptm_shared.astra_literature_review import restore_execution
+    review_execution=restore_execution(reader,root)
 validation=({'scope':'M3 plan from original M1 index/M2 links; no search/model or prior literature reinterpretation'} if review_revision else {'scope':'M1 catalog/index/links from saved sources; prior interpretation not replayed'} if access_revision else validate_reader({**tables,**reader}))
 output.mkdir(parents=True,exist_ok=False);write_tables(reader,output)
-if execution_revision:(output/'references').mkdir(exist_ok=True)
+if review_execution is not None:(output/'references').mkdir(exist_ok=True)
 if access_revision or whole_revision or review_revision:shutil.copyfile(root/'reader/READ_ME.md',output/'reader/READ_ME.md')
 options={'source_root':root,'access_only':access_revision} if hasattr(sys.modules['ptm_shared.astra_reader'],'write_evidence_access') else {}
 if whole_revision:options['whole_only']=True
 if review_revision:options['review_plan_only']=True
-if execution_revision:options['review_execution']=review_execution
+if review_execution is not None:options['review_execution']=review_execution
 files=write_reader(output,{**tables,**reader},**options)+[name+'.csv' for name in reader]
 results=[]
 for name in files:
@@ -97,7 +100,7 @@ for name in files:
 result={'passed':True,'scope':('M1_access_projection_from_saved_sources' if access_revision else 'reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables'),
         'previous_reader_interpretation_rebuilt':not (access_revision or whole_revision or review_revision),
         'literature_review_plan_rebuilt':review_revision,
-        'frozen_typed_literature_rebuilt':execution_revision,
+        'frozen_typed_literature_rebuilt':review_execution is not None,
         'new_model_calls':0,
         'whole_evidence_projection_rebuilt':whole_revision,
         'projection_inputs':'saved scientific/adapter/card rows and existing question matching; no full_* outputs as inputs' if whole_revision else None,

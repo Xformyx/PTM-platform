@@ -527,6 +527,12 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
     """Deterministic JSON/Markdown views of the canonical reader tables."""
     from .generic_workflow import json_write
     directory = Path(directory)
+    packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
+    if packet.get('literature_subject_execution') and review_execution is None:
+        from .astra_literature_review import EXECUTION_PIN
+        path=Path(source_root or directory)/EXECUTION_PIN
+        if not path.is_file():raise ValueError('Reader execution packet requires frozen pin')
+        review_execution=json.loads(path.read_text())
     access_artifacts = write_evidence_access(directory, source_root=source_root)
     packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
     if packet.get('whole_evidence') and not (access_only or review_plan_only):
@@ -538,6 +544,14 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
     if review_execution is not None:
         from .astra_literature_review import write_review_execution
         access_artifacts += write_review_execution(directory,tables,review_execution,source_root=source_root)
+        binding=packet.get('literature_subject_execution',{}).get('binding')
+        if binding:
+            from .astra_literature_review import BINDING
+            json_write(directory/BINDING,binding);access_artifacts.append(BINDING)
+        full=directory/'reader/FULL_EVIDENCE.md'
+        if full.is_file() and not (access_only or review_plan_only):
+            note='\n\n실제 typed 문헌 실행과 요청/전체 범위는 [M4 실행 기록](LITERATURE_SUBJECT_REVIEW.md)을 따릅니다. 대상 계획의 not_requested는 실행 결과를 덮어쓰지 않습니다.\n'
+            if note not in full.read_text():full.write_text(full.read_text()+note,encoding='utf-8')
     if review_plan_only:
         json_write(directory/'reader/authoring_packet.json',packet)
         note='\n\n## 전체 문헌 검토 대상 (M3)\n\n[요약과 독립적인 typed 검토 계획](LITERATURE_REVIEW_PLAN.md). 새 검색·비교는 미요청이며 기존 문헌 실행 기록은 보존됩니다.\n'
@@ -604,6 +618,9 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         '이 선정만으로 insulin cascade를 구성하지 마세요. 전체 emergence, protein, kinase 표로 범위를 넓히세요. '
         'method_id가 repository_measured_gene_zscore인 행은 PhosX 결과가 아닙니다. PhosX_native_functions와 method_executions가 있을 때만 PhosX로 읽습니다.',
         '## 저장된 연구 질문']
+    if packet.get('literature_subject_execution'):
+        summary=packet['literature_subject_execution']['summary']
+        lines.insert(1,f"[실제 M4 문헌 실행](LITERATURE_SUBJECT_REVIEW.md): 요청 범위 {summary['requested_scope_status']}; 전체 {summary['status']}. 계획과 실제 검색·비교·의미 승인은 별도 상태입니다.")
     for q in packet['research_question_evidence_map']['questions']:
         lines.extend([f"### {q['question_id']}", q['original_text'], f"상태: {q['answer_status']}; {q['answer_scope']}",
                       '연결 결과: '+(', '.join(q['finding_ids']) or '없음'), '부족한 근거: '+' '.join(q['missing_evidence'])])

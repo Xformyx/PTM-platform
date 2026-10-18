@@ -112,6 +112,8 @@ class StageLedger(list):
             dependencies['integrate_temporal_layers']=['quantitative_evidence']
             dependencies['augment_evidence']=['integrate_temporal_layers']
             dependencies['finding_literature']=['augment_evidence']
+            if self.plan.get('literature_subject_request',{}).get('mode','not_requested')!='not_requested':
+                dependencies['literature_subject_review']=['finding_literature']
         seen={r['stage']:r for r in self}
         rows=[{**{'stage':name,'status':'queued'},**seen.get(name,{}),'dependencies':deps,
             'code_hash':self.code_hash,'config_hash':object_hash(self.plan),'checkpoint':self.plan.get('fingerprints',{})} for name,deps in dependencies.items()]
@@ -518,6 +520,12 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
     code_capture={name:digest(Path(__file__).parent/name) for name in code_files}
     plan_resolver=engine.resolve_plan if engine else resolve_plan
     context=sanitize_research(effective_context(config['experimental_context']));design=context['study_design']
+    subject_request={'mode':'not_requested'}
+    if profile=='astra_analysis.v6' or context.get('literature_subject_review'):
+        from .astra_literature_review import review_request
+        subject_request=review_request(context)
+    if subject_request['mode']!='not_requested' and profile!='astra_analysis.v6':
+        raise ValueError('Literature subject review requires v6')
     (engine.validate_execution if engine else validate_execution)(context,design['study']['ptm_type'],config['species_tax_id'])
     root=Path(output_dir);run_id=f"g{int(config.get('run_generation') or 0)}-{uuid4().hex}"
     directory=root/'enrichment_free_runs'/run_id;directory.mkdir(parents=True,exist_ok=False)
@@ -562,6 +570,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         snapshot=config.get('user_input_snapshot') or capture_order({'id':order_id,'order_code':config['order_code'],'analysis_context':context})
         snapshot=sanitize_research(snapshot);literature=config.get('literature_pin') or {'collections':[],'documents':[],'status':'not_persisted_in_source_order'}
         plan=plan_resolver(context,hashes,taxa=fasta_taxonomy(inputs['FASTA']).values())
+        if subject_request['mode']!='not_requested':plan['literature_subject_request']=subject_request
         metrics.plan=plan
     with stage('quantify_evidence',metrics,checkpoint,progress):
         quant,quant_reuse=quant_cached(inputs,design,context,root,plan['fingerprints']['quant'],calculator=engine.calculate if engine else None) if not engine or engine.PROFILE=='astra_analysis.v6' else (engine.calculate(inputs,design,context),{'status':'computed','fingerprint':plan['fingerprints']['quant']})
@@ -583,6 +592,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
             acquisition_policy=requested_acquisition_policy(context))
         source_execution=source_execution_record(context,config.get('source_pin_sha256'),sources)
         plan=plan_resolver(context,hashes,sources['pin_sha256'],fasta_taxonomy(inputs['FASTA']).values())
+        if subject_request['mode']!='not_requested':plan['literature_subject_request']=subject_request
         if profile=='astra_analysis.v6':
             plan['code_dependencies']['reader_access']={name:code_capture[name] for name in READER_CODE_FILES}
         plan['source_execution']=source_execution
@@ -706,7 +716,27 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                 if digest(original)!=doc['sha256']:raise ValueError('Pinned literature content missing or changed')
                 target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(original,target)
         if engine and hasattr(engine,'write_artifacts'):engine.write_artifacts(directory,scientific,context,inputs,sources,readiness)
+        if subject_request['mode']!='not_requested':
+            from .astra_literature_review import run_requested_review
+            from .astra_reader import write_reader
+            with stage('literature_subject_review',metrics,checkpoint,progress):
+                subject_pin,subject_binding=run_requested_review(directory,scientific,context,snapshot,literature,
+                    output_root=root,run_id=run_id,settings=config)
+                plan['fingerprints']['literature_subject_review']=subject_binding['fingerprint']
+                plan['literature_subject_review']=subject_binding
+                readiness['literature_subject_review']=subject_binding
+                provenance['literature_subject_review']=subject_binding
+                provenance['stage_fingerprints']=plan['fingerprints']
+                provenance['provenance_id']=object_hash({k:v for k,v in provenance.items() if k!='provenance_id'})
+                dictionary=json.loads((directory/'reproducibility/data_dictionary.json').read_text())
+                dictionary.update(write_tables({'reader/packet':scientific['reader/packet']},directory))
+                json_write(directory/'reproducibility/data_dictionary.json',dictionary)
+                write_reader(directory,scientific,review_execution=subject_pin)
+                for name,value in [('study/analysis_plan',plan),('provenance',provenance),('evidence/readiness',readiness)]:
+                    json_write(directory/(name+'.json'),value)
         report=start_here(snapshot,counts,readiness);
+        if readiness.get('literature_subject_review'):
+            report+='\n\n[Explicit whole-evidence literature execution](reader/LITERATURE_SUBJECT_REVIEW.md): requested scope '+readiness['literature_subject_review']['requested_scope_status']+'; whole scope '+readiness['literature_subject_review']['whole_scope_status']+'. Frozen original model provenance; source anchors are not semantic approval.\n'
         report+='\nReference acquisition: '+source_execution['message']+'\nSee references/source_execution.json for requested/effective policy, hashes and reuse reason.\n'
         if engine and hasattr(engine,'report_addendum'):report+=engine.report_addendum(scientific,readiness)
         if engine and engine.PROFILE!='astra_analysis.v6':report+='\n## Experimental scientific evidence\nRead science/measurement_observations.csv and site_identity_audit.csv for exact observation and sequence provenance. Read science/kinase_calls.csv for each uncalibrated abstention; proposals are not validated calls. Specificity parity and independent benchmark improvement are not established. See evidence/readiness.json for resource/assay status. The taxon is inherited from the recorded Order, never inferred from a pathway.\n'
@@ -800,15 +830,19 @@ def validate_package(directory):
         packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
         if json.loads((directory/'references/finding_literature_pin.json').read_text())!=packet['literature']['pin']:
             raise ValueError('Literature pin/table mismatch')
+    context_path=directory/'study/study_context.json'
+    raw_request=json.loads(context_path.read_text()).get('literature_subject_review',{}) if context_path.is_file() else {}
+    if raw_request.get('mode','not_requested')!='not_requested' and not (directory/'reader/evidence_catalog.json').is_file():
+        raise ValueError('Requested literature execution requires evidence catalog')
     if (directory/'reader/evidence_catalog.json').is_file():
         from .astra_evidence_catalog import EvidenceCatalog
         catalog=EvidenceCatalog(directory)
         if (directory/'reader/literature_review_plan.json').is_file():
             from .astra_literature_review import validate_plan
             validate_plan(catalog)
-        if (directory/'references/literature_subject_execution_pin.json').is_file():
-            from .astra_literature_review import validate_execution
-            validate_execution(catalog)
+        from .astra_literature_review import validate_execution, review_request
+        request=review_request(json.loads((directory/'study/study_context.json').read_text())) if (directory/'study/study_context.json').is_file() else {'mode':'not_requested'}
+        validate_execution(catalog,required=request['mode']!='not_requested')
     print(json.dumps({'manifest_files':len(manifest['files']),'scientific_tables':len(tables),'validated':True}))
     return checks
 
@@ -836,11 +870,15 @@ def replay_package(directory,output,*,specificity_manifest=None):
     if (directory/'references/finding_literature_pin.json').is_file():
         from .astra_literature import apply
         apply(tables,json.loads((directory/'references/finding_literature_pin.json').read_text()),config['snapshot'],config['literature'])
+    subject_pin=None
+    if 'reader/packet' in tables:
+        from .astra_literature_review import restore_execution
+        subject_pin=restore_execution(tables,directory)
     validate_science(tables,config['design']);output.mkdir(parents=True,exist_ok=False);write_tables(tables,output,design=config['design'])
     reader_results=[]
     if 'reader/packet' in tables:
         from .astra_reader import write_reader
-        for relative in write_reader(output,tables,source_root=directory):
+        for relative in write_reader(output,tables,source_root=directory,review_execution=subject_pin):
             same=digest(directory/relative)==digest(output/relative)
             if not same:raise ValueError('Reader replay differs: '+relative)
             reader_results.append({'file':relative,'byte_equal':same})

@@ -118,6 +118,13 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     if whole_only:
         from .astra_reader_full import attach_full
         attach_full(tables)
+    from .astra_literature_review import EXECUTION_PIN, BINDING, restore_execution
+    inherited_execution=None
+    if (source/EXECUTION_PIN).is_file():
+        old_pin=json.loads((source/EXECUTION_PIN).read_text())
+        if review_execution is not None and old_pin['sha256']!=review_execution['sha256']:
+            raise ValueError('Replace an existing subject execution through an explicit new request')
+        inherited_execution=restore_execution(tables,source,consumer_run_id=run_id)
     validate_reader(tables)
     baseline=json.loads((source/'reproducibility/data_dictionary.json').read_text())
     dictionary=deepcopy(baseline)
@@ -128,7 +135,7 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
         key=name+'.csv'
         update[key].update(unique_key=baseline[key]['unique_key'],row_grain=baseline[key]['row_grain'])
     dictionary.update(update);json_write(directory/'reproducibility/data_dictionary.json',dictionary)
-    artifacts=write_reader(directory,tables,access_only=access_only,whole_only=whole_only,review_plan_only=review_plan_only,review_execution=review_execution)
+    artifacts=write_reader(directory,tables,access_only=access_only,whole_only=whole_only,review_plan_only=review_plan_only,review_execution=review_execution or inherited_execution)
     if not (access_only or whole_only or review_plan_only):
         if 'reader/literature_sources' in tables and json.loads(tables['reader/packet'].iloc[0].packet_json).get('literature'):
             literature_stage.write(directory,tables,pins=False)
@@ -149,7 +156,7 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
         figure_packet(tables,directory,design)
     display_files={'figures/figure_legends.json','figures/substrate_contrast_heatmap.svg',
         'figures/emerging_detection.svg','figures/emerging_detection_columns.csv'} if refresh_figures else set()
-    preserved+= [name for name in manifest['files'] if name.startswith(('figures/','references/')) and name not in display_files]
+    preserved+= [name for name in manifest['files'] if name.startswith(('figures/','references/')) and name not in display_files|{BINDING}]
     preserved+= ['reproducibility/replay_config.json']
     if access_only or whole_only or review_plan_only:
         preserved += [name for name in manifest['files'] if name.startswith('reader/') and name not in
@@ -197,6 +204,8 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
         code_sha256=codes,origin_analysis_code_sha256=origin.get('origin_analysis_code_sha256',origin['code_sha256']),
         stage_reuse={'scientific_tables':{'status':'reused_from_validated_package','run_id':origin['run_id']},
                     'literature':{'status':'frozen_results_reused','run_id':origin['run_id']}})
+    binding=json.loads(tables['reader/packet'].iloc[0].packet_json).get('literature_subject_execution',{}).get('binding')
+    if binding:provenance['literature_subject_review']=binding
     provenance['reader_revision_sha256']=object_hash(revision)
     if review_execution is not None:
         provenance['stage_reuse']['typed_literature']={'status':scope['status'],'requested_scope_status':scope['requested_scope_status'],
@@ -206,6 +215,7 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     json_write(directory/'reproducibility/parent_reader_provenance.json',origin)
     plan=json.loads((directory/'study/analysis_plan.json').read_text())
     plan['reader_revision']={k:v for k,v in revision.items() if k!='preserved_table_hashes'}
+    if binding:plan['literature_subject_review']=binding
     plan['code_dependencies']['evidence'].update(codes)
     json_write(directory/'study/analysis_plan.json',plan)
     json_write(directory/'reproducibility/temporal_reader_stage.json',{
@@ -216,6 +226,9 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     from .astra_package import start_here
     snapshot=json.loads((source/'study/user_input_snapshot.json').read_text())
     readiness=json.loads((source/'evidence/readiness.json').read_text())
+    if binding:
+        readiness['literature_subject_review']=binding
+        json_write(directory/'evidence/readiness.json',readiness)
     packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
     if packet.get('literature') and not (access_only or whole_only or review_plan_only):
         readiness['literature']=packet['literature']['summary']
@@ -233,13 +246,16 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
         (directory/'START_HERE_ASTRA.md').write_text('[Actual typed literature retrieval/comparison and partial coverage](reader/LITERATURE_SUBJECT_REVIEW.md). '
             'M3 plan availability is separate from actual execution. Legacy literature and scientific results are unchanged.\n\n'+
             (source/'START_HERE_ASTRA.md').read_text(),encoding='utf-8')
+    elif inherited_execution is not None:
+        with (directory/'START_HERE_ASTRA.md').open('a',encoding='utf-8') as handle:
+            handle.write('\n[Frozen whole-evidence subject execution](reader/LITERATURE_SUBJECT_REVIEW.md) is retained; no new search or model call.\n')
     (directory/'evidence_report.html').write_text((source/'evidence_report.html').read_text()+
         '\n<p><a href="reader/TEMPORAL_EVIDENCE.md">Saved temporal observations and sensitivity evidence</a></p>\n',encoding='utf-8')
     checkpoint()
     if captured!={name:digest(Path(__file__).with_name(name)) for name in refreshed_code}:raise ValueError('Reader source changed during revision')
     archive,files=seal_archive(directory,root,run_id,engine.VERSION,checkpoint)
     result=deepcopy(json.loads((source/'platform_run.json').read_text())) if (source/'platform_run.json').is_file() else {}
-    result.update(run_id=run_id,provenance=provenance,analysis_plan=plan)
+    result.update(run_id=run_id,provenance=provenance,analysis_plan=plan,analysis_readiness=readiness)
     for value in result.get('artifacts',{}).values():
         path=value['path'].replace(origin['run_id'],run_id);value.update(path=path,sha256=digest(root/path))
     if not result.get('artifacts'):result['artifacts']={'astra':{'path':str(archive.relative_to(root)),'sha256':digest(archive)}}
@@ -285,6 +301,11 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
         config['literature_selection_revision']=selection_revision
     elif refresh_reason is not None:
         raise ValueError('Selection refresh reason requires an explicit literature pin')
+    # A legacy selection revision must not silently relabel an existing whole-
+    # subject execution as if it searched the new corpus.
+    from .astra_literature_review import BINDING
+    if (source/BINDING).is_file() and object_hash(config['literature'])!=json.loads((source/BINDING).read_text())['consumer_literature_selection_sha256']:
+        raise ValueError('Literature selection change requires an explicit subject review request')
     tables=read_tables(source)
     if 'reader/packet' not in tables:raise ValueError('Completed reader adapter/package required')
     origin=json.loads((source/'provenance.json').read_text())
@@ -314,6 +335,10 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
     with stage('assemble_evidence_package',metrics,checkpoint,lambda _:None):
         from .astra_evidence_catalog import attach_access
         attach_access(tables)
+        from .astra_literature_review import EXECUTION_PIN, restore_execution, frozen_selection_match
+        if (source/EXECUTION_PIN).is_file():
+            frozen_selection_match(json.loads((source/EXECUTION_PIN).read_text())['literature_selection'],config['literature'])
+            restore_execution(tables,source,consumer_run_id=run_id)
         changed={name:tables[name] for name in ['reader/packet',*literature_stage.TABLE_KEYS]}
         if selection_revision:
             from .astra_inputs import transfer_contract
@@ -358,10 +383,16 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
         if selection_revision:provenance['literature_selection_revision']={k:v for k,v in selection_revision.items() if k!='previous_snapshot'}
         provenance['stage_fingerprints']['literature']=pin['request_sha256']
         provenance['stage_reuse']={'scientific_tables':{'status':'reused_from_validated_package','run_id':origin['run_id']},'literature':pin['cache']}
+        binding=json.loads(tables['reader/packet'].iloc[0].packet_json).get('literature_subject_execution',{}).get('binding')
+        if binding:
+            provenance['literature_subject_review']=binding
+            readiness['literature_subject_review']=binding
+            json_write(directory/'evidence/readiness.json',readiness)
         provenance['provenance_id']=object_hash({k:v for k,v in provenance.items() if k!='provenance_id'})
         json_write(directory/'provenance.json',provenance)
         plan=json.loads((directory/'study/analysis_plan.json').read_text())
         plan['fingerprints']['literature']=pin['request_sha256'];plan['reader_revision']={'origin_analysis_run_id':provenance['origin_analysis_run_id'],'scientific_recalculation':False}
+        if binding:plan['literature_subject_review']=binding
         json_write(directory/'study/analysis_plan.json',plan)
         for name in code_files:shutil.copyfile(Path(__file__).with_name(name),directory/'reproducibility/code/ptm_shared'/name)
         # Copying is checked bytewise, including all NA/text and scientific precision.
