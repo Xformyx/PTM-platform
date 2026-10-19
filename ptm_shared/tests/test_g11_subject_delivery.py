@@ -193,3 +193,43 @@ def test_request_only_changes_literature_dependency(config):
     before=resolve_plan(context)
     after=resolve_plan({**context,review.REQUEST_FIELD:{'mode':'execute','requested_subject_ids':['review_subject_'+'a'*20]}})
     assert before['fingerprints']==after['fingerprints']
+
+
+def test_compose_completed_frozen_scopes_preserves_original_contracts(frozen):
+    root, tables, catalog, _, _, source, _ = frozen
+    plan = review.build_plan(catalog)
+    snapshot = {}
+    subjects = plan.loc[plan.subject_type.isin(['observation', 'method_result'])].groupby('subject_type').head(1)
+    class EmptyModel:
+        provider = 'fixture'
+        model = 'empty-comparison-fixture'
+        def generate(self, *args, **kwargs): return '{"comparisons": []}'
+    with patch('ptm_shared.finding_literature.time.sleep'):
+        pins = [review.execute_review(catalog, plan, [row.review_subject_id], tables, snapshot, selection(),
+                    reason='independent completed fixture scope', max_subjects=1,
+                    retriever=Retriever(), llm=EmptyModel()) for row in subjects.itertuples()]
+    assert all(not p['deferred_subject_ids'] for p in pins)
+    with patch('ptm_shared.finding_literature.retrieve_finding_literature', side_effect=AssertionError('no runtime')):
+        combined = review.combine_review_executions([(p, source) for p in pins], catalog, tables,
+                    snapshot, selection(), reason='explicit frozen delivery')
+        review.replay_review(combined, catalog)
+    assert combined['component_executions'] == pins
+    assert combined['current_cost'] == {'queries': 0, 'model_calls': 0}
+    assert set(combined['requested_subject_ids']) == set(subjects.review_subject_id)
+    for p in pins:
+        for sid, record in p['retrieval']['records'].items():
+            assert combined['retrieval']['records'][sid] == record
+            assert combined['cache'][sid]['status'] == 'frozen_reused'
+    with pytest.raises(ValueError, match='Overlapping'):
+        review.combine_review_executions([(pins[0], source)]*2, catalog, tables, snapshot, selection(), reason='duplicate')
+    corrupt = json.loads(json.dumps(combined))
+    sid = corrupt['requested_subject_ids'][0]
+    corrupt['retrieval']['records'][sid]['request_reason'] = 'altered after execution'
+    corrupt['sha256'] = object_hash({k:v for k,v in corrupt.items() if k!='sha256'})
+    with pytest.raises(ValueError, match='component result'):
+        review.replay_review(corrupt, catalog)
+    corrupt = json.loads(json.dumps(combined))
+    corrupt['execution_contract']['budget']['max_model_calls'] += 1
+    corrupt['sha256'] = object_hash({k:v for k,v in corrupt.items() if k!='sha256'})
+    with pytest.raises(ValueError, match='component contract'):
+        review.replay_review(corrupt, catalog)

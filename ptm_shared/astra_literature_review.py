@@ -498,10 +498,83 @@ def execute_review(catalog, plan, subject_ids, tables, snapshot, literature, *, 
     return pin
 
 
+def _combined_execution_contract(pins):
+    contract = deepcopy(pins[0]['execution_contract'])
+    contract['composition'] = 'disjoint_frozen_executions.v1'
+    contract['component_contracts'] = [
+        {'pin_sha256': p['sha256'], 'contract_sha256': object_hash(p['execution_contract'])} for p in pins]
+    contract['budget'] = {
+        k: (max if k == 'max_prompt_bytes' else sum)(p['execution_contract']['budget'][k] for p in pins)
+        for k in ('max_queries', 'max_model_calls', 'max_prompt_bytes')}
+    return contract
+
+
+def combine_review_executions(executions, catalog, tables, snapshot, literature, *, reason):
+    """Deliver disjoint, completed frozen scopes without replaying their runtimes.
+
+    Each input is (pin, source_archive). Keep the constituent pins (including
+    their original model/code/budget) so a historical result is never relabelled
+    as a cache hit or as a comparison against another source bundle.
+    """
+    if not executions or not str(reason).strip():
+        raise ValueError('Explicit frozen executions and reason required')
+    pins = []
+    for pin, source in executions:
+        request = {'requested_subject_ids': pin['requested_subject_ids'],
+                   'budget': pin['execution_contract']['budget'], 'max_subjects': pin['max_subjects']}
+        validate_frozen_request(pin, request, catalog, tables, snapshot, literature, source)
+        if pin['deferred_subject_ids']:
+            raise ValueError('Cannot compose an incomplete requested scope')
+        if pin.get('component_executions'):
+            raise ValueError('Compose original executions, not nested compositions')
+        pins.append(deepcopy(pin))
+    if len({object_hash(p['literature_selection']) for p in pins}) != 1:
+        raise ValueError('Frozen executions have different literature selections')
+    ids = [sid for p in pins for sid in p['requested_subject_ids']]
+    if len(ids) != len(set(ids)):
+        raise ValueError('Overlapping frozen review scopes')
+    result = deepcopy(pins[0])
+    result.update(requested_subject_ids=ids, request_reason=str(reason), max_subjects=len(ids),
+                  component_executions=pins, deferred_subject_ids=[],
+                  current_cost={'queries': 0, 'model_calls': 0})
+    for field in ('subject_evidence', 'request_hashes', 'source_value_hashes'):
+        result[field] = {k: v for p in pins for k, v in p[field].items()}
+    result['retrieval'] = {
+        'records': {k: v for p in pins for k, v in p['retrieval']['records'].items()},
+        'references': [r for p in pins for r in p['retrieval']['references']]}
+    result['cache'] = {sid: {'status': 'frozen_reused', 'source_pin_sha256': p['sha256'],
+                            'reason': 'validated historical execution; not current retrieval cache'}
+                       for p in pins for sid in p['requested_subject_ids']}
+    result['execution_contract'] = _combined_execution_contract(pins)
+    result['sha256'] = object_hash({k: v for k, v in result.items() if k != 'sha256'})
+    replay_review(result, catalog)
+    return result
+
+
 def replay_review(pin, catalog):
     """Validate frozen typed execution, IDs and literal anchors without any runtime."""
     if pin.get('schema_version')!='literature_subject_execution.v1' or object_hash({k:v for k,v in pin.items() if k!='sha256'})!=pin.get('sha256'):
         raise ValueError('Review execution pin mismatch')
+    components = pin.get('component_executions', [])
+    if components:
+        for component in components:
+            if component.get('component_executions') or component['deferred_subject_ids']:
+                raise ValueError('Invalid frozen execution component')
+            replay_review(component, catalog)
+        ids = [sid for p in components for sid in p['requested_subject_ids']]
+        if len(ids) != len(set(ids)) or ids != pin['requested_subject_ids']:
+            raise ValueError('Frozen component subject mismatch')
+        if (pin['execution_contract'] != _combined_execution_contract(components) or
+            pin['max_subjects'] != len(ids) or pin['current_cost'] != {'queries': 0, 'model_calls': 0} or
+            any(p['literature_selection'] != pin['literature_selection'] for p in components)):
+            raise ValueError('Frozen component contract mismatch')
+        for field in ('subject_evidence', 'request_hashes', 'source_value_hashes'):
+            if pin[field] != {k: v for p in components for k, v in p[field].items()}:
+                raise ValueError('Frozen component source mismatch')
+        expected = {'records': {k:v for p in components for k,v in p['retrieval']['records'].items()},
+                    'references': [r for p in components for r in p['retrieval']['references']]}
+        if object_hash(expected) != object_hash(pin['retrieval']):
+            raise ValueError('Frozen component result mismatch')
     refs = pin['subject_evidence']
     if set(refs)!=set(pin['requested_subject_ids']) or set(refs)!=set(pin['retrieval']['records']): raise ValueError('Review subject FK mismatch')
     resolved = catalog.resolve([r['evidence_id'] for r in refs.values()])
