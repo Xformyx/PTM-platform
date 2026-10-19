@@ -130,7 +130,7 @@ def _compatible_contract(previous, current, archived_code):
             _execution_code(archived_code)==_execution_code(Path(__file__).read_text()))
 
 
-def collect(tables, snapshot, literature, *, settings=None, cache_root=None, retriever=None, llm=None, frozen_pin=None, frozen_code=None):
+def collect(tables, snapshot, literature, *, settings=None, cache_root=None, retriever=None, llm=None, frozen_pin=None, frozen_code=None, run_id=None):
     """Reuse the report function and checkpoint cache, then seal exported evidence.
 
     Only a complete, versioned result is cached. Failed/partial/model-unavailable
@@ -169,8 +169,20 @@ def collect(tables, snapshot, literature, *, settings=None, cache_root=None, ret
                'code':{n:hashlib.sha256(Path(__file__).with_name(n).read_bytes()).hexdigest()
                        for n in ('astra_literature.py','finding_literature.py','literature_cards.py')}}
     fingerprint = object_hash(request)
+    from .astra_evidence_catalog import evidence_id_for
+    evidence_by_subject = {}
+    for card in cards:
+        refs=[{'source_table':'reader/cards.csv','source_key':{'card_id':card['card_id']}}]
+        refs += [{'source_table':'reader_adapter/form_contrasts.csv',
+                  'source_key':{'adapter_row_id':binding['adapter_row_id']}}
+                 for binding in card.get('source_bindings',[])]
+        for ref in refs:ref['evidence_id']=evidence_id_for(ref['source_table'],ref['source_key'])
+        evidence_by_subject[card['finding_id']]=refs
     def run():
-        result = retrieve_finding_literature(cards,retriever,study,llm=llm,policy=policy)
+        result = retrieve_finding_literature(cards,retriever,study,llm=llm,policy=policy,
+            trace_directory=cache_root, trace_context={'run_id':run_id,
+                'stage_id':'finding_literature', 'request_sha256':fingerprint,
+                'evidence_by_subject':evidence_by_subject})
         for c in cards:
             r = result['records'][c['finding_id']]
             r['finding_id'] = c['finding_id']
@@ -235,10 +247,13 @@ def _export_result(result, literature):
                  'permitted' if d.get('content_status')=='full_text_included' else 'unknown') for d in literature.get('documents', [])}
     permitted_collections={c['chromadb_name'] for c in literature.get('collections', []) if c.get('evidence_export_permission')=='permitted'}
     restricted=False
+    permitted_sources=set()
     for ref in result.get('references', []):
         meta=ref.get('metadata') or {}
         permitted=ref.get('collection') in permitted_collections or permissions.get(str(_document_id(meta)))=='permitted'
         ref['source_sha256']=hashlib.sha256(str(ref.get('document','')).encode()).hexdigest()
+        if permitted:
+            permitted_sources.add((ref.get('collection'),ref.get('collection_version'),ref.get('source_id'),ref['source_sha256']))
         ref['read_scope']=meta.get('content_scope','retrieved_chunk_scope_unknown')
         ref['evidence_location']={k:meta[k] for k in ('page','section','chunk_index','source') if k in meta}
         ref['evidence_location']['chunk_id']=ref.get('source_id')
@@ -251,6 +266,42 @@ def _export_result(result, literature):
         for r in result['records'].values():
             r.pop('resolved_prompt',None);r.pop('comparison_generation',None)
             r['comparison_export_status']='restricted_source_text_not_exported'
+    # New diagnostic fields must not become an alternate route for source text.
+    # Keep only explicitly safe scalar metadata, hashes and gate results. Even
+    # permitted excerpts do not authorize exporting provider envelopes/prompts.
+    for record in result.get('records', {}).values():
+        diagnostic = record.get('comparison_diagnostics')
+        if diagnostic is None: continue  # Frozen legacy pins remain unchanged.
+        diagnostic_restricted = restricted or not diagnostic.get('source_map') or any(
+            tuple(row['source_key'].get(k) for k in ('collection','collection_version','source_id','content_sha256')) not in permitted_sources
+            for row in diagnostic.get('source_map',[]))
+        safe = {k:diagnostic[k] for k in (
+            'schema_version','run_id','stage_id','stage_request_sha256','attempt_id','attempt_ordinal',
+            'finding_id','review_subject_id','prompt_version','model','provider','parse_status',
+            'diagnostic_code_sha256','prompt_validation_sources_match',
+            'comparisons_status','source_map','source_map_sha256','validator_source_map_sha256',
+            'prompt_sha256','prompt_bytes','request_sha256','failure_type','raw_output_sha256',
+            'finish_reasons','truncation_status','transport_status','transport_diagnoses','provider_requests','provider_responses','internal_trace') if k in diagnostic}
+        safe['proposals'] = [{k:p[k] for k in (
+            'proposal_ordinal','proposal_sha256','source_index','gates','accepted_by_anchor_gates',
+            'first_failure_reason','exclusion_class','diagnoses','other_source_indices',
+            'semantic_status','production_accepted','gate_parity') if k in p}
+            for p in diagnostic.get('proposals', [])]
+        for p in safe['proposals']:
+            if not isinstance(p.get('source_index'),int):p['source_index']=None
+        if not diagnostic_restricted:
+            for safe_proposal, proposal in zip(safe['proposals'],diagnostic.get('proposals', [])):
+                safe_proposal.update(candidate=deepcopy(proposal['candidate']), source_offset=proposal['source_offset'])
+        safe['export_status']='hashes_and_gates_only' if diagnostic_restricted else 'permitted_candidate_excerpt'
+        # Evidence linkage contains exact existing IDs/keys, not whole row values.
+        safe['evidence_refs']=[{k:r[k] for k in ('evidence_id','source_table','source_key','source_key_json',
+            'adapter_row_id','form_id','contrast_id','card_id') if k in r}
+            for r in diagnostic.get('evidence_refs',[]) if isinstance(r,dict)]
+        record['comparison_diagnostics']=safe
+        if diagnostic_restricted:
+            for excluded in record.get('excluded_comparisons',[]):
+                if 'source_index' in excluded and not isinstance(excluded['source_index'],int):
+                    excluded['source_index']=None
     return result
 
 

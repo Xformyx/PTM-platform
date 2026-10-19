@@ -57,7 +57,13 @@ def test_existing_retrieval_comparison_and_identity_scope(reader,tmp_path,relati
     tables,design,snapshot=reader;before={k:v.copy(deep=True) for k,v in tables.items()}
     rag=Retriever();model=Model(relation)
     with patch('ptm_shared.finding_literature.time.sleep'):
-        pin=lit.collect(tables,snapshot,selection(),retriever=rag,llm=model,cache_root=tmp_path)
+        pin=lit.collect(tables,snapshot,selection(),retriever=rag,llm=model,cache_root=tmp_path,run_id='fixture-run')
+    for record in pin['retrieval']['records'].values():
+        diagnostic=record['comparison_diagnostics']
+        assert diagnostic['run_id']=='fixture-run' and diagnostic['stage_request_sha256']==pin['request_sha256']
+        assert diagnostic['evidence_refs'][0]['source_key']['card_id'] in set(tables['reader/cards'].card_id)
+        assert diagnostic['evidence_refs'][0]['evidence_id']==diagnostic['evidence_refs'][0]['source_key']['card_id']
+        assert diagnostic['internal_trace']['status']=='stored'
     summary=lit.apply(tables,pin,snapshot,selection())
     assert len(tables['reader/literature_search'])==6 # same gene, multiple references/taxa remain distinct
     assert {p for p,q in rag.calls}=={'literature_background','gene_function_context','direct_site_evidence','counterevidence'}

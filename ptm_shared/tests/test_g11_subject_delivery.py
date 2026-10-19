@@ -143,6 +143,7 @@ def test_explicit_execution_is_called_only_at_requested_stage(frozen):
     requested={k:v for k,v in request.items() if k!='pin_ref'};requested['mode']='execute'
     with patch.object(review,'execute_review',return_value=pin) as execute:
         result,binding=review.run_requested_review(root,tables,{review.REQUEST_FIELD:requested},{},selection(),output_root=output,run_id='explicit-consumer')
+        assert execute.call_args.kwargs['run_id']=='explicit-consumer'
     assert execute.call_count==1 and execute.call_args.kwargs['settings']['budget']==requested['budget']
     assert result==pin and binding['source_run_id']=='explicit-consumer' and binding['effective_mode']=='explicit_execution'
 

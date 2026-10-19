@@ -5,10 +5,12 @@ import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Iterable, Mapping
+from uuid import uuid4
 
 
 VERSION = "finding_retrieval.v7"
 PROMPT_VERSION = "finding_comparison.v6.2"
+DIAGNOSTICS_VERSION = "finding_comparison_diagnostics.v1"
 FINDING_RETRIEVAL_BACKOFF_SECONDS = 0.25
 """Bounded pause between retrieval layers.
 
@@ -99,7 +101,7 @@ def _prompt_observation(observation):
     return projected, definitions
 
 
-def quote_binding_failure(candidate, hit, identity):
+def quote_binding_failure(candidate, hit, identity, *, typed=False, allow_site_comparison=None):
     """기존 승인 조건을 통과하지 못한 제안의 첫 실패 지점을 이름만 붙인다.
 
     구현 대상: docs/astra_evidence_integration/MIGRATION_AND_OPERATIONS_KO.md «문헌 검토 단계»
@@ -119,7 +121,7 @@ def quote_binding_failure(candidate, hit, identity):
         return "citation_identifier_missing", "citation_mismatch"
     if scope not in {"study", "pathway", "gene", "site"}:
         return "scope_not_declared", "scope"
-    if scope not in {"study", "pathway"} and gene.lower() not in quote.lower():
+    if scope not in {"study", "pathway"} and not (gene and gene.lower() in quote.lower()):
         return "scope_identifier_absent_from_quote", "scope"
     if scope == "site" and not (site and site.lower() in quote.lower()):
         return "scope_site_absent_from_quote", "scope"
@@ -129,12 +131,116 @@ def quote_binding_failure(candidate, hit, identity):
         return "direct_site_scope_mismatch", "scope"
     if not candidate.get("external_finding"):
         return "claim_text_missing", "scope"
+    if typed and scope == 'site' and allow_site_comparison is not True:
+        return "typed_site_comparison_not_allowed", "scope"
     if any(candidate.get(k) and candidate[k] not in quote for k in CONTEXT_FIELDS):
         return "condition_context_not_in_quote", "condition_comparison"
     return "unbound_quote_context_or_scope", "unclassified"
 
 
-def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=None):
+def _trace_hash(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                    separators=(',', ':'), default=str).encode()).hexdigest()
+
+
+def _source_map(hits):
+    """Freeze request-local positions before prompt serialization, never re-sort."""
+    mapped = []
+    for index, hit in enumerate(hits):
+        document = str(hit.get('document') or '')
+        key = {k: hit.get(k) for k in ('collection', 'collection_version', 'source_id')}
+        key['content_sha256'] = hashlib.sha256(document.encode()).hexdigest()
+        meta = hit.get('metadata') or {}
+        mapped.append({'source_index': index, 'source_key': key, 'source_key_sha256': _trace_hash(key),
+            'text_length': len(document), 'text_bytes': len(document.encode()),
+            'location': {k: meta[k] for k in ('document_id', 'doc_id', 'page', 'section', 'chunk_index') if k in meta}})
+    return mapped
+
+
+def comparison_diagnostics(candidate, hits, identity, *, ordinal, typed=False, allow_site_comparison=None):
+    """Explain every existing gate; the production approval expression stays below.
+
+    Other-source matches are diagnostic only. No quote normalization, reassignment
+    or semantic approval. Missing provider/parse records remain unknown.
+    """
+    schema = isinstance(candidate, dict) and all(isinstance(candidate.get(k), str) for k in PROPERTIES)
+    c = candidate if isinstance(candidate, dict) else {}
+    index = c.get('source_index')
+    index_valid = isinstance(index, int) and 0 <= index < len(hits)
+    hit = hits[index] if index_valid else {}
+    quote = str(c.get('quote') or ''); document = str(hit.get('document') or '')
+    scope = c.get('reference_scope') if isinstance(c.get('reference_scope'),str) else None
+    relationship = c.get('relationship') if isinstance(c.get('relationship'),str) else None
+    gene = str(identity.get('gene') or ''); site = str(identity.get('candidate_residue_annotation') or '')
+    gates = {'schema': schema, 'source_index': index_valid, 'nonempty_quote': bool(quote),
+        'literal_quote': bool(quote) and quote in document,
+        'scope': scope in {'study','pathway','gene','site'},
+        'scope_identifier': scope in {'study','pathway'} or bool(gene) and gene.lower() in quote.lower(),
+        'site_identifier': scope != 'site' or bool(site) and site.lower() in quote.lower(),
+        'relationship': isinstance(relationship, str) and relationship in ALLOWED_RELATIONSHIPS,
+        'claim': bool(c.get('external_finding')),
+        'direct_site_scope': relationship != 'direct_site_evidence' or scope == 'site',
+        'typed_site': not typed or scope != 'site' or allow_site_comparison is True,
+        'citation_identifier': bool(hit.get('doi') or hit.get('pmid')),
+        'context': all(not c.get(k) or isinstance(c[k], str) and c[k] in quote for k in CONTEXT_FIELDS)}
+    accepted = all(gates.values())
+    reason, group = ((None, None) if accepted else quote_binding_failure(c, hit, identity,
+        typed=typed, allow_site_comparison=allow_site_comparison) if schema else ('invalid_comparison_schema','schema'))
+    labels = []
+    if not schema: labels.append('schema_or_parse_failure')
+    if not index_valid: labels.append('invalid_source_index')
+    if not quote: labels.append('empty_quote')
+    if quote and not gates['literal_quote']: labels.append('quote_absent_from_prompt_source')
+    other = [i for i,h in enumerate(hits) if i != index and quote and quote in str(h.get('document') or '')]
+    if other: labels.append('quote_present_in_other_prompt_source')
+    if not all(gates[k] for k in ('scope','scope_identifier','site_identifier','typed_site')):
+        labels.append('identity_or_site_scope_gate_failed')
+    if not gates['context']: labels.append('context_field_not_literal_in_quote')
+    return {'proposal_ordinal': ordinal, 'proposal_sha256': _trace_hash(candidate),
+        'source_index': index, 'candidate': deepcopy(candidate), 'gates': gates,
+        'accepted_by_anchor_gates': accepted, 'first_failure_reason': reason, 'exclusion_class': group,
+        'diagnoses': labels, 'other_source_indices': other,
+        'source_offset': document.index(quote) if gates['literal_quote'] else None,
+        'semantic_status': 'review_required' if accepted else 'not_verified'}
+
+
+def _finish_diagnostics(record, trace_directory):
+    diag = record.get('comparison_diagnostics')
+    if diag is None: return
+    from common.generation_trace import persist_generation_trace
+    generation = record.get('comparison_generation') or {}
+    raw = generation.get('provider_raw_text')
+    transport = generation.get('transport') or []
+    reasons = [e['finish_reason'] for e in transport if e.get('finish_reason')]
+    requests=[]
+    for event in transport:
+        if 'request_payload' not in event: continue
+        payload=event['request_payload']
+        prompt=payload.get('prompt')
+        if prompt is None:
+            user=[m.get('content') for m in payload.get('messages',[]) if m.get('role')=='user']
+            prompt=user[0] if len(user)==1 and isinstance(user[0],str) else None
+        requests.append({'transport_attempt':event.get('transport_attempt'),
+            'payload_sha256':_trace_hash(payload), 'client_truncation':event.get('client_truncation'),
+            'prompt_sha256':hashlib.sha256(prompt.encode()).hexdigest() if isinstance(prompt,str) else None,
+            'matches_resolved_prompt':prompt==record.get('resolved_prompt') if isinstance(prompt,str) else None})
+    diag.update(raw_output_sha256=hashlib.sha256(raw.encode()).hexdigest() if isinstance(raw,str) else None,
+        finish_reasons=reasons, truncation_status=('observed' if any(r in {'length','max_tokens','MAX_TOKENS'} for r in reasons)
+            else 'not_reported_by_provider' if reasons else 'unknown'),
+        transport_status='recorded' if transport else 'not_recorded',
+        provider_responses=[{'transport_attempt':e.get('transport_attempt'),
+            'response_sha256':_trace_hash(e['response'])} for e in transport if 'response' in e],
+        provider_requests=requests)
+    diag['transport_diagnoses']=(['prompt_validation_source_mismatch'] if any(
+        r['matches_resolved_prompt'] is False for r in requests) else [])
+    diag['internal_trace'] = persist_generation_trace(trace_directory, {
+        'schema_version': DIAGNOSTICS_VERSION, 'diagnostics': diag,
+        'resolved_prompt': record.get('resolved_prompt'), 'generation': generation,
+        'comparison_execution': record.get('comparison_execution')})
+
+
+def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=None,
+                               trace_context=None, trace_directory=None):
     """Search each frozen feature, retaining failures and incomplete comparisons.
 
     The application verifies literal source anchors and reference scope. A
@@ -237,6 +343,28 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
         if model_calls >= policy["max_model_calls"]:
             record["review_reason"] = "model_budget_exhausted"
             continue
+        # Prompt and validation use this same ordered snapshot. The references
+        # list retains these objects so accepted annotations keep existing joins.
+        from pathlib import Path
+        from common import generation_trace, model_json
+        trace_code = {Path(p).name:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in
+            (__file__,generation_trace.__file__,model_json.__file__,Path(generation_trace.__file__).with_name('llm_client.py'))}
+        source_map = _source_map(hits)
+        context = trace_context or {}
+        record['comparison_diagnostics'] = diagnostics = {
+            'schema_version': DIAGNOSTICS_VERSION, 'run_id': context.get('run_id'),
+            'stage_id': context.get('stage_id', 'finding_literature'),
+            'stage_request_sha256': context.get('request_sha256'),
+            'diagnostic_code_sha256': trace_code,
+            'attempt_id': uuid4().hex, 'attempt_ordinal': 1,
+            'finding_id': card.get('finding_id'), 'review_subject_id': card.get('review_subject_id'),
+            'evidence_refs': deepcopy(context.get('evidence_refs') or context.get('evidence_by_subject',{}).get(fid) or card.get('source_bindings') or
+                                      (card.get('literature_input') or {}).get('source_refs') or []),
+            'source_map': source_map, 'prompt_sources': deepcopy(hits),
+            'prompt_version': PROMPT_VERSION, 'model': getattr(llm,'model',None),
+            'provider': getattr(llm,'provider',None), 'parse_status': 'not_attempted',
+            'comparisons_status': 'not_attempted', 'proposals': [],
+            'validator_source_map_sha256': _trace_hash(source_map)}
         prompt_study = dict(study)
         # A canonical design is often supplied twice. Keep one complete copy;
         # never shorten questions, trajectories, masks, or source excerpts.
@@ -257,8 +385,14 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
         record["prompt_version"] = PROMPT_VERSION
         record["resolved_prompt"] = prompt
         record["resolved_prompt_sha256"] = hashlib.sha256(prompt.encode()).hexdigest()
+        diagnostics.update(prompt_sha256=record['resolved_prompt_sha256'], prompt_bytes=len(prompt.encode()),
+            source_map_sha256=_trace_hash(source_map),
+            request_sha256=_trace_hash({'stage_request':context.get('request_sha256'), 'subject':fid,
+                'prompt':record['resolved_prompt_sha256'], 'source_map':source_map,
+                'model':diagnostics['model'], 'provider':diagnostics['provider'], 'schema':SCHEMA}))
         if len(prompt.encode()) > policy["max_prompt_bytes"]:
             record["review_reason"] = "source_bundle_exceeds_review_budget"
+            diagnostics['comparisons_status']='prompt_budget_deferred'
             continue
         model_calls += 1
         from common.generation_trace import capture_generation
@@ -274,14 +408,21 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
             with capture_generation() as transport:
                 generation["transport"] = transport
                 generation["provider_raw_text"] = llm.generate(prompt, max_tokens=4096, response_format={"type": "json_schema", "json_schema": {"name": "finding_comparison", "strict": True, "schema": SCHEMA}})
+            diagnostics['parse_status']='attempted'
             draft = parse_model_json(generation["provider_raw_text"])
+            diagnostics['parsed_output']=deepcopy(draft)
+            diagnostics['parse_status']='parsed'
             if not isinstance(draft, dict):
                 raise ValueError("comparison_object_required")
             candidates = draft["comparisons"]
             if not isinstance(candidates, list):
                 raise ValueError("comparison_array_required")
+            diagnostics['comparisons_status']='empty' if not candidates else 'proposals_returned'
             record['comparison_execution']['status']='completed'
         except Exception as error:
+            diagnostics['failure_type']=type(error).__name__
+            diagnostics['comparisons_status']='schema_or_parse_failure' if diagnostics['parse_status']!='not_attempted' else 'generation_failed'
+            if diagnostics['parse_status']=='attempted':diagnostics['parse_status']='failed'
             record.update(comparison_failure_type=type(error).__name__)
             generation["exception_type"] = type(error).__name__
             record['comparison_execution'].update(status='failed',failure_type=type(error).__name__)
@@ -292,8 +433,14 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
                 output_sha256=hashlib.sha256(str(generation.get('provider_raw_text') or '').encode()).hexdigest(),
                 transport=[{k:v for k,v in e.items() if k in {'resolved_model','resolved_provider','finish_reason','usage','exception_type','request_settings'}}
                            for e in generation.get('transport',[])])
-        for candidate in candidates:
+        diagnostics['validator_source_map_sha256']=_trace_hash(_source_map(hits))
+        diagnostics['prompt_validation_sources_match']=diagnostics['source_map_sha256']==diagnostics['validator_source_map_sha256']
+        for ordinal, candidate in enumerate(candidates):
+            diagnostic = comparison_diagnostics(candidate, hits, identity, ordinal=ordinal,
+                typed=typed, allow_site_comparison=card.get('allow_site_comparison'))
+            diagnostics['proposals'].append(diagnostic)
             if not isinstance(candidate, dict) or not all(isinstance(candidate.get(k), str) for k in PROPERTIES):
+                diagnostic.update(production_accepted=False,gate_parity=True)
                 record["excluded_comparisons"].append({"reason": "invalid_comparison_schema", "exclusion_class": "schema"})
                 continue
             index = candidate.get("source_index")
@@ -313,8 +460,12 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
                      and (not typed or scope != 'site' or card.get('allow_site_comparison') is True)
                      and (hit.get("doi") or hit.get("pmid"))
                      and all(not candidate.get(k) or candidate[k] in quote for k in CONTEXT_FIELDS))
+            # Diagnostic parity is tested independently; it never grants approval.
+            diagnostic['production_accepted']=bool(valid)
+            diagnostic['gate_parity']=bool(valid)==diagnostic['accepted_by_anchor_gates']
             if not valid:
-                reason, exclusion_class = quote_binding_failure(candidate, hit, identity)
+                reason, exclusion_class = quote_binding_failure(candidate, hit, identity,
+                    typed=typed, allow_site_comparison=card.get('allow_site_comparison'))
                 record["excluded_comparisons"].append({
                     "source_index": index, "reason": reason, "exclusion_class": exclusion_class})
                 continue
@@ -344,6 +495,8 @@ def retrieve_finding_literature(cards, retriever, study, *, llm=None, policy=Non
         relations = {c["relationship"] for c in record["comparisons"] if c["relationship"] in {"known_agreement", "disagreement"}}
         record["status"] = ("agreement_and_disagreement" if len(relations) > 1 else next(iter(relations)) if relations else
                             "context_available" if record["comparisons"] else "retrieved_comparison_pending" if record["excluded_comparisons"] else "not_explained_by_retrieved_evidence")
+    for record in records.values():
+        _finish_diagnostics(record, trace_directory)
     return {
         "schema_version": VERSION,
         "records": records,

@@ -665,7 +665,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                         path=root/'enrichment_free_runs'/prior_run/'references/finding_literature_pin.json'
                         if path.is_file():previous_pin=json.loads(path.read_text())
                         previous_code=finding_execution_code(root,previous_pin,prior_run)
-                finding_pin=collect(scientific,snapshot,literature,settings=config,cache_root=root/'.astra_stage_cache',frozen_pin=previous_pin,frozen_code=previous_code)
+                finding_pin=collect(scientific,snapshot,literature,settings=config,cache_root=root/'.astra_stage_cache',frozen_pin=previous_pin,frozen_code=previous_code,run_id=run_id)
             evidence_reuse['finding_literature']=config.get('_literature_reuse',{'status':'explicit_frozen_pin'})
             original_code=finding_execution_code(root,finding_pin)
             if original_code is not None:

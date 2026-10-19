@@ -329,7 +329,7 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
     metrics.plan={'fingerprints':deepcopy(origin['stage_fingerprints']),'operation':'reader_literature_revision'}
     with stage('finding_literature',metrics,checkpoint,lambda _:None):
         pin=literature_stage.collect(tables,config['snapshot'],config['literature'],settings=settings,
-            cache_root=root/'.astra_stage_cache',retriever=retriever,llm=llm)
+            cache_root=root/'.astra_stage_cache',retriever=retriever,llm=llm,run_id=run_id)
         summary=literature_stage.apply(tables,pin,config['snapshot'],config['literature'])
         metrics.plan['fingerprints']['literature']=pin['request_sha256']
     with stage('assemble_evidence_package',metrics,checkpoint,lambda _:None):

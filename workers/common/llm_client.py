@@ -354,6 +354,10 @@ class LLMClient:
             payload["system"] = system_prompt
 
         try:
+            from common.generation_trace import record_generation_event
+            record_generation_event(event_type="request", request_payload=payload,
+                                    resolved_provider="ollama", resolved_model=self.model,
+                                    transport_attempt=1, client_truncation="none")
             r = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=OLLAMA_TIMEOUT)
             if r.status_code != 200:
                 body = r.text[:500]
@@ -362,6 +366,8 @@ class LLMClient:
                     f"Response: {body}"
                 )
                 logger.error(error_msg)
+                record_generation_event(transport_attempt=1, http_status=r.status_code,
+                                        exception_type="HTTPError")
                 return f"[LLM Error: {error_msg}]"
             response = r.json()
             from common.generation_trace import record_generation_event
@@ -514,6 +520,10 @@ class LLMClient:
         # v11.9: Retry loop with exponential backoff for 429/5xx errors
         for attempt in range(1, _RATE_LIMIT_MAX_RETRIES + 1):
             try:
+                from common.generation_trace import record_generation_event
+                record_generation_event(event_type="request", request_payload=payload,
+                                        resolved_provider=self.provider, resolved_model=model,
+                                        transport_attempt=attempt, client_truncation="none")
                 r = requests.post(
                     f"{base_url}/chat/completions",
                     json=payload, headers=headers, timeout=timeout,

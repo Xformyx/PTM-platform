@@ -173,7 +173,7 @@ def run_requested_review(directory, tables, context, snapshot, literature, *, ou
     else:
         pin=execute_review(catalog,build_plan(catalog),request['requested_subject_ids'],tables,snapshot,literature,
             reason=request['request_reason'],max_subjects=request['max_subjects'],
-            settings={**(settings or {}),'budget':request['budget']},cache_root=Path(output_root)/'.astra_stage_cache')
+            settings={**(settings or {}),'budget':request['budget']},cache_root=Path(output_root)/'.astra_stage_cache', run_id=run_id)
         source_run=run_id;cost=pin['current_cost']
         selection_match={'status':'current_explicit_execution'}
     _,summary=project_review(pin,catalog)
@@ -406,7 +406,7 @@ def _source_value(resolved):
 
 
 def execute_review(catalog, plan, subject_ids, tables, snapshot, literature, *, reason,
-                   max_subjects, settings=None, retriever=None, llm=None, cache_root=None):
+                   max_subjects, settings=None, retriever=None, llm=None, cache_root=None, run_id=None):
     """Explicit execution only; M3 tests inject fixtures. Default writers never call it."""
     from . import astra_literature as legacy
     from .finding_literature import retrieve_finding_literature
@@ -451,7 +451,12 @@ def execute_review(catalog, plan, subject_ids, tables, snapshot, literature, *, 
                    'transport':legacy._transport_hash(retriever)}
         keys[sid] = object_hash(request)
         def compute():
-            result = retrieve_finding_literature([payload],retriever,study,llm=llm,policy=remaining)
+            result = retrieve_finding_literature([payload],retriever,study,llm=llm,policy=remaining,
+                trace_directory=cache_root, trace_context={'run_id':run_id,
+                    'stage_id':'literature_review_subject','request_sha256':keys[sid],
+                    'evidence_refs':[{'evidence_id':index.loc[sid,'evidence_id'],
+                        'source_table':index.loc[sid,'source_table'],
+                        'source_key':json.loads(index.loc[sid,'source_key_json'])}]})
             record = result['records'][sid]
             if (record['status'] in {'not_searched','retrieval_failed','budget_exhausted','retrieved_comparison_pending'} or
                 record.get('partial_retrieval_failure') or any(s.get('status')=='budget_exhausted' for s in record.get('searches',[])) or

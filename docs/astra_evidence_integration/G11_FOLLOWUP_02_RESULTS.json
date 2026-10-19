@@ -1,0 +1,2268 @@
+{
+  "schema_version": "g11_followup_round02_results.v1",
+  "starting_head": "5cb693eaff74698acd4d51986ddae4f1d8c87f15",
+  "branch": "main",
+  "scope": "Round02 historical audit and prospective diagnostics only",
+  "historical_audit": {
+    "schema_version": "g11_historical_exclusion_audit.v1",
+    "source": "codex-inputs/g11-followup-01/baseline",
+    "consumer": "codex-inputs/g11-followup-01/integration-final/order/enrichment_free_runs/g0-b992dc7f962f445f8536c4d8da876292",
+    "pin_sha256": "da2df0842e16a222717fd2416909de5ff1e594d5a3dbddfb297808017d076f39",
+    "request_sha256": "dcab5f7cc58de8ccc61e775e07cfa5527cad28bf043e79bebf4ac9376596003b",
+    "cache": {
+      "reason": "index_version_not_immutable",
+      "status": "not_cached"
+    },
+    "model": {
+      "model": "gemma3:27b",
+      "prompt_version": "finding_comparison.v6.2",
+      "provider": "ollama",
+      "status": "available"
+    },
+    "exclusion_count": 71,
+    "reasons": {
+      "quote_not_in_retrieved_chunk": 68,
+      "scope_identifier_absent_from_quote": 3
+    },
+    "by_finding": {
+      "finding_1011f501dabce788a13c": 7,
+      "finding_14ae32c53211dbe34c1a": 1,
+      "finding_5ca13dd04345bb1bfb67": 5,
+      "finding_696636ad85310f1393ed": 5,
+      "finding_852f4b96ec652776a5b8": 3,
+      "finding_85e82f2c754a7e5f6c15": 6,
+      "finding_99977f2c761f656ee19e": 3,
+      "finding_a0f138f34e259e65da05": 6,
+      "finding_bd2193bf35d16ee950fd": 6,
+      "finding_c3aed5d4ce7c30b2df7b": 6,
+      "finding_d439daac7ed70c17907e": 5,
+      "finding_ddd27caf48112aa8be08": 6,
+      "finding_e68a84b5597284e7585d": 3,
+      "finding_e729d948655bb383bf90": 6,
+      "finding_e9961a39b1192935b7b4": 3
+    },
+    "classifications": {
+      "historical_trace_unavailable": 68,
+      "partially_reconstructable": 3
+    },
+    "exactly_reconstructable": 0,
+    "causal_explanation_verified": 0,
+    "unique_historical_source_chunks": 28,
+    "matched_source_chunks": 1,
+    "recovered_source_locations": {
+      "c7324e4af73ab5b38d4c7615011164a6aef43c5e1d6ab2037f57d3f15f703189": [
+        {
+          "path": "codex-inputs/full-evidence-m4/index_snapshot_private.json",
+          "snapshot_source_id": "de231a8d2c17a4a8c4a9569e48978064_26",
+          "content_sha256": "c7324e4af73ab5b38d4c7615011164a6aef43c5e1d6ab2037f57d3f15f703189"
+        }
+      ]
+    },
+    "matched_prompts": {},
+    "matched_outputs": {},
+    "scanned_files": [
+      {
+        "path": "codex-inputs/full-evidence-m1/baseline/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m1/legacy-reader-replay/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m1/revision/enrichment_free_runs/g0-1cc3b1ebab05499d95f7f8f3cc42bbb0/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m1/revision/enrichment_free_runs/g0-55e9e0492ede450fb2a045ca485acd5f/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m1/revision/enrichment_free_runs/g0-65e752d11bcd4964977f1e8d9f7e04df/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m2/final/revision/enrichment_free_runs/g0-2c894c4dd1ef42578002df629cfe0823/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m2/release/revision/enrichment_free_runs/g0-5ca8d2c077534ebb9be4e23731bac4d4/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m2/validation/revision/enrichment_free_runs/g0-2f77800f47b44c06a066047c7b70ed74/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m2/verified/revision/enrichment_free_runs/g0-24d53aad7f924819bde2389b8316c241/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m3/final/revision/enrichment_free_runs/g0-d09c6d03835a46248e5bdb6fe9e07e8c/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m3/validation/revision/enrichment_free_runs/g0-7b372812555d444687ba7dc6c3aa25ae/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m4/final/revision/enrichment_free_runs/g0-febc02fcaa0b43c0ac9cd973730a7a3b/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m4/index_snapshot_private.json",
+        "sha256": "6a54c3ba546f98651e1dd8cdb00124400e3ff7947f93390cd2be0f11da5ca122",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/full-evidence-m4/validation/revision/enrichment_free_runs/g0-0631971c2ea7484fac29862e660866b8/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/REGENERATION.json",
+        "sha256": "9712e8b87fc20a301d9f9a92d4b7e9f86a841f0b85bf4df9b7bf7416e63f3e14",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/baseline/provenance.json",
+        "sha256": "98b9571aa5a16f294bffb924562d33708735fb511a9c22fdfd33a44366aec327",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/baseline/references/finding_literature_pin.json",
+        "sha256": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/baseline/study/analysis_plan.json",
+        "sha256": "38bb590be192eaeaa2d5f3c29dd83f4630ace728c35926a49e085aafd21a7425",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/frozen-regeneration/enrichment_free_current.json",
+        "sha256": "72b3610d959c45f05f9040aa384dd67e1ff93a7b87265f42da13774abb88fb64",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/frozen-regeneration/enrichment_free_runs/g0-7b1846d72384411eb63f741e872473d2/platform_run.json",
+        "sha256": "72b3610d959c45f05f9040aa384dd67e1ff93a7b87265f42da13774abb88fb64",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/frozen-regeneration/enrichment_free_runs/g0-7b1846d72384411eb63f741e872473d2/provenance.json",
+        "sha256": "8ac7ef3ad2edade6b5cfa28578aa8d5c18da7227d578065ac6e23d7314b7bc5a",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/frozen-regeneration/enrichment_free_runs/g0-7b1846d72384411eb63f741e872473d2/references/finding_literature_pin.json",
+        "sha256": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/frozen-regeneration/enrichment_free_runs/g0-7b1846d72384411eb63f741e872473d2/study/analysis_plan.json",
+        "sha256": "3764ed66b8f189f6a2c879d45ff9dc400d982a0e5c76ea9db83dc1a68a798a5c",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-01/offline-reader/references/finding_literature_pin.json",
+        "sha256": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-01/order/enrichment_free_current.json",
+        "sha256": "d6e010c6e8580b75e0f8ff9dc4a9692b138c7263a3ed593866b1d9479f127897",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-01/order/enrichment_free_runs/g0-d142671b054b4a1da997b2c933a8b674/platform_run.json",
+        "sha256": "d6e010c6e8580b75e0f8ff9dc4a9692b138c7263a3ed593866b1d9479f127897",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-01/order/enrichment_free_runs/g0-d142671b054b4a1da997b2c933a8b674/provenance.json",
+        "sha256": "1937818e27023b54fdcdbe1bf613b5815e9650eefbb5eb8495a1402be7289b1a",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-01/order/enrichment_free_runs/g0-d142671b054b4a1da997b2c933a8b674/references/finding_literature_pin.json",
+        "sha256": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-01/order/enrichment_free_runs/g0-d142671b054b4a1da997b2c933a8b674/stage_checkpoint.json",
+        "sha256": "43aa213105e15517e457eed831b9a3916706c699847c8c48a971d16222f1f10d",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-01/order/enrichment_free_runs/g0-d142671b054b4a1da997b2c933a8b674/study/analysis_plan.json",
+        "sha256": "48b4c3a4910264e16b7267061a1d4e7b068c73833ab6b9bcffba7bf696badda8",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-01/order/enrichment_free_runs/g0-febc02fcaa0b43c0ac9cd973730a7a3b/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-final/offline-reader/references/finding_literature_pin.json",
+        "sha256": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-final/order/enrichment_free_current.json",
+        "sha256": "552cbbaa42da0aa0cb4227c6c581782675fe1fe187e3dd1a7e314fa0e8b3c0f1",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-final/order/enrichment_free_runs/g0-b992dc7f962f445f8536c4d8da876292/platform_run.json",
+        "sha256": "552cbbaa42da0aa0cb4227c6c581782675fe1fe187e3dd1a7e314fa0e8b3c0f1",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-final/order/enrichment_free_runs/g0-b992dc7f962f445f8536c4d8da876292/provenance.json",
+        "sha256": "c7b3d14a1237a6beea23e5ef209b55594ed91369546d6587d4a71a3814a49f24",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-final/order/enrichment_free_runs/g0-b992dc7f962f445f8536c4d8da876292/references/finding_literature_pin.json",
+        "sha256": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-final/order/enrichment_free_runs/g0-b992dc7f962f445f8536c4d8da876292/stage_checkpoint.json",
+        "sha256": "a830615eaa1436e13c844eb680be9b08ba48e2809343aa1950a8c68c05f6f39d",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-final/order/enrichment_free_runs/g0-b992dc7f962f445f8536c4d8da876292/study/analysis_plan.json",
+        "sha256": "262abc427a97cafc1f0a839ce7dd2277963ebae4ae55461f46a4078a0f53a854",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/g11-followup-01/integration-final/order/enrichment_free_runs/g0-febc02fcaa0b43c0ac9cd973730a7a3b/references/finding_literature_pin.json",
+        "sha256": "b48478c2e4b0ca1da3a3fa57e2a1648bd050af8a72c44a9768e5a6d4170bb567",
+        "status": "inspected"
+      },
+      {
+        "path": "codex-inputs/round08b-20261008/index_snapshot.json",
+        "sha256": "234697e7946328bcfe20db72d702ad89df7798655a41eea0dd5b62e19340da9f",
+        "status": "inspected"
+      }
+    ],
+    "search_roots": [
+      "codex-inputs",
+      "/private/tmp/ptm-round11-20261010",
+      "/private/tmp/ptm-g11-integration-final.log",
+      "/private/tmp/ptm-g11-final-tests.log"
+    ],
+    "original_and_round01_preservation": {
+      "references/finding_literature_pin.json": {
+        "source_sha256": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214",
+        "consumer_sha256": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214"
+      },
+      "references/literature_pin.json": {
+        "source_sha256": "de95eed8076da7939fc8e70391320e72e92a573113c0ff55a434b045565ccf7c",
+        "consumer_sha256": "de95eed8076da7939fc8e70391320e72e92a573113c0ff55a434b045565ccf7c"
+      },
+      "reader/literature_search.csv": {
+        "source_sha256": "7d710661579aef79f4a961d32896e365ed572f0c16766465302e96463d329f8c",
+        "consumer_sha256": "7d710661579aef79f4a961d32896e365ed572f0c16766465302e96463d329f8c"
+      },
+      "reader/literature_sources.csv": {
+        "source_sha256": "5738fffeeff20a561a48f0f0d3a20bdcb8ab6c7e2bcd930a76b9a7c9d8cd1100",
+        "consumer_sha256": "5738fffeeff20a561a48f0f0d3a20bdcb8ab6c7e2bcd930a76b9a7c9d8cd1100"
+      },
+      "reader/literature_comparisons.csv": {
+        "source_sha256": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+        "consumer_sha256": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe"
+      }
+    },
+    "m4_subject_pin_audited_as_legacy_exclusions": false,
+    "new_queries": 0,
+    "new_model_calls": 0,
+    "operating_server_or_order_checked": false
+  },
+  "audit_csv": {
+    "path": "docs/astra_evidence_integration/G11_FOLLOWUP_02_EXCLUSION_AUDIT.csv",
+    "sha256": "3001e03a72a19d0075107fd9164e3e701325dcaf715ff5aeb3240c4ba7a5fdaa",
+    "rows": 71
+  },
+  "historical_counts": {
+    "model_executed_findings": 15,
+    "references_rows": 239,
+    "coverage_rows": 239,
+    "unique_content_hashes": 28,
+    "unique_doi": 6,
+    "source_anchored_comparisons": 0,
+    "semantic_approved": 0,
+    "exported_source_text_rows": 0,
+    "final_prompt_text_available": 0
+  },
+  "differential_approval_parity": {
+    "source": "original_g11_finding_literature.py",
+    "cases": [
+      {
+        "typed": false,
+        "changes": {},
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [],
+        "new_exclusions": []
+      },
+      {
+        "typed": false,
+        "changes": {
+          "source_index": 9
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 9,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 9,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ]
+      },
+      {
+        "typed": false,
+        "changes": {
+          "source_index": 1
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 1,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 1,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ]
+      },
+      {
+        "typed": false,
+        "changes": {
+          "quote": "paraphrase"
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ]
+      },
+      {
+        "typed": false,
+        "changes": {
+          "quote": ""
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ]
+      },
+      {
+        "typed": false,
+        "changes": {
+          "quote": "human cells"
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "scope_identifier_absent_from_quote",
+            "exclusion_class": "scope"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "scope_identifier_absent_from_quote",
+            "exclusion_class": "scope"
+          }
+        ]
+      },
+      {
+        "typed": false,
+        "changes": {
+          "quote": "KIN"
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "scope_site_absent_from_quote",
+            "exclusion_class": "scope"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "scope_site_absent_from_quote",
+            "exclusion_class": "scope"
+          }
+        ]
+      },
+      {
+        "typed": false,
+        "changes": {
+          "species": "rat"
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "condition_context_not_in_quote",
+            "exclusion_class": "condition_comparison"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "condition_context_not_in_quote",
+            "exclusion_class": "condition_comparison"
+          }
+        ]
+      },
+      {
+        "typed": false,
+        "changes": {
+          "relationship": "not_allowed"
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "relationship_not_allowed",
+            "exclusion_class": "scope"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "relationship_not_allowed",
+            "exclusion_class": "scope"
+          }
+        ]
+      },
+      {
+        "typed": false,
+        "changes": {
+          "external_finding": ""
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "claim_text_missing",
+            "exclusion_class": "scope"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "claim_text_missing",
+            "exclusion_class": "scope"
+          }
+        ]
+      },
+      {
+        "typed": true,
+        "changes": {},
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "unbound_quote_context_or_scope",
+            "exclusion_class": "unclassified"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "typed_site_comparison_not_allowed",
+            "exclusion_class": "scope"
+          }
+        ]
+      },
+      {
+        "typed": true,
+        "changes": {
+          "source_index": 9
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 9,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 9,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ]
+      },
+      {
+        "typed": true,
+        "changes": {
+          "source_index": 1
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 1,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 1,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ]
+      },
+      {
+        "typed": true,
+        "changes": {
+          "quote": "paraphrase"
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ]
+      },
+      {
+        "typed": true,
+        "changes": {
+          "quote": ""
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "quote_not_in_retrieved_chunk",
+            "exclusion_class": "citation_mismatch"
+          }
+        ]
+      },
+      {
+        "typed": true,
+        "changes": {
+          "quote": "human cells"
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "scope_identifier_absent_from_quote",
+            "exclusion_class": "scope"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "scope_identifier_absent_from_quote",
+            "exclusion_class": "scope"
+          }
+        ]
+      },
+      {
+        "typed": true,
+        "changes": {
+          "quote": "KIN"
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "scope_site_absent_from_quote",
+            "exclusion_class": "scope"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "scope_site_absent_from_quote",
+            "exclusion_class": "scope"
+          }
+        ]
+      },
+      {
+        "typed": true,
+        "changes": {
+          "species": "rat"
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "condition_context_not_in_quote",
+            "exclusion_class": "condition_comparison"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "typed_site_comparison_not_allowed",
+            "exclusion_class": "scope"
+          }
+        ]
+      },
+      {
+        "typed": true,
+        "changes": {
+          "relationship": "not_allowed"
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "relationship_not_allowed",
+            "exclusion_class": "scope"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "relationship_not_allowed",
+            "exclusion_class": "scope"
+          }
+        ]
+      },
+      {
+        "typed": true,
+        "changes": {
+          "external_finding": ""
+        },
+        "prompt_identical": true,
+        "approval_identical": true,
+        "status_identical": true,
+        "old_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "claim_text_missing",
+            "exclusion_class": "scope"
+          }
+        ],
+        "new_exclusions": [
+          {
+            "source_index": 0,
+            "reason": "claim_text_missing",
+            "exclusion_class": "scope"
+          }
+        ]
+      }
+    ],
+    "real_rag_calls": 0,
+    "real_model_calls": 0
+  },
+  "focused_suite": {
+    "passed": 78,
+    "deselected": 4,
+    "skipped": 0,
+    "failed": 0,
+    "cases": [
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes0-False-True-None-True]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes1-False-True-source_index-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes2-False-True-literal_quote-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes3-False-True-literal_quote-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes4-False-True-literal_quote-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes5-False-True-literal_quote-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes6-False-True-nonempty_quote-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes7-False-True-scope_identifier-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes8-False-True-site_identifier-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes9-False-True-context-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes10-True-False-typed_site-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes11-True-False-None-True]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes12-False-True-relationship-False]"
+      },
+      {
+        "file": "",
+        "name": "test_all_gate_diagnostics_agree_with_unchanged_production_expression[changes13-False-True-claim-False]"
+      },
+      {
+        "file": "",
+        "name": "test_parse_empty_truncation_and_invalid_proposals_remain_distinct[{\"comparisons\":[-length-failed-schema_or_parse_failure-observed]"
+      },
+      {
+        "file": "",
+        "name": "test_parse_empty_truncation_and_invalid_proposals_remain_distinct[not json-None-failed-schema_or_parse_failure-unknown]"
+      },
+      {
+        "file": "",
+        "name": "test_parse_empty_truncation_and_invalid_proposals_remain_distinct[response2-stop-parsed-empty-not_reported_by_provider]"
+      },
+      {
+        "file": "",
+        "name": "test_parse_empty_truncation_and_invalid_proposals_remain_distinct[response3-stop-parsed-schema_or_parse_failure-not_reported_by_provider]"
+      },
+      {
+        "file": "",
+        "name": "test_parse_empty_truncation_and_invalid_proposals_remain_distinct[response4-stop-parsed-proposals_returned-not_reported_by_provider]"
+      },
+      {
+        "file": "",
+        "name": "test_export_never_leaks_restricted_proposals_or_provider_payloads[permitted]"
+      },
+      {
+        "file": "",
+        "name": "test_export_never_leaks_restricted_proposals_or_provider_payloads[unknown]"
+      },
+      {
+        "file": "",
+        "name": "test_existing_model_transport_captures_final_payload_without_credentials[ollama]"
+      },
+      {
+        "file": "",
+        "name": "test_existing_model_transport_captures_final_payload_without_credentials[openai]"
+      },
+      {
+        "file": "",
+        "name": "test_unrequested_model_does_not_require_worker_transport"
+      },
+      {
+        "file": "",
+        "name": "test_frozen_delivery_is_summary_independent_and_has_zero_runtime_calls"
+      },
+      {
+        "file": "",
+        "name": "test_invalid_request_source_scope_and_frozen_provenance_fail_closed"
+      },
+      {
+        "file": "",
+        "name": "test_incomplete_request_preserves_previous_pointer_and_unrequested_is_noop"
+      },
+      {
+        "file": "",
+        "name": "test_required_execution_cannot_silently_disappear"
+      },
+      {
+        "file": "",
+        "name": "test_normal_writer_restore_and_mandatory_artifacts"
+      },
+      {
+        "file": "",
+        "name": "test_explicit_execution_is_called_only_at_requested_stage"
+      },
+      {
+        "file": "",
+        "name": "test_ordinary_replay_forwards_pin_without_running_science"
+      },
+      {
+        "file": "",
+        "name": "test_frozen_inventory_mapping_is_not_current_corpus_cache_permission"
+      },
+      {
+        "file": "",
+        "name": "test_request_only_changes_literature_dependency"
+      },
+      {
+        "file": "",
+        "name": "test_plan_summary_independence_and_typed_source_preservation"
+      },
+      {
+        "file": "",
+        "name": "test_unselected_review_existing_retriever_validator_cache_and_replay"
+      },
+      {
+        "file": "",
+        "name": "test_budget_failure_no_hit_restrictions_and_resume"
+      },
+      {
+        "file": "",
+        "name": "test_typed_protein_cannot_gain_site_agreement_or_use_empty_aggregate_cache"
+      },
+      {
+        "file": "",
+        "name": "test_request_hash_changes_with_evidence_question_resource_and_model"
+      },
+      {
+        "file": "",
+        "name": "test_method_queries_use_recorded_entities_without_fabricated_gene_site"
+      },
+      {
+        "file": "",
+        "name": "test_partial_retrieval_and_layer_budget_remain_resumable_after_comparison"
+      },
+      {
+        "file": "",
+        "name": "test_frozen_projection_preserves_scientific_and_legacy_states"
+      },
+      {
+        "file": "",
+        "name": "test_runtime_digest_changes_per_subject_cache"
+      },
+      {
+        "file": "",
+        "name": "test_partial_pin_cannot_hide_deferred_status"
+      },
+      {
+        "file": "",
+        "name": "test_complete_projection_and_summary_independence"
+      },
+      {
+        "file": "",
+        "name": "test_ambiguous_scope_and_frozen_literature_are_not_promoted"
+      },
+      {
+        "file": "",
+        "name": "test_citations_unselected_foreign_run_and_wrong_key"
+      },
+      {
+        "file": "",
+        "name": "test_only_selected_native_membership_links_method_results"
+      },
+      {
+        "file": "",
+        "name": "test_saved_values_na_scope_links_questions_and_writer"
+      },
+      {
+        "file": "",
+        "name": "test_missing_ambiguous_duplicate_scope_and_tampering"
+      },
+      {
+        "file": "",
+        "name": "test_existing_v6_reader_builder_consumes_saved_tables_without_analysis"
+      },
+      {
+        "file": "",
+        "name": "test_nullable_boolean_csv_semantics"
+      },
+      {
+        "file": "",
+        "name": "test_immutable_revision_failure_keeps_pointer_and_source"
+      },
+      {
+        "file": "",
+        "name": "test_fresh_projection_and_csv_missing_cells_match"
+      },
+      {
+        "file": "",
+        "name": "test_existing_retrieval_comparison_and_identity_scope[known_agreement]"
+      },
+      {
+        "file": "",
+        "name": "test_existing_retrieval_comparison_and_identity_scope[disagreement]"
+      },
+      {
+        "file": "",
+        "name": "test_existing_retrieval_comparison_and_identity_scope[context_difference]"
+      },
+      {
+        "file": "",
+        "name": "test_empty_unresolved_failure_and_export_permission_are_separate"
+      },
+      {
+        "file": "",
+        "name": "test_stale_pin_source_tamper_selection_and_row_join_fail_closed"
+      },
+      {
+        "file": "",
+        "name": "test_live_order_condition_key_order_matches_archived_replay"
+      },
+      {
+        "file": "",
+        "name": "test_existing_indexer_doc_id_keeps_permission_and_read_scope"
+      },
+      {
+        "file": "",
+        "name": "test_lossless_prompt_design_reference_and_execution_audit"
+      },
+      {
+        "file": "",
+        "name": "test_published_pin_reuses_executed_comparison_without_network_or_semantic_promotion"
+      },
+      {
+        "file": "",
+        "name": "test_prompt_projection_roundtrips_repeated_masks_without_dropping_observations"
+      },
+      {
+        "file": "",
+        "name": "test_reader_change_can_reuse_only_hash_bound_identical_execution"
+      },
+      {
+        "file": "",
+        "name": "test_completed_empty_comparison_is_not_pending"
+      },
+      {
+        "file": "",
+        "name": "test_repeated_reader_revision_keeps_original_literature_execution_proof"
+      },
+      {
+        "file": "tests.test_flow_finding_retrieval",
+        "name": "test_retrieved_comparison_reaches_packet_and_condition_aware_prose[known_agreement]"
+      },
+      {
+        "file": "tests.test_flow_finding_retrieval",
+        "name": "test_retrieved_comparison_reaches_packet_and_condition_aware_prose[disagreement]"
+      },
+      {
+        "file": "tests.test_flow_finding_retrieval",
+        "name": "test_missing_search_failure_and_pending_comparison_remain_distinct[off-not_searched-not performed]"
+      },
+      {
+        "file": "tests.test_flow_finding_retrieval",
+        "name": "test_missing_search_failure_and_pending_comparison_remain_distinct[failed-retrieval_failed-search failed]"
+      },
+      {
+        "file": "tests.test_flow_finding_retrieval",
+        "name": "test_missing_search_failure_and_pending_comparison_remain_distinct[pending-retrieved_comparison_pending-remains incomplete]"
+      },
+      {
+        "file": "tests.test_flow_finding_retrieval",
+        "name": "test_fabricated_quote_cannot_become_a_literature_comparison"
+      },
+      {
+        "file": "tests.test_flow_finding_retrieval",
+        "name": "test_paraphrase_is_preserved_for_review_without_certifying_claim_support[insulin directly activates this site]"
+      },
+      {
+        "file": "tests.test_flow_finding_retrieval",
+        "name": "test_paraphrase_is_preserved_for_review_without_certifying_claim_support[An increase at S7 was reported]"
+      },
+      {
+        "file": "tests.test_flow_finding_retrieval",
+        "name": "test_fenced_comparison_json_is_accepted"
+      },
+      {
+        "file": "tests.test_report_review_llm_contract",
+        "name": "test_gemini_compatible_payload_sends_schema_with_resolved_model"
+      },
+      {
+        "file": "tests.test_report_review_llm_contract",
+        "name": "test_malformed_structured_records_are_withheld_without_crashing"
+      },
+      {
+        "file": "tests.test_report_review_llm_contract",
+        "name": "test_valid_sentences_survive_one_corrupt_structured_sentence"
+      }
+    ],
+    "xml": "codex-inputs/g11-followup-02/TEST_RESULTS_FINAL.xml",
+    "counting": "unique final suite only; repeated development runs not added",
+    "deselection_reason": "exclude full science/package computations; saved-source integration checked separately"
+  },
+  "development_regressions": {
+    "unrequested_worker_import_dependency": "reproduced and fixed with lazy trace imports; included in final suite",
+    "earlier_synthetic_publication_fixture": "one additional existing synthetic test was run in initial selection, not added to final suite count; no real-input science executed"
+  },
+  "new_real_execution": {
+    "rag_queries": 0,
+    "model_calls": 0,
+    "external_network_requests": 0,
+    "quant_recalculation": 0,
+    "phosx_recalculation": 0
+  },
+  "internal_trace_contract": {
+    "schema": "finding_comparison_diagnostics.v1",
+    "path": "<order output>/.astra_stage_cache/generation_traces/<sha256>.json",
+    "file_mode": "0600",
+    "new_directory_mode": "0700",
+    "package_included": false,
+    "git_included": false,
+    "no_registered_root": "not_persisted",
+    "write_failure": "failed"
+  },
+  "remaining_limits": [
+    "No exact historical proposal/prompt/raw response recovered",
+    "No semantic approval or biological inconsistency inferred",
+    "Operating server/DB/UI/queue not inspected",
+    "Rounds03/04 not performed"
+  ],
+  "push": false,
+  "deployment": false,
+  "flag_changed": false,
+  "commit_record": "local commit SHA in final response and untracked LOCAL_COMMIT.json",
+  "ordinary_delivery": {
+    "baseline_run": "g11-9d1d38e402834cabb8a423e9233df19d",
+    "binding": {
+      "consumer_literature_selection_sha256": "de95eed8076da7939fc8e70391320e72e92a573113c0ff55a434b045565ccf7c",
+      "consumer_run_id": "g0-d1a3184e488a4a368ce326087a34ebdc",
+      "current_cost": {
+        "model_calls": 0,
+        "queries": 0
+      },
+      "effective_mode": "frozen_results_reused",
+      "execution_contract_sha256": "fb62593f0c461c632cd1c19ff64f058d4ba6349526fa0abd2075297c8fb0a0e0",
+      "fingerprint": "5adb9e02a0cee34638fffd30199c381f15a805172292a9dfe1dc7551bf123bae",
+      "literature_selection_sha256": "f6a67702ce7f7a4c87d99eb60a5f186a4eb034baffbfa3de3a92f03a095137ec",
+      "model_provenance": "frozen_original_execution",
+      "pin_sha256": "cc40cc142efb241631a94f85af7b5ef93da23fbf349402cb59be60046cbc540c",
+      "request": {
+        "budget": {
+          "max_model_calls": 5,
+          "max_prompt_bytes": 100000,
+          "max_queries": 24
+        },
+        "max_subjects": 5,
+        "mode": "reuse_frozen",
+        "pin_ref": {
+          "run_id": "g0-febc02fcaa0b43c0ac9cd973730a7a3b",
+          "sha256": "cc40cc142efb241631a94f85af7b5ef93da23fbf349402cb59be60046cbc540c"
+        },
+        "request_reason": "G11 follow-up 01: explicit historical frozen delivery, no new retrieval",
+        "requested_subject_ids": [
+          "review_subject_55b247e34a7048934295",
+          "review_subject_093b33f4f8cff43355e7",
+          "review_subject_70c0a0b67f80c422c6c9",
+          "review_subject_9aaa70207efe64e6c61a",
+          "review_subject_6f2b7a781153897eb7b2"
+        ]
+      },
+      "requested_mode": "reuse_frozen",
+      "requested_scope_status": "completed",
+      "schema_version": "literature_subject_binding.v1",
+      "selection_match": {
+        "current_index_verified": false,
+        "documents": [
+          {
+            "consumer_document_id": 96,
+            "sha256": "1edda25940a29db97ed688a74507c32f2bfb4b0878bd67bd39fc0a45812a6535",
+            "source_document_id": 1
+          },
+          {
+            "consumer_document_id": 97,
+            "sha256": "e0476400a5da87f15db0e00a17369a39239ac232ef138f15acb3f397ee3d77b7",
+            "source_document_id": 2
+          },
+          {
+            "consumer_document_id": 98,
+            "sha256": "1b7317e6b9b56266c2d86fa6f8f7455ccf7105fd1bf8c9de5c51f9dc9d0a395c",
+            "source_document_id": 3
+          },
+          {
+            "consumer_document_id": 99,
+            "sha256": "f05814b34f295c2f4d4ca953c7ee0b373a8eabe1b8d11c2ee7a6a79ae7da0bd5",
+            "source_document_id": 4
+          },
+          {
+            "consumer_document_id": 100,
+            "sha256": "536468f120a694205b4be8ec33adaaa0b0c33d309bf0a357d41046a0104dce06",
+            "source_document_id": 5
+          },
+          {
+            "consumer_document_id": 101,
+            "sha256": "23c441e4aced70371b119bddfd3df0c081735ef352e9e345d74ad8a5733fc780",
+            "source_document_id": 6
+          },
+          {
+            "consumer_document_id": 102,
+            "sha256": "7998438d97b8ac67fd857724d9f3f8d1397e2e299cbfb4381b10ae2d77d8fbe4",
+            "source_document_id": 7
+          }
+        ],
+        "export_policy": "retained frozen permission provenance; no new text or permission granted",
+        "frozen_corpus_versions": [
+          "8feb2aed15b1be487a940a20033c8b8df233601a73ff09301e5a91b9ba6382f6"
+        ],
+        "new_execution_cache_compatible": false,
+        "status": "same_document_bytes_frozen_historical_corpus_only"
+      },
+      "source_run_id": "g0-febc02fcaa0b43c0ac9cd973730a7a3b",
+      "whole_scope_status": "partial"
+    },
+    "download_bytes": 384142451,
+    "download_sha256": "9a1fda4c892688d8a64726414e1a975f4b5680ff6cbf6f9c1817dc52e2959ade",
+    "download_transport": "real FileResponse ASGI body streamed; DB/auth/queue isolated doubles",
+    "elapsed_seconds": 559.801,
+    "network_calls": 0,
+    "new_rag_model_calls": 0,
+    "operating_order_verified": false,
+    "package_root": "/Users/josephk/Projects/PTM-platform/codex-inputs/g11-followup-02/integration/order/enrichment_free_runs/g0-d1a3184e488a4a368ce326087a34ebdc",
+    "preserved_files": {
+      "evidence/censoring_bounds.csv": "bcf47ffe21e529dc7e02232ea079819609b4c87fd515f453dbd351ab335e66ed",
+      "evidence/coverage_funnel.csv": "d21c6cdd91ede594e43568d76c4b2ecb87aab8fdf520b8daff99e452cd66eaa4",
+      "evidence/emergence_evidence.csv": "cf8647ac2089a2f264c4c46f65170fbb59301a3e27d45ee218977c5111d8cbfd",
+      "evidence/feature_evidence_ledger.csv": "ce039f0e140dafba6d2e9e9bb49f67f7eaa3d8df014d4a93121a63e9e78f9111",
+      "evidence/normalization_offsets.csv": "d6987599fd51fa6c3fb6c1828eeffe81722db07c668125b230a7b574b50d4cdf",
+      "evidence/parent_adjustment_impact.csv": "1ee8ef327125b29dbbd3c4150fd770b80b1d03f3e6b31698f514e235ea5556bb",
+      "evidence/technical_dispersion.csv": "6d79b51a75698ece3af9c8b8d0071d95599eccc488d92fa10c2de90cbd6b077d",
+      "evidence/technical_injection_omissions.csv": "b58f1cd1f7b94017f2cc07e7670937d3751b270f0023b08a9357b37faf5af602",
+      "figures/U_P_A_examples.svg": "04c52b017be5a4e4de48d190578dde6f8ad06f6bf1da1dd44f4ba33706addc76",
+      "figures/U_P_A_examples_source.csv": "1ee8ef327125b29dbbd3c4150fd770b80b1d03f3e6b31698f514e235ea5556bb",
+      "figures/coverage.svg": "4a704ffbd669ab97bb102e6fa726a1b4df5505817cf524484a14c7d8182f95e9",
+      "figures/coverage_source.csv": "d21c6cdd91ede594e43568d76c4b2ecb87aab8fdf520b8daff99e452cd66eaa4",
+      "figures/cross_layer_timing.svg": "e7ddea41eb6cfbc88a3a466c8082fb03b456cc8b7e27c0805d48b917070a3dc5",
+      "figures/cross_layer_timing_source.csv": "d0fb151db60fe2e2607880a4638dfbc0784acef2d9e942a26de7bc56c22d4064",
+      "figures/emerging_detection.png": "1c754112e825f178c5f92fc1b4101728688cb7c1a2ca5daad00c8e886252d32f",
+      "figures/emerging_detection.svg": "c747cbe72239bab951fe4c44b4d2b44d18d83eb247444bf0a6c9b91a8bea2f9f",
+      "figures/emerging_detection_columns.csv": "ddd3fb131a34783bd9ce3802fce1cac7d5a11c406ff85a122ebcbc5d73dd71cf",
+      "figures/emerging_detection_display.json": "60f825621a487fe2b9269324a2abd50597095fdc245dc3ab75154b79d71ff843",
+      "figures/emerging_detection_rows.csv": "2c1a18522f43924dc9e508b25efcde8c7f61c70d1d5c18fa471248760719e359",
+      "figures/emerging_detection_source.csv": "cf8647ac2089a2f264c4c46f65170fbb59301a3e27d45ee218977c5111d8cbfd",
+      "figures/figure_legends.json": "80a7cb0752eb2ecc440618b898eb36e7b5aab54a97613b8c264d76b4b500d31f",
+      "figures/kinase_footprints.svg": "2fae3a22f820118bb701b3fbe5ba4214ff3c37d13211c9ad652b1aa676ef3e6b",
+      "figures/kinase_footprints_points.csv": "fe8e4eb89795140e9bde4b25b3bf3288112f85fde66d4be908cf7fe9f8ae410d",
+      "figures/kinase_footprints_selection.csv": "a77c7f5bad74ab6d72e39dabfe789d8007d8ae1baf342cfa30f535b6d8e9c857",
+      "figures/kinase_footprints_source.csv": "130541865ae4eb439474e2d9a70b3a034303a8391561981cc0db7b7c745d075d",
+      "figures/parent_correction.svg": "8fe960629101de62212266fe4c6181c11974f489d71cb4352629d86a8f374ff7",
+      "figures/parent_correction_source.csv": "1ee8ef327125b29dbbd3c4150fd770b80b1d03f3e6b31698f514e235ea5556bb",
+      "figures/protein_trajectories.svg": "add013f646afa47b356d8644d4295e7943938ae771521f9aed248b92e886bc49",
+      "figures/protein_trajectories_points.csv": "190682e74a5b5db32aa2aa93c98f6b15eadcc5d019a55ef842b1332a66c78652",
+      "figures/protein_trajectories_selection.csv": "00470c180a34231796891042ac46a1dfe5b8348d36f63c28a4c8f8498bfc61dc",
+      "figures/protein_trajectories_source.csv": "08fe73c422929d0886cb0afd35b12206f8a867d25350b7d6e2205aa57faceb35",
+      "figures/substrate_contrast_heatmap.png": "9ec3ff16909e888f570d782a170b92d83043d06d427e3de1431f2289b0879491",
+      "figures/substrate_contrast_heatmap.svg": "e3abafb33c542768c7e8a14666d737baced1a942112025c6627699f8914781b2",
+      "figures/substrate_contrast_heatmap_columns.csv": "ce79f35782a9447988dbb2cda88b6539f5886368eee344f26158c2095c418973",
+      "figures/substrate_contrast_heatmap_display.json": "4fe3c6822effab558c5a77167acf07769ad7e5cfd8afd488e7e9c5a739e00a09",
+      "figures/substrate_contrast_heatmap_rows.csv": "2c1a18522f43924dc9e508b25efcde8c7f61c70d1d5c18fa471248760719e359",
+      "figures/substrate_contrast_heatmap_source.csv": "0936a28fab025b60255290ce4652a1f7274279740a536824b7802dadfa3b3875",
+      "figures/technical_dispersion.svg": "26f7d7e8583288bd4bc71557dd25b55270ed409716fd5b79f482bb9304618e9d",
+      "figures/technical_dispersion_source.csv": "6d79b51a75698ece3af9c8b8d0071d95599eccc488d92fa10c2de90cbd6b077d",
+      "kinase/candidate_sensitivity.csv": "da21e80ee7b8d806b64372de878be00ddfda0be3f05ba5ccd8d85e517e0124cb",
+      "kinase/kea3_results.csv": "353764d299b94915559b68c8c0ecf0e0774bbff1d5f1b3de2cd3c08fa7f4502f",
+      "kinase/kinase_candidate_edges.csv": "cc00b9ea136d3737aeb5305a5438be820a6b8e8617d645927c0aac083d4365a3",
+      "kinase/kinase_candidate_summary.csv": "5554e85db275bd1b4662d77c27576445ae5d564d8880dae1f0a828b89c3a9c1f",
+      "kinase/kinase_protein_context.csv": "9be64c03039f4abef8d6ea095e26de9985e88c110176cfaa58cb4f2817cac1b3",
+      "kinase/kinase_self_site_context.csv": "5b60a36aefcce6583e9f8dd57f2b28ce4496982872e97145c2b734887edd7dbb",
+      "kinase/kinase_technical_omissions.csv": "967ce65cbef2e9d58b843313a39a62a6b8b3cecae21d264ad569aec240e3e039",
+      "kinase/kinase_temporal_profiles.csv": "130541865ae4eb439474e2d9a70b3a034303a8391561981cc0db7b7c745d075d",
+      "kinase/method_executions.csv": "b218a4da60c1c37ccfbb32137645f0bc438fcee9a4f9a2dcc6ea23d59e38506b",
+      "kinase/method_membership.csv": "8c7661c34d21f6fa3042fb40be1162d5c17a72c2ccf17247fcfe8a3ad0aa1e0d",
+      "kinase/method_scores.csv": "bac9ec3ce979ced99aee840471afef057cefda197f5c9a8076e3c71045359ccd",
+      "kinase/substrate_contributions.csv": "c1a6b4a59f9732c73bc51b180eee37591d9a7c92b6b6308051cad680a94def69",
+      "quant/annotation_edges.csv": "ab555595c3f294dd63e65960e46c90744ac81efe49c5ebc9a08e0d8d93fb0bc4",
+      "quant/comparisons.csv": "0936a28fab025b60255290ce4652a1f7274279740a536824b7802dadfa3b3875",
+      "quant/detection.csv": "352228515a2a169aafd4699cce475fdfefb36a2f03c731b226966bf2ba2cbcb7",
+      "quant/emergent_kinase_evidence.csv": "cd8e1ac9670efe6d8ed65373f45780fce6a30fa79f6935f947d092ae84b2034e",
+      "quant/form_evidence_status.csv": "0229daf7ca1f0383d7f15dda2e67973cf07c9f7b17e6092fccc111db6f7c3639",
+      "quant/kinase_injection_omissions.csv": "c7dd60af7fb3ef655ec58ff9aec19d3d02391f30852bb61e3e1b7c456c28446b",
+      "quant/kinase_membership.csv": "0949fcf78cb754c90b43cb3314385934fca46e58f9e6298ccc8c8aca5e352915",
+      "quant/kinase_profiles.csv": "df78178a41f3aa50bc3fd391f6b9750598ed071a0f2a1259b89c467d81e56bee",
+      "quant/kinase_sensitivity.csv": "dd482c1d58e71e4154d9e6f9f9eeea632bff75e4b036724c12a4c9e333d48161",
+      "quant/primary_A_input.csv": "ec2129b23ab4b385fdec8809a2a6a7f075ea04578f4652eee64512dd471143b3",
+      "quant/protein_contrasts.csv": "08fe73c422929d0886cb0afd35b12206f8a867d25350b7d6e2205aa57faceb35",
+      "quant/runlevel.csv": "f9e960ed122fd3ba8773145a091110cf1c1539013ed8328bc1c8fcb88d8406a7",
+      "quant/site_mapping.csv": "2690b405e44bbf3ef56b521fd9cfc3063adff10d00756333721c52cef0807bea",
+      "quant/strict_parent_complete.csv": "8ccd0252df68b63eb67b60a764b8b644451c661afc1a76f453aeb6e25d3cf727",
+      "quant/strict_parent_paired.csv": "c1ced00d455ed75212b199aa5c18f7a6ba59e10e6f2b95ab544011a70b981b64",
+      "quant/strict_parent_peptide_masks.csv": "5bffe52d1722f46852f4945f5d3c3dda8e52c5ec4413a721427090ad2f0a241a",
+      "quant/strict_selected_sequences.csv": "9636bee80af780425c3eeea7720d314523cbda2b0155c0c8481e59f509394184",
+      "quant/strict_unmodified_proteins.csv": "69f8f847fd9e20c411c374f6b13dbbe6568b56dd725e1e13c319a7daf59fa661",
+      "quant/strict_unmodified_sequences.csv": "071cc1d937310233917710b8954305fe1a76055949a2a4567dceee095983846a",
+      "quant/summary.csv": "4d90b48233fb106cf67869f117f9221338846ab3e71a4574faa66e871598d100",
+      "quant/temporal_protein_summary.csv": "173746aff05917a8599bc83739c4fc10a5c449b0e16b12daf0181527570027ae",
+      "quant/validation_panel.csv": "90888a0d560e242d0a8854adf500f06d46fe0c51a7c7668d767e2e200e7bcdcd",
+      "reader/cards.csv": "c7d1c92f70a3743d0e641b1e2afb29c4cb56ac690b7c08cd83c1d6b25c14440b",
+      "reader/coverage.csv": "46eca8b2e4f2c0b166d10efbf51ff73d0015207cdead7de3742e762ca9155922",
+      "reader/findings.csv": "fa49cfe8dc760a5ea15f261329d9c961ea0d48f47f572fab99704aaf5d737d25",
+      "reader/literature_comparisons.csv": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+      "reader/literature_search.csv": "7d710661579aef79f4a961d32896e365ed572f0c16766465302e96463d329f8c",
+      "reader/literature_sources.csv": "5738fffeeff20a561a48f0f0d3a20bdcb8ab6c7e2bcd930a76b9a7c9d8cd1100",
+      "reader_adapter/form_contrasts.csv": "8cd2a0ffd4f94479c0d983610828406868f468de31326782ac1cc9ef89e1fb09",
+      "reader_adapter/form_identity.csv": "31bd366391f9b87991b15fd6514141b9e0ac68ee388c55b26dad101cd1d7fd43",
+      "reader_adapter/precursor_membership.csv": "c2fee673621c5b23a73f1f676b8fbfda5ad35988e84ca0eeee2c0ade49dc4b01",
+      "reader_adapter/study_metadata.csv": "2d48ee7466c7e9d51537fe558c7c2f012698fe2079ca7eaeef0c2b53facfa2fb",
+      "references/finding_literature_pin.json": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214",
+      "references/literature_pin.json": "de95eed8076da7939fc8e70391320e72e92a573113c0ff55a434b045565ccf7c",
+      "references/source_pin.json": "f49b30786ce34ddf219aa5d868623d7eff93277752c7571c68869a55b9ef9b33",
+      "references/source_query_ledger.csv": "a2bc2df3f21b12cc3c01f954b1e28576117f9f649a829b54738331570f33a7ed",
+      "science/calibrated_calls.csv": "98c834126bb0d6a1df2a005d78ba3731742de0494d3ce8a528b09416df91d25d",
+      "science/calibration_provenance.csv": "993764d17adaedaea7ce5aa1e21ff9b3a1736877fe3267ba2a78587a580a5b28",
+      "science/evidence_dependency_groups.csv": "2650104b979ff79736d44b2616aacb564a9579e8cf7710146735e66397d2f1e2",
+      "science/group_excluded_anchors.csv": "4029a264f28627a93380c9c2b58940343a2724de7d3981830eb692dea1303e03",
+      "science/inference_results.csv": "c33fd2aefa94beb162555926203a91367e0b7c665b8eb0a5e807a69864da0698",
+      "science/kinase_calls.csv": "c33fd2aefa94beb162555926203a91367e0b7c665b8eb0a5e807a69864da0698",
+      "science/localization_by_contrast.csv": "8a1bc216501a8144f1108f6fd21da50fd263709c55593e1dd8bd03b05e0ab5ec",
+      "science/measurement_observations.csv": "7ec7e26708ae60bac85cf2aacb5b8e7107c76f4e69d793a7c6a974026af5abe5",
+      "science/observation_sites.csv": "dfb5af701edf4a2de9e5e398dd73d7c6ae232f78e6ee2480fb992675f65a5861",
+      "science/official_parity_results.json": "c70468d840c8ae43f8234f575b7ed7b60f8f6859b5bb38fa92039800321fe460",
+      "science/perturbation_validation.csv": "af0d9228f01323a2fb279a06ac2805c3538d6913366e82c65af256d23745a076",
+      "science/reference_inventory.csv": "a1ee6875bce7b09f947ba73e057303e97b351b4d29986dc865ce4104120a3807",
+      "science/replicate_uncertainty.csv": "1c5b7323e799cc78c6479bcd6275de81511c59b3a78470526cdcd346976cc4cc",
+      "science/resource_registry.json": "c219a8f5cb767165f17486ef46c3d82fc8c76644580c1cfe92016cc55db8c607",
+      "science/site_identity_audit.csv": "11efc4b4397c499fe81e7246919fec1411b15d019105100f91da9cb13852f94a",
+      "science/site_report_observations.csv": "a7e15f62ecc51859bb35991978d3aba233d1c012c069257cb578c23b860fb9f9",
+      "science/specificity_scores.csv": "d9280b0b93056dbd90d60eae26da133c329555d467abbd51f184ca196893f7cf",
+      "temporal/cross_layer_links.csv": "d0fb151db60fe2e2607880a4638dfbc0784acef2d9e942a26de7bc56c22d4064",
+      "temporal/group_excluded_cowave.csv": "70b3f2372553b51933918248777c6a9bc7995b7280d77daa19d537708b03cc3e",
+      "temporal/interval_contrasts.csv": "893fb3e5ee3d577569216ddb9a02a640f5fc980f63b4f8e604731098f4f8face",
+      "temporal/kinase_fixed_membership.csv": "38f396dd90b2e1d68f1edaf19f6f1d0627f180263c5f8ccb963423f5f0013236",
+      "temporal/kinase_temporal_features.csv": "9f73c90bcdc75f737930e08505a0c7ce71910474fb16a1d9920509b101b62c9f",
+      "temporal/protein_temporal_features.csv": "0d84a0a9a77cafc3beaa3dc85d3d978f048458ea3f007419c0ae3435cfdec70b",
+      "temporal/ptm_temporal_features.csv": "ceb73f8d8819df451e0efe11c15d56dfaf311d72722db4849780bdcbd8139616",
+      "temporal/target_excluded_anchors.csv": "90da84777a22f9842d96a2afcd975138695a3ceb9a42f1f245a6337513ec684e",
+      "temporal/temporal_series.csv": "f22b2f38c12c7abda074d12d33f2b691dcbd7b1bc9ab4f8face16efe70f68109"
+    },
+    "reader_replay": {
+      "catalog_available": true,
+      "files": [
+        {
+          "byte_equal": true,
+          "file": "reader/READ_ME.md",
+          "sha256": "84c599fa542a8153e6167a8116baa7801739e18c338588e04253dd1a760faa0d"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/authoring_packet.json",
+          "sha256": "82592e33c858b8797b579d53a39d0d5b80bed8afa5c25b0653223cab13703fbf"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/coverage_summary.json",
+          "sha256": "7662883573ec6208d8792e2f7373a12e1992e475bba980d78c5641be7ae100eb"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/question_map.json",
+          "sha256": "9951c4c3b75a7768ff7c3fd77a0939dde707e4abd7d7f027c06467e6613f68bb"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/selection_audit.json",
+          "sha256": "1469f665d67bd9db155637555b5db36e0d78a429ae0c83a7984a39c63202746c"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/evidence_catalog.json",
+          "sha256": "b44d30e38e748e89237edeea8aa0e7166fcb74438c2f5f21d3ad350a69c9b1ba"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/evidence_index.csv",
+          "sha256": "b96c04d50c9001fc99704389bc4111971f43867f2163bfa66330fd0d66101b5b"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/evidence_links.csv",
+          "sha256": "86060731dfc4533d7e1e0eca4e781c47ea1b725771a9608618590d1401b5ecaa"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/EVIDENCE_ACCESS.md",
+          "sha256": "5fc77b9b059c735c42613b45fed7f767dbb6ea48923a0cf4d2f29bb903dc80ae"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/full_question_links.csv",
+          "sha256": "42d706c7817ff383a37c2164595f8506ba464a7dcb0423b347e9c7956d305b4c"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/full_temporal_links.csv",
+          "sha256": "8866e58cfc2b58feba83fe609b7e788cbe37f138a5a4312fdc1081ed056cace7"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/full_temporal_subjects.csv",
+          "sha256": "5c2dbb52b2a08405a66ac69f965e60632ba187329f67cc30b4157decd6b7ee20"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/full_module_membership.csv",
+          "sha256": "fad0c4a3fc9c594d2357840eb546dc3ab8aae245f0e6bc77657e78b177982810"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/full_evidence_summary.json",
+          "sha256": "1b3e137ffd792266e5eda7d1adeb44bb68e74edf70ee58a385b4925594ac786e"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/FULL_EVIDENCE.md",
+          "sha256": "29d3d2b2c9089130139f306241748278a944b860efb5628cf302feca12dcfede"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_review_subjects.csv",
+          "sha256": "3446690ca6af9da3414bf107eea94b153a7cc2d2a5cf17ce3d0a3a23ebb78491"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_review_plan.json",
+          "sha256": "2d9790123a2c32a42a41cd3ddf032c81f8b0bb0d1f3f3eca13338963ecc0b11c"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/LITERATURE_REVIEW_PLAN.md",
+          "sha256": "d4e21d7e07a83faa9b4667e669c590341f092400e23391916abaa6b0981370cd"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_subject_execution.csv",
+          "sha256": "73bf66b27803f12a1452dec22eab8a0031bac8336a237ed75e7442ffbe244237"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_subject_links.csv",
+          "sha256": "73064b9d51f5673c24ee80dd7623b8383847bf108344b69a65152cf415dd4b97"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_subject_summary.json",
+          "sha256": "6640427fa9af7fd27a89a9c59b334914d9f3c81e7d5c62b2ae88333eb91f8126"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/LITERATURE_SUBJECT_REVIEW.md",
+          "sha256": "546717eb96a4b651edca19769b0bad05af7d8119d191d640bec2c5d841de5d77"
+        },
+        {
+          "byte_equal": true,
+          "file": "references/literature_subject_execution_pin.json",
+          "sha256": "019b4d79987829288e214ab43d33c465cb2b884b3650f55558e2ba7738991356"
+        },
+        {
+          "byte_equal": true,
+          "file": "references/literature_subject_binding.json",
+          "sha256": "15ebc1ce30f5f9a6c654791841673a0c4d1f6e4e657bf777adb46cd230ee01a8"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/PHOSX_TIME_COURSE.md",
+          "sha256": "21edd017948dcef0550c29376c45c136348c495c7378e46657ecc9e3f0e9d6b5"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/phosx_time_summary.csv",
+          "sha256": "d4b795e40c15d85d1b0b1500a9ee9af82ba18d03e3a5afddbcb6951cf11fbad1"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/phosx_assay_time_results.csv",
+          "sha256": "1040c4bb7eb24f0de023045a27e10779ec6c1adb76b0ce047a8865c39ce060f7"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/TEMPORAL_EVIDENCE.md",
+          "sha256": "f8a3e828eb418fadb9cbd4fe1dfe3606d23c2872aa878647cb3ca86d6b8ea922"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/temporal_evidence.json",
+          "sha256": "d28c818045cc4b6540766b3aeed7bf1a42cc34308c8fe97bc1242f3d94466ab4"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/temporal_links.csv",
+          "sha256": "20c6ba4bedf1ca9d13fb4053284286ec75ef612b354f293e3f53e36d418b38ba"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/LITERATURE.md",
+          "sha256": "44521fb8cb06bf5a168f48db60652c21177b1f243eec7ce3230ecc555c4e933f"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_summary.json",
+          "sha256": "4c4db5c65db0c96d5fe578b06817879cf8740825127a81a2a7fdc00a2afea90d"
+        },
+        {
+          "byte_equal": true,
+          "file": "references/finding_literature_pin.json",
+          "sha256": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/cards.csv",
+          "sha256": "c7d1c92f70a3743d0e641b1e2afb29c4cb56ac690b7c08cd83c1d6b25c14440b"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/findings.csv",
+          "sha256": "fa49cfe8dc760a5ea15f261329d9c961ea0d48f47f572fab99704aaf5d737d25"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/coverage.csv",
+          "sha256": "46eca8b2e4f2c0b166d10efbf51ff73d0015207cdead7de3742e762ca9155922"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/packet.csv",
+          "sha256": "3ac6eb126c64d2f1ec99b98fb348f81df75480ffbccbd1ae033e738714d56343"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_search.csv",
+          "sha256": "7d710661579aef79f4a961d32896e365ed572f0c16766465302e96463d329f8c"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_sources.csv",
+          "sha256": "5738fffeeff20a561a48f0f0d3a20bdcb8ab6c7e2bcd930a76b9a7c9d8cd1100"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_comparisons.csv",
+          "sha256": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_subject_execution.csv",
+          "sha256": "73bf66b27803f12a1452dec22eab8a0031bac8336a237ed75e7442ffbe244237"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_subject_links.csv",
+          "sha256": "73064b9d51f5673c24ee80dd7623b8383847bf108344b69a65152cf415dd4b97"
+        }
+      ],
+      "frozen_typed_literature_rebuilt": true,
+      "literature_review_plan_rebuilt": false,
+      "network_requests": 0,
+      "new_model_calls": 0,
+      "passed": true,
+      "previous_reader_interpretation_rebuilt": true,
+      "projection_inputs": null,
+      "repository_code_used": false,
+      "run_id": "g0-d1a3184e488a4a368ce326087a34ebdc",
+      "scientific_requantification": false,
+      "scope": "reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables",
+      "validation": {
+        "cards_checked": 14658,
+        "findings_checked": 15,
+        "source_rows_checked": 16944,
+        "values_times_NA_masks_ids": "passed"
+      },
+      "whole_evidence_projection_rebuilt": false
+    },
+    "run_id": "g0-d1a3184e488a4a368ce326087a34ebdc",
+    "scientific_calculation_calls": 0,
+    "scope": "local dispatch/builder/publish/download integration; DB/queue and scientific stages doubled using validated archive rows",
+    "source_execution_run": "g0-febc02fcaa0b43c0ac9cd973730a7a3b",
+    "zip": "/Users/josephk/Projects/PTM-platform/codex-inputs/g11-followup-02/integration/order/astra_analysis_package_g0-d1a3184e488a4a368ce326087a34ebdc.zip",
+    "zip_sha256": "9a1fda4c892688d8a64726414e1a975f4b5680ff6cbf6f9c1817dc52e2959ade"
+  },
+  "ordinary_manifest_diff": {
+    "same": [
+      "evidence/analysis_limitations.json",
+      "evidence/censoring_bounds.csv",
+      "evidence/coverage_funnel.csv",
+      "evidence/emergence_evidence.csv",
+      "evidence/evidence_claims.jsonl",
+      "evidence/feature_evidence_ledger.csv",
+      "evidence/normalization_offsets.csv",
+      "evidence/parent_adjustment_impact.csv",
+      "evidence/technical_dispersion.csv",
+      "evidence/technical_injection_omissions.csv",
+      "figures/U_P_A_examples.svg",
+      "figures/U_P_A_examples_source.csv",
+      "figures/coverage.svg",
+      "figures/coverage_source.csv",
+      "figures/cross_layer_timing.svg",
+      "figures/cross_layer_timing_source.csv",
+      "figures/emerging_detection.png",
+      "figures/emerging_detection.svg",
+      "figures/emerging_detection_columns.csv",
+      "figures/emerging_detection_display.json",
+      "figures/emerging_detection_rows.csv",
+      "figures/emerging_detection_source.csv",
+      "figures/figure_legends.json",
+      "figures/kinase_footprints.svg",
+      "figures/kinase_footprints_points.csv",
+      "figures/kinase_footprints_selection.csv",
+      "figures/kinase_footprints_source.csv",
+      "figures/parent_correction.svg",
+      "figures/parent_correction_source.csv",
+      "figures/protein_trajectories.svg",
+      "figures/protein_trajectories_points.csv",
+      "figures/protein_trajectories_selection.csv",
+      "figures/protein_trajectories_source.csv",
+      "figures/substrate_contrast_heatmap.png",
+      "figures/substrate_contrast_heatmap.svg",
+      "figures/substrate_contrast_heatmap_columns.csv",
+      "figures/substrate_contrast_heatmap_display.json",
+      "figures/substrate_contrast_heatmap_rows.csv",
+      "figures/substrate_contrast_heatmap_source.csv",
+      "figures/technical_dispersion.svg",
+      "figures/technical_dispersion_source.csv",
+      "inputs/PG.tsv",
+      "inputs/PR.tsv",
+      "inputs/analysis_reference.fasta",
+      "inputs/reference.fasta",
+      "inputs/specificity/SPECIFICITY.json",
+      "kinase/candidate_sensitivity.csv",
+      "kinase/kea3_results.csv",
+      "kinase/kinase_candidate_edges.csv",
+      "kinase/kinase_candidate_summary.csv",
+      "kinase/kinase_protein_context.csv",
+      "kinase/kinase_self_site_context.csv",
+      "kinase/kinase_technical_omissions.csv",
+      "kinase/kinase_temporal_profiles.csv",
+      "kinase/method_executions.csv",
+      "kinase/method_membership.csv",
+      "kinase/method_scores.csv",
+      "kinase/substrate_contributions.csv",
+      "methods/METHODS.md",
+      "methods/adapter_parameters.json",
+      "methods/method_registry.json",
+      "methods/motif.json",
+      "methods/native_execution_runtime.json",
+      "methods/normalization.json",
+      "methods/statistics_inventory.json",
+      "quant/annotation_edges.csv",
+      "quant/comparisons.csv",
+      "quant/detection.csv",
+      "quant/emergent_kinase_evidence.csv",
+      "quant/form_evidence_status.csv",
+      "quant/kinase_injection_omissions.csv",
+      "quant/kinase_membership.csv",
+      "quant/kinase_profiles.csv",
+      "quant/kinase_sensitivity.csv",
+      "quant/primary_A_input.csv",
+      "quant/protein_contrasts.csv",
+      "quant/runlevel.csv",
+      "quant/site_mapping.csv",
+      "quant/strict_parent_complete.csv",
+      "quant/strict_parent_paired.csv",
+      "quant/strict_parent_peptide_masks.csv",
+      "quant/strict_selected_sequences.csv",
+      "quant/strict_unmodified_proteins.csv",
+      "quant/strict_unmodified_sequences.csv",
+      "quant/summary.csv",
+      "quant/temporal_protein_summary.csv",
+      "quant/validation_panel.csv",
+      "reader/EVIDENCE_ACCESS.md",
+      "reader/LITERATURE.md",
+      "reader/PHOSX_TIME_COURSE.md",
+      "reader/TEMPORAL_EVIDENCE.md",
+      "reader/cards.csv",
+      "reader/coverage.csv",
+      "reader/coverage_summary.json",
+      "reader/evidence_index.csv",
+      "reader/evidence_links.csv",
+      "reader/findings.csv",
+      "reader/full_evidence_summary.json",
+      "reader/full_module_membership.csv",
+      "reader/full_question_links.csv",
+      "reader/full_temporal_links.csv",
+      "reader/full_temporal_subjects.csv",
+      "reader/literature_comparisons.csv",
+      "reader/literature_review_subjects.csv",
+      "reader/literature_search.csv",
+      "reader/literature_sources.csv",
+      "reader/literature_summary.json",
+      "reader/phosx_assay_time_results.csv",
+      "reader/phosx_time_summary.csv",
+      "reader/question_map.json",
+      "reader/selection_audit.json",
+      "reader/temporal_evidence.json",
+      "reader/temporal_links.csv",
+      "reader_adapter/form_contrasts.csv",
+      "reader_adapter/form_identity.csv",
+      "reader_adapter/precursor_membership.csv",
+      "reader_adapter/study_metadata.csv",
+      "references/bibliographic_records.json",
+      "references/context_relations.json",
+      "references/finding_literature_pin.json",
+      "references/literature_pin.json",
+      "references/source_execution.json",
+      "references/source_pin.json",
+      "references/source_query_ledger.csv",
+      "replay.py",
+      "reproducibility/code/ptm_shared/__init__.py",
+      "reproducibility/code/ptm_shared/analysis_context.py",
+      "reproducibility/code/ptm_shared/annotation_registry.py",
+      "reproducibility/code/ptm_shared/annotation_species.py",
+      "reproducibility/code/ptm_shared/astra_card_inputs.py",
+      "reproducibility/code/ptm_shared/astra_discovery.py",
+      "reproducibility/code/ptm_shared/astra_evidence.py",
+      "reproducibility/code/ptm_shared/astra_evidence_catalog.py",
+      "reproducibility/code/ptm_shared/astra_evidence_v6.py",
+      "reproducibility/code/ptm_shared/astra_figures.py",
+      "reproducibility/code/ptm_shared/astra_inputs.py",
+      "reproducibility/code/ptm_shared/astra_plan.py",
+      "reproducibility/code/ptm_shared/astra_reader_full.py",
+      "reproducibility/code/ptm_shared/astra_reader_temporal.py",
+      "reproducibility/code/ptm_shared/astra_science.py",
+      "reproducibility/code/ptm_shared/astra_sources.py",
+      "reproducibility/code/ptm_shared/astra_temporal.py",
+      "reproducibility/code/ptm_shared/contrast_quantification.py",
+      "reproducibility/code/ptm_shared/de_novo_representation.py",
+      "reproducibility/code/ptm_shared/diann_evidence.py",
+      "reproducibility/code/ptm_shared/directed_temporal_relationship.py",
+      "reproducibility/code/ptm_shared/evidence_contracts.py",
+      "reproducibility/code/ptm_shared/evidence_methods.py",
+      "reproducibility/code/ptm_shared/evidence_stage_cache.py",
+      "reproducibility/code/ptm_shared/evidence_temporal.py",
+      "reproducibility/code/ptm_shared/feature_identity.py",
+      "reproducibility/code/ptm_shared/generic_kinase.py",
+      "reproducibility/code/ptm_shared/generic_workflow.py",
+      "reproducibility/code/ptm_shared/inference_policy.py",
+      "reproducibility/code/ptm_shared/kea3_evidence.py",
+      "reproducibility/code/ptm_shared/kinase_family_registry.json",
+      "reproducibility/code/ptm_shared/kinase_specificity.py",
+      "reproducibility/code/ptm_shared/kinase_trajectory_evidence.py",
+      "reproducibility/code/ptm_shared/literature_cards.py",
+      "reproducibility/code/ptm_shared/localization_evidence.py",
+      "reproducibility/code/ptm_shared/measured_feature_cards.py",
+      "reproducibility/code/ptm_shared/motif_candidate_calibration.py",
+      "reproducibility/code/ptm_shared/motif_library.json",
+      "reproducibility/code/ptm_shared/normalization_provenance.py",
+      "reproducibility/code/ptm_shared/official_method_tracks.py",
+      "reproducibility/code/ptm_shared/official_specificity.py",
+      "reproducibility/code/ptm_shared/perturbation_validation.py",
+      "reproducibility/code/ptm_shared/phosx_activity_adapter.py",
+      "reproducibility/code/ptm_shared/probabilistic_cowave.py",
+      "reproducibility/code/ptm_shared/quantitative_fields.py",
+      "reproducibility/code/ptm_shared/reader_authoring.py",
+      "reproducibility/code/ptm_shared/reader_observations.py",
+      "reproducibility/code/ptm_shared/report_compatible_kinase.py",
+      "reproducibility/code/ptm_shared/report_compatible_quantification.py",
+      "reproducibility/code/ptm_shared/research_questions.py",
+      "reproducibility/code/ptm_shared/science_inference.py",
+      "reproducibility/code/ptm_shared/science_reference.py",
+      "reproducibility/code/ptm_shared/source_acquisition.py",
+      "reproducibility/code/ptm_shared/species_registry.py",
+      "reproducibility/code/ptm_shared/study_design.py",
+      "reproducibility/code/ptm_shared/study_design.schema.json",
+      "reproducibility/code/ptm_shared/study_design.v4.schema.json",
+      "reproducibility/code/ptm_shared/study_metadata.py",
+      "reproducibility/code/ptm_shared/study_presets.py",
+      "reproducibility/code/ptm_shared/study_temporal_context.py",
+      "reproducibility/code/ptm_shared/study_temporal_context_resolution.py",
+      "reproducibility/code/ptm_shared/substrate_temporal_dynamics.py",
+      "reproducibility/requirements.txt",
+      "reproducibility/table_migration.json",
+      "reproducibility/v3_migration.json",
+      "science/calibrated_calls.csv",
+      "science/calibration_provenance.csv",
+      "science/evidence_dependency_groups.csv",
+      "science/group_excluded_anchors.csv",
+      "science/inference_results.csv",
+      "science/kinase_calls.csv",
+      "science/localization_by_contrast.csv",
+      "science/measurement_observations.csv",
+      "science/observation_sites.csv",
+      "science/official_parity_results.json",
+      "science/perturbation_validation.csv",
+      "science/reference_inventory.csv",
+      "science/replicate_uncertainty.csv",
+      "science/resource_registry.json",
+      "science/site_identity_audit.csv",
+      "science/site_report_observations.csv",
+      "science/specificity_scores.csv",
+      "study/input_capabilities.json",
+      "study/input_lineage.csv",
+      "study/study_design.json",
+      "temporal/cross_layer_links.csv",
+      "temporal/group_excluded_cowave.csv",
+      "temporal/interval_contrasts.csv",
+      "temporal/kinase_fixed_membership.csv",
+      "temporal/kinase_temporal_features.csv",
+      "temporal/protein_temporal_features.csv",
+      "temporal/ptm_temporal_features.csv",
+      "temporal/target_excluded_anchors.csv",
+      "temporal/temporal_series.csv"
+    ],
+    "changed": {
+      "reproducibility/stage_reuse.json": {
+        "before": "630d5cd973573c71742a5389d1f540302a73805378426ba5adf5a08122b5a190",
+        "after": "e970accc6a051051028688b32751fa8ae545f6b1959143a068cee36c23d36ec7"
+      },
+      "reproducibility/stage_metrics.json": {
+        "before": "9a93d28c8317578df6b0c641ae97d3ce965f965000f71812177dd2423e65f7ba",
+        "after": "c63fa57e63f1e3997550dfafbcc71da06e44ff801a4730c2d4ed0e78e7558fb7"
+      },
+      "reproducibility/code/ptm_shared/astra_reader.py": {
+        "before": "1c6c00b97fccd50aeba851a57b35159056a593bb7b2c921fb84cb675d2b82586",
+        "after": "00098e3469dab689d14978d9b9728614d7bfc6abc24a700a5b4d2dc70026f12d"
+      },
+      "reader/literature_review_plan.json": {
+        "before": "a507d4ba885d7dd337a480033e43a03aed80c4114d2562754c3fca38f0b52a8c",
+        "after": "2d9790123a2c32a42a41cd3ddf032c81f8b0bb0d1f3f3eca13338963ecc0b11c"
+      },
+      "reader/authoring_packet.json": {
+        "before": "325fb129b6cb160d4b31a31fcf6181a33a3b9a518f8f32e4813c559f17fe3873",
+        "after": "82592e33c858b8797b579d53a39d0d5b80bed8afa5c25b0653223cab13703fbf"
+      },
+      "reproducibility/data_dictionary.json": {
+        "before": "4fb50b58393f600d145ecfa71e3482c80f114481b6de23c7b10657b7673c61a4",
+        "after": "6cecde132a30d7376c902acc3633818ca575c932fb0eb88d4fa9f189c999df99"
+      },
+      "study/user_input_snapshot.json": {
+        "before": "8e771d157fea116fff706a802179c25127a404905b4ffb7c804422f7a9583c4b",
+        "after": "691d291f68c723d7594376093b36e5902f957239531c8fcbf546fe88ee4b1734"
+      },
+      "reproducibility/replay_config.json": {
+        "before": "a2c242762e86cb968b22a7f8b17cf27fe1d887cae45f72b8e3c05939f0a7348e",
+        "after": "644de43bf67f68cc08b59df7e980c03f074bfbfc211ca89ba0c270fb082a133e"
+      },
+      "reproducibility/code/ptm_shared/finding_literature.py": {
+        "before": "f587fc5b2070d7e2e4b5569f7225dcd0bec684e563082ccf2c4b4419c20b3f75",
+        "after": "bcdd8e1f1cef78715195cae5991d2da4ae8e5738e340c67bcb6511e91dbc1c53"
+      },
+      "reproducibility/code/ptm_shared/astra_package.py": {
+        "before": "3969a69774ef8093f29a821cff5e2eb69a49092005c94e940109c116276915a2",
+        "after": "bea672b2b9f7c6b7cd04e73f7d819c310991f3188df29fa280e1690431f15883"
+      },
+      "reproducibility/code/ptm_shared/astra_literature_review.py": {
+        "before": "2d6a2868aa532c0b57f30989469f03367c604aa496fa2d62b714643ba57f8a95",
+        "after": "9622f865229e042232b1a22514d430484d80697c4d9eb0667ca40dd36873663b"
+      },
+      "reader/FULL_EVIDENCE.md": {
+        "before": "91aa31eae9f5885be64fd83da2916295070dca763ec4803895b88c4380a0f5a5",
+        "after": "29d3d2b2c9089130139f306241748278a944b860efb5628cf302feca12dcfede"
+      },
+      "evidence_report.html": {
+        "before": "a62429621be87574eadc82b7aaacf9a4828f3e775e39ad95cedd2aaf19136db6",
+        "after": "d72f308d09b4b364ca6f89ceccedbdb0e2c44118dff5ab6534ec6445fcdd49dc"
+      },
+      "reader/LITERATURE_REVIEW_PLAN.md": {
+        "before": "e0438a43ddd5504e59c04725038bcc43a5774106ba4ffbfbacba860ff29c5a94",
+        "after": "d4e21d7e07a83faa9b4667e669c590341f092400e23391916abaa6b0981370cd"
+      },
+      "references/literature_comparison_packet.json": {
+        "before": "39f99eaa5fab3d6bc1a1731f92c130e14f7026b5a4819a34288facc9eb9a81dd",
+        "after": "99fcf791e14756ea92bc9cb46105753020d66003355fc997184e4bfd2461fd53"
+      },
+      "study/STUDY_BRIEF.md": {
+        "before": "6c668d2b77ef405046c1a8b2a32815a206003760747447695b4061e376a85a7a",
+        "after": "d28cc6215b3d8e4dc81d7ba278ac0aebcb72559ef372b7fed82c814717a2e7e3"
+      },
+      "START_HERE_ASTRA.md": {
+        "before": "1d2eb9f9ca0f6583cad78ece8d33ec70697f7899f76ac8e1633d31ea443824c7",
+        "after": "e16c23859477ea94e213b73bde5a08f6f3a53cfdd0a105f368fe92600f06c6e8"
+      },
+      "methods/software_versions.json": {
+        "before": "460eb187aa717f3df93e14d425c702b1c4d82416e133432a1159058d2fea35b8",
+        "after": "a2a49c893976ba8a3d2fdd6b285f2a9511be1e523bfc57a5b0af8ecbff302ba9"
+      },
+      "study/input_field_manifest.csv": {
+        "before": "804bf64942366221f4545ad1770aa35949cbf27b244a783ba7b8ea2c88c7a77b",
+        "after": "0c2dd91d6a726eb171033a2448cac49921282986b60e8b6df60afade8976bfa2"
+      },
+      "reproducibility/package_validation.json": {
+        "before": "a98ee63e6036cacf8f5838dd0575af9f5f2031ec8c9a58b71897f92a5cc9c3ac",
+        "after": "028c7dcc5e73e3ed55638a8008166a29d26322300c9c06afaadccb1083bc1118"
+      },
+      "provenance.json": {
+        "before": "98b9571aa5a16f294bffb924562d33708735fb511a9c22fdfd33a44366aec327",
+        "after": "34f1f25571e6a77340517cd1c34e79729eb41b717015fa96167d3bacd6988904"
+      },
+      "reproducibility/code/ptm_shared/astra_literature.py": {
+        "before": "75b72673a4d720a414ef557967ab89be253d89cbfd80862f680c6e3da286d628",
+        "after": "21d766df4ec028dc2a636ffc287694d83928478a96fbc20fe82147c607cdca76"
+      },
+      "evidence/readiness.json": {
+        "before": "91bb63779656f3bc1a720db496098b5ee58783646b7b42a872ed77c44f6b4245",
+        "after": "110be63585ff0a09678fe9b1380aef0b2b16143645f8b2be9abef091b15c7a56"
+      },
+      "reader/packet.csv": {
+        "before": "ca8a52ecb337731eb5c25a79e72c96baacd1c6ad456ebb21f1628170b7870421",
+        "after": "3ac6eb126c64d2f1ec99b98fb348f81df75480ffbccbd1ae033e738714d56343"
+      },
+      "reproducibility/stage_ledger.json": {
+        "before": "57d9756696af66620aa1fe2fd35cd08e14afc9cc20dd1b8fb194581c8e835994",
+        "after": "8e893148a0a24e9df3d76ed20525676df607bd678e1bb6c001fdc1c893fc7a0d"
+      },
+      "reader/evidence_catalog.json": {
+        "before": "a18abe96bf8d91fc35b647f9a91d46f65f87b0b6e3151c18a35e95cce14a0d67",
+        "after": "b44d30e38e748e89237edeea8aa0e7166fcb74438c2f5f21d3ad350a69c9b1ba"
+      },
+      "reader/READ_ME.md": {
+        "before": "812e19b3a87bd66fc1ce9fe34dc2a05254872af68fec8feada08e5f163b0ddec",
+        "after": "84c599fa542a8153e6167a8116baa7801739e18c338588e04253dd1a760faa0d"
+      },
+      "study/analysis_plan.json": {
+        "before": "38bb590be192eaeaa2d5f3c29dd83f4630ace728c35926a49e085aafd21a7425",
+        "after": "6b408e5f37a83158fe035f28d0f7474584d1f2bb62f61b720c0f2ff9e22f20bf"
+      },
+      "study/study_context.json": {
+        "before": "a5c933bcadf3edbe37a69056dd7dd6d556de516e52962504f8aa370a96f61ba8",
+        "after": "97345fe79bf157192dcf3c81012ec1b822698849d52627ec8636667911ccbb7c"
+      },
+      "study/input_transfer_validation.json": {
+        "before": "07aac48763f7e396ccf08f41f5070ac7b9982c34675293468575e3ce244cd767",
+        "after": "ac351728541a1c43fdccc5ab0fa79d45d8b1cadb47e7b09cd24e9a4d7be04ad4"
+      },
+      "reproducibility/code/ptm_shared/astra_reader_revision.py": {
+        "before": "52e59b8fb2323a4e4f72fc886bbb492306ad02ead598828a8bc6768e95fa6987",
+        "after": "9a648bc3b9ac811dfc3f61d9d214d57b2c9f9079c3cda4cad96277c3ea0ad23c"
+      }
+    },
+    "added": [
+      "reader/LITERATURE_SUBJECT_REVIEW.md",
+      "reader/literature_subject_execution.csv",
+      "reader/literature_subject_links.csv",
+      "reader/literature_subject_summary.json",
+      "references/literature_subject_binding.json",
+      "references/literature_subject_execution_pin.json"
+    ],
+    "removed": [
+      "references/finding_literature_execution.py"
+    ],
+    "missing_archived_execution_code_reason": "isolated test Order registered M4 source only, not old g11 execution archive; final preservation revision uses original Round01 archive"
+  },
+  "caller_trace_assertions": {
+    "passed": 4,
+    "included_in_78_unique_cases": true,
+    "xml": "codex-inputs/g11-followup-02/CALLER_TRACE_TESTS.xml"
+  },
+  "synthetic_internal_trace_examples": {
+    "cases": 4,
+    "root": "codex-inputs/g11-followup-02/fixture-traces",
+    "real_searches": 0,
+    "real_model_calls": 0,
+    "not_historical_g11_traces": true
+  },
+  "final_preserved_reader": {
+    "changed_files": {
+      "START_HERE_ASTRA.md": {
+        "after": "bb5e06175a1335a71c340f86927b548074be278d87d0eca36bda22d2eb260c0e",
+        "before": "e16c23859477ea94e213b73bde5a08f6f3a53cfdd0a105f368fe92600f06c6e8"
+      },
+      "evidence/readiness.json": {
+        "after": "044dffbee999d0894f67455317fac602397fd9cd2918747afce8a427255213fc",
+        "before": "a0317fe31c891e58635cf542499bb7e6eee7c6970619a3378d8e5b6dd09e7e12"
+      },
+      "evidence_report.html": {
+        "after": "4ac29844793da3c2f28db2e514f03c7f7e4de7621bf008552148aa7c819e1549",
+        "before": "d72f308d09b4b364ca6f89ceccedbdb0e2c44118dff5ab6534ec6445fcdd49dc"
+      },
+      "provenance.json": {
+        "after": "b31abbe43380a2f7ddb2c3702bd6a42154807be51e59329053cde231c0e6ca5a",
+        "before": "c7b3d14a1237a6beea23e5ef209b55594ed91369546d6587d4a71a3814a49f24"
+      },
+      "reader/EVIDENCE_ACCESS.md": {
+        "after": "55413a7e580a31726b3abea9d0d4f29a70eee5960c30608b20e3147d9de81bce",
+        "before": "5fc77b9b059c735c42613b45fed7f767dbb6ea48923a0cf4d2f29bb903dc80ae"
+      },
+      "reader/LITERATURE_SUBJECT_REVIEW.md": {
+        "after": "ebbd3ae80d5ab5cc34d59c7fcfbc3c86dc1124a2b2eced9be2c0fabb59de7e7e",
+        "before": "aa2f89b32f04d5e20092eb481ac5e82a2bc31922b6283911883b3cd53b6e7147"
+      },
+      "reader/READ_ME.md": {
+        "after": "6a7d5b0a5d8424aa43b8ee9db1faa90e6428fc64444933675f2ea8ded3dba37b",
+        "before": "84c599fa542a8153e6167a8116baa7801739e18c338588e04253dd1a760faa0d"
+      },
+      "reader/authoring_packet.json": {
+        "after": "ea2b54fc1f2c2ba63682a6545c5a36c47a2157ae2c78d1e4c44ccf077ed17a7e",
+        "before": "8898d71c7e03bb401a7fedb9a2010107619a260dfcd8c2052eb0fc5ee90dc545"
+      },
+      "reader/evidence_catalog.json": {
+        "after": "80b6218ebc0c52bc8254e214bd753af8232fc970de91a72a4c18755fd64446fb",
+        "before": "889b318be50e539f884905be90af56c4ddc831ad13bbac61579bba327d25d88d"
+      },
+      "reader/packet.csv": {
+        "after": "5adf28aec3a161cae15e922826224cd2ebe2559fee7b68700dd6d840f8840296",
+        "before": "3048a14bd660ab13ee8a49927b2ac5e7f0bf167fc7a08de5a5655e6caab83c7c"
+      },
+      "references/literature_subject_binding.json": {
+        "after": "ee47cef43905aa5fcaf507a0072fd84a1ea142df6162f1ef22b9ab2f7616e2b6",
+        "before": "023e2856cad18c8efa86ff92c88407d845a6829b6e5f140f558a3b6d5e4a1302"
+      },
+      "reproducibility/code/ptm_shared/astra_literature.py": {
+        "after": "21d766df4ec028dc2a636ffc287694d83928478a96fbc20fe82147c607cdca76",
+        "before": "75b72673a4d720a414ef557967ab89be253d89cbfd80862f680c6e3da286d628"
+      },
+      "reproducibility/code/ptm_shared/astra_literature_review.py": {
+        "after": "9622f865229e042232b1a22514d430484d80697c4d9eb0667ca40dd36873663b",
+        "before": "a7ba0952379a28b5e982e18b2b54ae4c163ebad95e7ea431842c00ffd931b853"
+      },
+      "reproducibility/code/ptm_shared/astra_package.py": {
+        "after": "bea672b2b9f7c6b7cd04e73f7d819c310991f3188df29fa280e1690431f15883",
+        "before": "fe145de2e89681f270b3bf7b7360e182e37be6a99d1f6484d70f9f26733fdc9c"
+      },
+      "reproducibility/code/ptm_shared/astra_reader_revision.py": {
+        "after": "9a648bc3b9ac811dfc3f61d9d214d57b2c9f9079c3cda4cad96277c3ea0ad23c",
+        "before": "a6e29e49b3e5b789006812e9fbff4c3d0ffe5a085bd7563ecd23ad01ce8a926a"
+      },
+      "reproducibility/code/ptm_shared/finding_literature.py": {
+        "after": "d9bff6e0cee19740c507ea7480e7f6665cb6cc19c6f95eaaaeecbd7a1b991b42",
+        "before": "f587fc5b2070d7e2e4b5569f7225dcd0bec684e563082ccf2c4b4419c20b3f75"
+      },
+      "study/analysis_plan.json": {
+        "after": "8da9b159940baed2627e08b9af745d56f7c5667aa842dd57886c957243422d6f",
+        "before": "262abc427a97cafc1f0a839ce7dd2277963ebae4ae55461f46a4078a0f53a854"
+      }
+    },
+    "download_bytes": 384177469,
+    "download_sha256": "16fd11483872d5b94a0d0f44cdc421129de67de25bea3669ced2413c65fad243",
+    "elapsed_seconds": 304.203,
+    "network_calls": 0,
+    "new_rag_model_calls": 0,
+    "original_success_pointer_preserved": true,
+    "package_root": "/Users/josephk/Projects/PTM-platform/codex-inputs/g11-followup-02/final-preserved/order/enrichment_free_runs/g0-82d7ec9317cf4d8794bff1828dfb63b0",
+    "preserved_files": {
+      "figures/U_P_A_examples.svg": "04c52b017be5a4e4de48d190578dde6f8ad06f6bf1da1dd44f4ba33706addc76",
+      "figures/U_P_A_examples_source.csv": "1ee8ef327125b29dbbd3c4150fd770b80b1d03f3e6b31698f514e235ea5556bb",
+      "figures/coverage.svg": "4a704ffbd669ab97bb102e6fa726a1b4df5505817cf524484a14c7d8182f95e9",
+      "figures/coverage_source.csv": "d21c6cdd91ede594e43568d76c4b2ecb87aab8fdf520b8daff99e452cd66eaa4",
+      "figures/cross_layer_timing.svg": "e7ddea41eb6cfbc88a3a466c8082fb03b456cc8b7e27c0805d48b917070a3dc5",
+      "figures/cross_layer_timing_source.csv": "d0fb151db60fe2e2607880a4638dfbc0784acef2d9e942a26de7bc56c22d4064",
+      "figures/emerging_detection.png": "1c754112e825f178c5f92fc1b4101728688cb7c1a2ca5daad00c8e886252d32f",
+      "figures/emerging_detection.svg": "c747cbe72239bab951fe4c44b4d2b44d18d83eb247444bf0a6c9b91a8bea2f9f",
+      "figures/emerging_detection_columns.csv": "ddd3fb131a34783bd9ce3802fce1cac7d5a11c406ff85a122ebcbc5d73dd71cf",
+      "figures/emerging_detection_display.json": "60f825621a487fe2b9269324a2abd50597095fdc245dc3ab75154b79d71ff843",
+      "figures/emerging_detection_rows.csv": "2c1a18522f43924dc9e508b25efcde8c7f61c70d1d5c18fa471248760719e359",
+      "figures/emerging_detection_source.csv": "cf8647ac2089a2f264c4c46f65170fbb59301a3e27d45ee218977c5111d8cbfd",
+      "figures/figure_legends.json": "80a7cb0752eb2ecc440618b898eb36e7b5aab54a97613b8c264d76b4b500d31f",
+      "figures/kinase_footprints.svg": "2fae3a22f820118bb701b3fbe5ba4214ff3c37d13211c9ad652b1aa676ef3e6b",
+      "figures/kinase_footprints_points.csv": "fe8e4eb89795140e9bde4b25b3bf3288112f85fde66d4be908cf7fe9f8ae410d",
+      "figures/kinase_footprints_selection.csv": "a77c7f5bad74ab6d72e39dabfe789d8007d8ae1baf342cfa30f535b6d8e9c857",
+      "figures/kinase_footprints_source.csv": "130541865ae4eb439474e2d9a70b3a034303a8391561981cc0db7b7c745d075d",
+      "figures/parent_correction.svg": "8fe960629101de62212266fe4c6181c11974f489d71cb4352629d86a8f374ff7",
+      "figures/parent_correction_source.csv": "1ee8ef327125b29dbbd3c4150fd770b80b1d03f3e6b31698f514e235ea5556bb",
+      "figures/protein_trajectories.svg": "add013f646afa47b356d8644d4295e7943938ae771521f9aed248b92e886bc49",
+      "figures/protein_trajectories_points.csv": "190682e74a5b5db32aa2aa93c98f6b15eadcc5d019a55ef842b1332a66c78652",
+      "figures/protein_trajectories_selection.csv": "00470c180a34231796891042ac46a1dfe5b8348d36f63c28a4c8f8498bfc61dc",
+      "figures/protein_trajectories_source.csv": "08fe73c422929d0886cb0afd35b12206f8a867d25350b7d6e2205aa57faceb35",
+      "figures/substrate_contrast_heatmap.png": "9ec3ff16909e888f570d782a170b92d83043d06d427e3de1431f2289b0879491",
+      "figures/substrate_contrast_heatmap.svg": "e3abafb33c542768c7e8a14666d737baced1a942112025c6627699f8914781b2",
+      "figures/substrate_contrast_heatmap_columns.csv": "ce79f35782a9447988dbb2cda88b6539f5886368eee344f26158c2095c418973",
+      "figures/substrate_contrast_heatmap_display.json": "4fe3c6822effab558c5a77167acf07769ad7e5cfd8afd488e7e9c5a739e00a09",
+      "figures/substrate_contrast_heatmap_rows.csv": "2c1a18522f43924dc9e508b25efcde8c7f61c70d1d5c18fa471248760719e359",
+      "figures/substrate_contrast_heatmap_source.csv": "0936a28fab025b60255290ce4652a1f7274279740a536824b7802dadfa3b3875",
+      "figures/technical_dispersion.svg": "26f7d7e8583288bd4bc71557dd25b55270ed409716fd5b79f482bb9304618e9d",
+      "figures/technical_dispersion_source.csv": "6d79b51a75698ece3af9c8b8d0071d95599eccc488d92fa10c2de90cbd6b077d",
+      "kinase/candidate_sensitivity.csv": "da21e80ee7b8d806b64372de878be00ddfda0be3f05ba5ccd8d85e517e0124cb",
+      "kinase/kea3_results.csv": "353764d299b94915559b68c8c0ecf0e0774bbff1d5f1b3de2cd3c08fa7f4502f",
+      "kinase/kinase_candidate_edges.csv": "cc00b9ea136d3737aeb5305a5438be820a6b8e8617d645927c0aac083d4365a3",
+      "kinase/kinase_candidate_summary.csv": "5554e85db275bd1b4662d77c27576445ae5d564d8880dae1f0a828b89c3a9c1f",
+      "kinase/kinase_protein_context.csv": "9be64c03039f4abef8d6ea095e26de9985e88c110176cfaa58cb4f2817cac1b3",
+      "kinase/kinase_self_site_context.csv": "5b60a36aefcce6583e9f8dd57f2b28ce4496982872e97145c2b734887edd7dbb",
+      "kinase/kinase_technical_omissions.csv": "967ce65cbef2e9d58b843313a39a62a6b8b3cecae21d264ad569aec240e3e039",
+      "kinase/kinase_temporal_profiles.csv": "130541865ae4eb439474e2d9a70b3a034303a8391561981cc0db7b7c745d075d",
+      "kinase/method_executions.csv": "b218a4da60c1c37ccfbb32137645f0bc438fcee9a4f9a2dcc6ea23d59e38506b",
+      "kinase/method_membership.csv": "8c7661c34d21f6fa3042fb40be1162d5c17a72c2ccf17247fcfe8a3ad0aa1e0d",
+      "kinase/method_scores.csv": "bac9ec3ce979ced99aee840471afef057cefda197f5c9a8076e3c71045359ccd",
+      "kinase/substrate_contributions.csv": "c1a6b4a59f9732c73bc51b180eee37591d9a7c92b6b6308051cad680a94def69",
+      "quant/annotation_edges.csv": "ab555595c3f294dd63e65960e46c90744ac81efe49c5ebc9a08e0d8d93fb0bc4",
+      "quant/comparisons.csv": "0936a28fab025b60255290ce4652a1f7274279740a536824b7802dadfa3b3875",
+      "quant/detection.csv": "352228515a2a169aafd4699cce475fdfefb36a2f03c731b226966bf2ba2cbcb7",
+      "quant/emergent_kinase_evidence.csv": "cd8e1ac9670efe6d8ed65373f45780fce6a30fa79f6935f947d092ae84b2034e",
+      "quant/form_evidence_status.csv": "0229daf7ca1f0383d7f15dda2e67973cf07c9f7b17e6092fccc111db6f7c3639",
+      "quant/kinase_injection_omissions.csv": "c7dd60af7fb3ef655ec58ff9aec19d3d02391f30852bb61e3e1b7c456c28446b",
+      "quant/kinase_membership.csv": "0949fcf78cb754c90b43cb3314385934fca46e58f9e6298ccc8c8aca5e352915",
+      "quant/kinase_profiles.csv": "df78178a41f3aa50bc3fd391f6b9750598ed071a0f2a1259b89c467d81e56bee",
+      "quant/kinase_sensitivity.csv": "dd482c1d58e71e4154d9e6f9f9eeea632bff75e4b036724c12a4c9e333d48161",
+      "quant/primary_A_input.csv": "ec2129b23ab4b385fdec8809a2a6a7f075ea04578f4652eee64512dd471143b3",
+      "quant/protein_contrasts.csv": "08fe73c422929d0886cb0afd35b12206f8a867d25350b7d6e2205aa57faceb35",
+      "quant/runlevel.csv": "f9e960ed122fd3ba8773145a091110cf1c1539013ed8328bc1c8fcb88d8406a7",
+      "quant/site_mapping.csv": "2690b405e44bbf3ef56b521fd9cfc3063adff10d00756333721c52cef0807bea",
+      "quant/strict_parent_complete.csv": "8ccd0252df68b63eb67b60a764b8b644451c661afc1a76f453aeb6e25d3cf727",
+      "quant/strict_parent_paired.csv": "c1ced00d455ed75212b199aa5c18f7a6ba59e10e6f2b95ab544011a70b981b64",
+      "quant/strict_parent_peptide_masks.csv": "5bffe52d1722f46852f4945f5d3c3dda8e52c5ec4413a721427090ad2f0a241a",
+      "quant/strict_selected_sequences.csv": "9636bee80af780425c3eeea7720d314523cbda2b0155c0c8481e59f509394184",
+      "quant/strict_unmodified_proteins.csv": "69f8f847fd9e20c411c374f6b13dbbe6568b56dd725e1e13c319a7daf59fa661",
+      "quant/strict_unmodified_sequences.csv": "071cc1d937310233917710b8954305fe1a76055949a2a4567dceee095983846a",
+      "quant/summary.csv": "4d90b48233fb106cf67869f117f9221338846ab3e71a4574faa66e871598d100",
+      "quant/temporal_protein_summary.csv": "173746aff05917a8599bc83739c4fc10a5c449b0e16b12daf0181527570027ae",
+      "quant/validation_panel.csv": "90888a0d560e242d0a8854adf500f06d46fe0c51a7c7668d767e2e200e7bcdcd",
+      "reader/cards.csv": "c7d1c92f70a3743d0e641b1e2afb29c4cb56ac690b7c08cd83c1d6b25c14440b",
+      "reader/coverage.csv": "46eca8b2e4f2c0b166d10efbf51ff73d0015207cdead7de3742e762ca9155922",
+      "reader/findings.csv": "fa49cfe8dc760a5ea15f261329d9c961ea0d48f47f572fab99704aaf5d737d25",
+      "reader/literature_comparisons.csv": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+      "reader/literature_search.csv": "7d710661579aef79f4a961d32896e365ed572f0c16766465302e96463d329f8c",
+      "reader/literature_sources.csv": "5738fffeeff20a561a48f0f0d3a20bdcb8ab6c7e2bcd930a76b9a7c9d8cd1100",
+      "reader/literature_subject_execution.csv": "73bf66b27803f12a1452dec22eab8a0031bac8336a237ed75e7442ffbe244237",
+      "reader/literature_subject_links.csv": "73064b9d51f5673c24ee80dd7623b8383847bf108344b69a65152cf415dd4b97",
+      "reader/literature_subject_summary.json": "6640427fa9af7fd27a89a9c59b334914d9f3c81e7d5c62b2ae88333eb91f8126",
+      "reader_adapter/form_contrasts.csv": "8cd2a0ffd4f94479c0d983610828406868f468de31326782ac1cc9ef89e1fb09",
+      "reader_adapter/form_identity.csv": "31bd366391f9b87991b15fd6514141b9e0ac68ee388c55b26dad101cd1d7fd43",
+      "reader_adapter/precursor_membership.csv": "c2fee673621c5b23a73f1f676b8fbfda5ad35988e84ca0eeee2c0ade49dc4b01",
+      "reader_adapter/study_metadata.csv": "2d48ee7466c7e9d51537fe558c7c2f012698fe2079ca7eaeef0c2b53facfa2fb",
+      "references/finding_literature_execution.py": "75b72673a4d720a414ef557967ab89be253d89cbfd80862f680c6e3da286d628",
+      "references/finding_literature_pin.json": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214",
+      "references/literature_pin.json": "de95eed8076da7939fc8e70391320e72e92a573113c0ff55a434b045565ccf7c",
+      "references/literature_subject_execution_pin.json": "019b4d79987829288e214ab43d33c465cb2b884b3650f55558e2ba7738991356",
+      "references/source_pin.json": "f49b30786ce34ddf219aa5d868623d7eff93277752c7571c68869a55b9ef9b33",
+      "science/calibrated_calls.csv": "98c834126bb0d6a1df2a005d78ba3731742de0494d3ce8a528b09416df91d25d",
+      "science/calibration_provenance.csv": "993764d17adaedaea7ce5aa1e21ff9b3a1736877fe3267ba2a78587a580a5b28",
+      "science/evidence_dependency_groups.csv": "2650104b979ff79736d44b2616aacb564a9579e8cf7710146735e66397d2f1e2",
+      "science/group_excluded_anchors.csv": "4029a264f28627a93380c9c2b58940343a2724de7d3981830eb692dea1303e03",
+      "science/inference_results.csv": "c33fd2aefa94beb162555926203a91367e0b7c665b8eb0a5e807a69864da0698",
+      "science/kinase_calls.csv": "c33fd2aefa94beb162555926203a91367e0b7c665b8eb0a5e807a69864da0698",
+      "science/localization_by_contrast.csv": "8a1bc216501a8144f1108f6fd21da50fd263709c55593e1dd8bd03b05e0ab5ec",
+      "science/measurement_observations.csv": "7ec7e26708ae60bac85cf2aacb5b8e7107c76f4e69d793a7c6a974026af5abe5",
+      "science/observation_sites.csv": "dfb5af701edf4a2de9e5e398dd73d7c6ae232f78e6ee2480fb992675f65a5861",
+      "science/official_parity_results.json": "c70468d840c8ae43f8234f575b7ed7b60f8f6859b5bb38fa92039800321fe460",
+      "science/perturbation_validation.csv": "af0d9228f01323a2fb279a06ac2805c3538d6913366e82c65af256d23745a076",
+      "science/reference_inventory.csv": "a1ee6875bce7b09f947ba73e057303e97b351b4d29986dc865ce4104120a3807",
+      "science/replicate_uncertainty.csv": "1c5b7323e799cc78c6479bcd6275de81511c59b3a78470526cdcd346976cc4cc",
+      "science/resource_registry.json": "c219a8f5cb767165f17486ef46c3d82fc8c76644580c1cfe92016cc55db8c607",
+      "science/site_identity_audit.csv": "11efc4b4397c499fe81e7246919fec1411b15d019105100f91da9cb13852f94a",
+      "science/site_report_observations.csv": "a7e15f62ecc51859bb35991978d3aba233d1c012c069257cb578c23b860fb9f9",
+      "science/specificity_scores.csv": "d9280b0b93056dbd90d60eae26da133c329555d467abbd51f184ca196893f7cf",
+      "temporal/cross_layer_links.csv": "d0fb151db60fe2e2607880a4638dfbc0784acef2d9e942a26de7bc56c22d4064",
+      "temporal/group_excluded_cowave.csv": "70b3f2372553b51933918248777c6a9bc7995b7280d77daa19d537708b03cc3e",
+      "temporal/interval_contrasts.csv": "893fb3e5ee3d577569216ddb9a02a640f5fc980f63b4f8e604731098f4f8face",
+      "temporal/kinase_fixed_membership.csv": "38f396dd90b2e1d68f1edaf19f6f1d0627f180263c5f8ccb963423f5f0013236",
+      "temporal/kinase_temporal_features.csv": "9f73c90bcdc75f737930e08505a0c7ce71910474fb16a1d9920509b101b62c9f",
+      "temporal/protein_temporal_features.csv": "0d84a0a9a77cafc3beaa3dc85d3d978f048458ea3f007419c0ae3435cfdec70b",
+      "temporal/ptm_temporal_features.csv": "ceb73f8d8819df451e0efe11c15d56dfaf311d72722db4849780bdcbd8139616",
+      "temporal/target_excluded_anchors.csv": "90da84777a22f9842d96a2afcd975138695a3ceb9a42f1f245a6337513ec684e",
+      "temporal/temporal_series.csv": "f22b2f38c12c7abda074d12d33f2b691dcbd7b1bc9ab4f8face16efe70f68109"
+    },
+    "replay": {
+      "catalog_available": true,
+      "files": [
+        {
+          "byte_equal": true,
+          "file": "reader/evidence_catalog.json",
+          "sha256": "80b6218ebc0c52bc8254e214bd753af8232fc970de91a72a4c18755fd64446fb"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/evidence_index.csv",
+          "sha256": "b96c04d50c9001fc99704389bc4111971f43867f2163bfa66330fd0d66101b5b"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/evidence_links.csv",
+          "sha256": "86060731dfc4533d7e1e0eca4e781c47ea1b725771a9608618590d1401b5ecaa"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/EVIDENCE_ACCESS.md",
+          "sha256": "55413a7e580a31726b3abea9d0d4f29a70eee5960c30608b20e3147d9de81bce"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_review_subjects.csv",
+          "sha256": "3446690ca6af9da3414bf107eea94b153a7cc2d2a5cf17ce3d0a3a23ebb78491"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_review_plan.json",
+          "sha256": "2d9790123a2c32a42a41cd3ddf032c81f8b0bb0d1f3f3eca13338963ecc0b11c"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/LITERATURE_REVIEW_PLAN.md",
+          "sha256": "d4e21d7e07a83faa9b4667e669c590341f092400e23391916abaa6b0981370cd"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_subject_execution.csv",
+          "sha256": "73bf66b27803f12a1452dec22eab8a0031bac8336a237ed75e7442ffbe244237"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_subject_links.csv",
+          "sha256": "73064b9d51f5673c24ee80dd7623b8383847bf108344b69a65152cf415dd4b97"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_subject_summary.json",
+          "sha256": "6640427fa9af7fd27a89a9c59b334914d9f3c81e7d5c62b2ae88333eb91f8126"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/LITERATURE_SUBJECT_REVIEW.md",
+          "sha256": "ebbd3ae80d5ab5cc34d59c7fcfbc3c86dc1124a2b2eced9be2c0fabb59de7e7e"
+        },
+        {
+          "byte_equal": true,
+          "file": "references/literature_subject_execution_pin.json",
+          "sha256": "019b4d79987829288e214ab43d33c465cb2b884b3650f55558e2ba7738991356"
+        },
+        {
+          "byte_equal": true,
+          "file": "references/literature_subject_binding.json",
+          "sha256": "ee47cef43905aa5fcaf507a0072fd84a1ea142df6162f1ef22b9ab2f7616e2b6"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/authoring_packet.json",
+          "sha256": "ea2b54fc1f2c2ba63682a6545c5a36c47a2157ae2c78d1e4c44ccf077ed17a7e"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/READ_ME.md",
+          "sha256": "6a7d5b0a5d8424aa43b8ee9db1faa90e6428fc64444933675f2ea8ded3dba37b"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/packet.csv",
+          "sha256": "5adf28aec3a161cae15e922826224cd2ebe2559fee7b68700dd6d840f8840296"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_subject_execution.csv",
+          "sha256": "73bf66b27803f12a1452dec22eab8a0031bac8336a237ed75e7442ffbe244237"
+        },
+        {
+          "byte_equal": true,
+          "file": "reader/literature_subject_links.csv",
+          "sha256": "73064b9d51f5673c24ee80dd7623b8383847bf108344b69a65152cf415dd4b97"
+        }
+      ],
+      "frozen_typed_literature_rebuilt": true,
+      "literature_review_plan_rebuilt": true,
+      "network_requests": 0,
+      "new_model_calls": 0,
+      "passed": true,
+      "previous_reader_interpretation_rebuilt": false,
+      "projection_inputs": null,
+      "repository_code_used": false,
+      "run_id": "g0-82d7ec9317cf4d8794bff1828dfb63b0",
+      "scientific_requantification": false,
+      "scope": "reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables",
+      "validation": {
+        "scope": "M3 plan from original M1 index/M2 links; no search/model or prior literature reinterpretation"
+      },
+      "whole_evidence_projection_rebuilt": false
+    },
+    "run_id": "g0-82d7ec9317cf4d8794bff1828dfb63b0",
+    "scientific_calculation_calls": 0,
+    "scope": "saved reader revision and real Results FileResponse; DB/auth doubles",
+    "zip": "/Users/josephk/Projects/PTM-platform/codex-inputs/g11-followup-02/final-preserved/order/astra_analysis_package_g0-82d7ec9317cf4d8794bff1828dfb63b0.zip",
+    "zip_sha256": "16fd11483872d5b94a0d0f44cdc421129de67de25bea3669ced2413c65fad243"
+  },
+  "intermediate_reader_revision": {
+    "elapsed_seconds": 307.679,
+    "run_id": "g0-0542264fdfbb430cbd28069a7964617f",
+    "zip_sha256": "dd06df39a35fa004a49dd05dbad64f405d6341268ffdfcd1ac99e0ad5679a484"
+  },
+  "original_zip_preservation": {
+    "g11": "58ab453b60b31d033b6f87cda23847c141a986520a5ec76476a83b203a743de4",
+    "round01": "5406f564b091c8b8b9cdb2e2f66f45552c4d574a79472a4675f8e5258f5e8ce0",
+    "unchanged": true
+  },
+  "status": "Round02 implemented and locally validated; historical causal reconstruction remains unavailable",
+  "production_files": [
+    "ptm_shared/astra_literature.py",
+    "ptm_shared/astra_literature_review.py",
+    "ptm_shared/astra_package.py",
+    "ptm_shared/astra_reader_revision.py",
+    "ptm_shared/finding_literature.py",
+    "workers/common/generation_trace.py",
+    "workers/common/llm_client.py"
+  ]
+}
