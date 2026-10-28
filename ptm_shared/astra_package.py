@@ -33,7 +33,7 @@ from .generic_kinase import fasta_taxonomy
 VERSION='astra_analysis_package.v4'
 READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py','astra_literature_review.py']
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
-    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
+    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','study_input_metadata.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py']))
 EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['candidate_id','contrast_id','track'],
     'substrate_contributions':['contribution_id'],'candidate_sensitivity':['candidate_id','contrast_id','track','omission_kind','omitted_id'],
@@ -47,6 +47,12 @@ EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['ca
     'coverage_funnel':['metric','denominator'],'kinase_candidate_summary':['candidate_id','series_id'], 'censoring_bounds':['bound_id'],
     'kinase_protein_context':['candidate_id','contrast_id','protein_group'],'kinase_self_site_context':['candidate_id','form_id','contrast_id'],
     'kinase_technical_omissions':['candidate_id','contrast_id','track','omitted_injection_id']}
+
+
+def write_study_inputs(directory, snapshot, context, design):
+    """The package's input metadata boundary, usable without scientific execution."""
+    for name,value in [('user_input_snapshot',snapshot),('study_context',context),('study_design',design)]:
+        json_write(Path(directory)/'study'/(name+'.json'),value)
 
 
 def finding_execution_code(root, pin, preferred_run=None):
@@ -699,8 +705,8 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                     specificity='see_methods_method_registry_and_resource_manifest')
             provenance['provenance_id']=object_hash({k:v for k,v in provenance.items() if k!='provenance_id'})
         json_write(directory/'provenance.json',provenance)
-        for name,value in [('study/user_input_snapshot',snapshot),('study/study_context',context),('study/study_design',design),
-            ('study/analysis_plan',plan),('study/input_transfer_validation',transfer),('references/literature_pin',literature),
+        write_study_inputs(directory,snapshot,context,design)
+        for name,value in [('study/analysis_plan',plan),('study/input_transfer_validation',transfer),('references/literature_pin',literature),
             ('references/source_pin',sources),('evidence/readiness',readiness),('methods/normalization',{'primary':norm,'sensitivity':altnorm}),
             ('methods/motif',motif),('reproducibility/data_dictionary',dictionary),('reproducibility/package_validation',{'checks':validation,'unexpected_input_omissions':transfer['unexpected_missing']})]:json_write(directory/(name+'.json'),value)
         json_write(directory/'references/bibliographic_records.json',sources.get('bibliography',[]))

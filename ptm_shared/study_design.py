@@ -107,6 +107,17 @@ def _origin(source, original, status='imported', rule=None):
     return {'source':source,'original_value':deepcopy(original),'confirmation_status':status,'conversion_rule':rule}
 
 
+def _generated(provenance, path, value):
+    """Refresh only recorded automatic output; direct edits and old origins survive."""
+    record=provenance.get(path,{})
+    return 'resolved_value' in record and record['resolved_value']==value and record.get('confirmation_status')!='user_confirmed'
+
+
+def _record_generated(provenance, path, value):
+    provenance[path]={**provenance.get(path,_origin('resolver',None,'derived')),
+                      'resolved_value':deepcopy(value)}
+
+
 def _metadata(context):
     original={k:deepcopy(context.get(k)) for k in CONTEXT_FIELDS}
     acquisition=clean_context(context.get('acquisition') or {})
@@ -137,6 +148,10 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
     if explicit and explicit.get('schema_version') not in {VERSION,SCIENCE_VERSION}:raise DesignError([issue('schema_version','study_design.schema_version','Unsupported study design schema; explicit migration is required')])
     previous=explicit if explicit.get('schema_version') in {VERSION,SCIENCE_VERSION} else {}
     science=context.get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'} or previous.get('schema_version')==SCIENCE_VERSION
+    metadata_issues=[]
+    if str(context.get('quantitation_export_mode','')).startswith('astra_analysis.'):
+        from .study_input_metadata import reconcile_diann_version
+        context,metadata_issues=reconcile_diann_version(context)
     axis=context.get('design_axis',previous.get('study',{}).get('design_axis','time_course')) if science else 'time_course'
     structural=validate_structure(previous) if previous else []
     if structural:
@@ -144,6 +159,8 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
     if previous:
         for key in CONTEXT_FIELDS:
             if key not in context:context[key]=previous.get('study',{}).get('original_context',{}).get(key)
+        for key in ['acquisition','processing','pre_treatment','enrichment_status']:
+            if key not in context and key in previous.get('study',{}):context[key]=deepcopy(previous['study'][key])
     conditions=deepcopy(previous.get('conditions') or [])
     arms=deepcopy(previous.get('arms') or context.get('treatment_arms') or [])
     manifest=context.get('sample_manifest') or {}
@@ -154,7 +171,24 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
         if legacy and legacy.get('condition')=='Control' and row['group'].lower()=='control' and not row.get('condition_id'):
             row['condition']='Control'  # confirmed v1 grouping takes precedence over draft raw time labels
     provenance=deepcopy(previous.get('field_provenance') or {})
-    errors=[]; candidates=time_list(context.get('time_points'))
+    old_provenance=deepcopy(provenance)
+    old_records={collection:{row[key]:row for row in previous.get(collection,[])}
+                 for collection,key in [('conditions','condition_id'),('injections','injection_id'),
+                                        ('materials','material_id'),('contrasts','contrast_id'),('arms','arm_id')]}
+    def automatic(collection,key):
+        old=old_records[collection].get(key)
+        return old is None or _generated(old_provenance,f'{collection}.{key}',old)
+    # Structured source arms can be corrected without editing a second design.
+    for declared in context.get('treatment_arms') or []:
+        aid=declared['arm_id']
+        if automatic('arms',aid):
+            arms=[a for a in arms if a['arm_id']!=aid]+[deepcopy(declared)]
+            provenance[f'arms.{aid}']=_origin('analysis_context.treatment_arms',declared,'provided')
+    labels=list(dict.fromkeys(r['condition'] for r in rows))
+    # Retire only unchanged automatic records. Unknown historical origins and
+    # user overrides remain visible for field-specific conflict resolution.
+    conditions=[c for c in conditions if c.get('label') in labels or not automatic('conditions',c['condition_id'])]
+    errors=list(metadata_issues); candidates=time_list(context.get('time_points'))
     if explicit and not previous:errors.append(issue('schema_version','study_design.schema_version','Unsupported study design schema'))
     old_treatment=previous.get('study',{}).get('original_context',{}).get('treatment')
     pending_conflicts=deepcopy(previous.get('metadata_conflicts') or [])
@@ -163,33 +197,42 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
         if any(t.get('dose') is not None for arm in arms for t in arm.get('treatments',[])):
             pending_conflicts=[issue('treatment_context_conflict','arms','Treatment description changed while structured doses remain; review their assignment',original_value=old_treatment)]
     errors.extend(pending_conflicts)
-    labels=list(dict.fromkeys(r['condition'] for r in rows))
     existing_labels={c.get('label'):c for c in conditions}
     for label in labels:
-        if label not in existing_labels:
-            group=[r for r in rows if r['condition']==label]
-            condition_id=str(group[0].get('condition_id') or stable_id('condition',label))
-            roles={str(r.get('role') or ('reference' if r['group'].lower()=='control' else 'target')) for r in group}
-            parsed=label_time(label)
-            arm_name=group[0].get('arm_id') or group[0].get('arm')
-            if not arm_name:
-                stripped=TIME_RE.sub('',label.replace('_',' ')).strip(' -_') if parsed else ''
-                arm_name=('reference' if roles=={'reference'} else stripped or context.get('treatment') or 'treatment')
-            arm_id=next((a['arm_id'] for a in arms if a.get('name')==arm_name or a.get('arm_id')==arm_name),stable_id('arm',arm_name))
-            if not any(a['arm_id']==arm_id for a in arms):
-                arms.append({'arm_id':arm_id,'name':arm_name,'treatments':[],
-                             'source':'sample_config.arm' if group[0].get('arm_id') or group[0].get('arm') else 'legacy_condition_or_treatment_description'})
-            c={'condition_id':condition_id,'arm_id':arm_id,'label':label,'role':next(iter(roles)) if len(roles)==1 else 'unknown'}
-            if len(roles)>1:errors.append(issue('condition_role_conflict',f'conditions.{condition_id}.role','Conflicting condition roles'))
-            conditions.append(c);existing_labels[label]=c
+        old_condition=existing_labels.get(label)
+        group=[r for r in rows if r['condition']==label]
+        condition_id=str((old_condition or {}).get('condition_id') or group[0].get('condition_id') or stable_id('condition',label))
+        roles={str(r.get('role') or ('reference' if r['group'].lower()=='control' else 'target')) for r in group}
+        parsed=label_time(label)
+        arm_name=group[0].get('arm_id') or group[0].get('arm')
+        if not arm_name:
+            stripped=TIME_RE.sub('',label.replace('_',' ')).strip(' -_') if parsed else ''
+            arm_name=('reference' if roles=={'reference'} else stripped or context.get('treatment') or 'treatment')
+        arm_id=next((a['arm_id'] for a in arms if a.get('name')==arm_name or a.get('arm_id')==arm_name),stable_id('arm',arm_name))
+        if not any(a['arm_id']==arm_id for a in arms):
+            arms.append({'arm_id':arm_id,'name':arm_name,'treatments':[],
+                         'source':'sample_config.arm' if group[0].get('arm_id') or group[0].get('arm') else 'legacy_condition_or_treatment_description'})
+        c={'condition_id':condition_id,'arm_id':arm_id,'label':label,'role':next(iter(roles)) if len(roles)==1 else 'unknown'}
+        if len(roles)>1:errors.append(issue('condition_role_conflict',f'conditions.{condition_id}.role','Conflicting condition roles'))
+        if old_condition is None:conditions.append(c)
+        else:
+            for key,value in c.items():
+                path=f'conditions.{condition_id}.{key}'
+                if automatic('conditions',condition_id) or _generated(old_provenance,path,old_condition.get(key)):
+                    old_condition[key]=value
+                    _record_generated(provenance,path,value)
+        if old_condition is None:
+            for key,value in c.items():_record_generated(provenance,f'conditions.{condition_id}.{key}',value)
+        existing_labels[label]=old_condition or c
     for c in conditions:
         cid=c.get('condition_id'); path=f'conditions.{cid}.time'
+        automatic_time=(cid not in old_records['conditions'] or _generated(old_provenance,path,c.get('time'))) and c.get('time_conflict_resolution')!='use_confirmed_structured'
         source_labels=sorted({r['raw_condition'] for r in rows if r['condition']==c.get('label')})
         c['source_labels']=source_labels
         if axis=='cross_sectional':
             c.setdefault('time',None)
             continue
-        explicit_time=c.get('time')
+        explicit_time=None if automatic_time else c.get('time')
         parsed=label_time(c.get('label',''))
         m=manifest_conditions.get(c.get('label'),{})
         imported=None
@@ -220,6 +263,7 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
                 errors.append(issue('time_points_conflict',path,'Condition time is absent from the declared time_points list',original_time_points=context.get('time_points')))
         else:
             c['time']=None;errors.append(issue('time_unresolved',path,'Confirm a numerical time and its unit'))
+        if automatic_time:_record_generated(provenance,path,c.get('time'))
     known_ids={c.get('condition_id') for c in conditions}
     condition_by_label={c['label']:c for c in conditions}
     materials=deepcopy(previous.get('materials') or [])
@@ -233,20 +277,23 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
     for row in rows:
         sid=row['sample_id']; c=condition_by_label[row['condition']]; cid=c['condition_id']
         old=old_injections.get(sid)
-        redeclare=declaration!=previous.get('replication_declaration',declaration)
-        if old and old.get('condition_id')==cid and not redeclare:
-            injections.append(old);continue
         legacy=declared_samples.get(sid)
-        item={'injection_id':stable_id('injection',sid),'input_column':sid,'condition_id':cid,'material_id':None,
+        if legacy and legacy.get('condition')!=row['condition']:
+            errors.append(issue('manifest_condition_conflict',f'sample_manifest.samples.{sid}.condition','Manifest condition differs from Sample Config',configured=row['condition'],declared=legacy.get('condition')))
+        item={'injection_id':old['injection_id'] if old else stable_id('injection',sid),'input_column':sid,'condition_id':cid,'material_id':None,
               'technical_injection_id':None,'legacy_replicate':row.get('legacy_replicate')}
+        old_material=material_map.get((old or {}).get('material_id'))
+        if old and (not automatic('injections',old['injection_id']) or (old_material and not automatic('materials',old_material['material_id']))):
+            injections.append({**old,'condition_id':cid});continue
         source='unresolved'; biological=None; pair=None
         if legacy and legacy.get('condition')==row['condition'] and legacy.get('biological_unit'):
             biological=legacy['biological_unit']; mid=stable_id('material',cid+'|'+biological)
             pair=biological if manifest.get('pairing')=='paired' else None
             item['technical_injection_id']=legacy.get('technical_injection')
             source='sample_manifest.v1.biological_unit'
-            provenance[f'materials.{mid}']=_origin(source,legacy,'confirmed',
-                'v1 grouping/statistical ID → biological_unit_id; material scoped to condition; pairing copied, never inferred')
+            if automatic('materials',mid):
+                provenance[f'materials.{mid}']=_origin(source,legacy,'confirmed',
+                    'v1 grouping/statistical ID → biological_unit_id; material scoped to condition; pairing copied, never inferred')
         elif declaration=='technical_per_condition':
             mid=stable_id('material',cid); source='user_replication_declaration'
             # One sampled material is known; no donor identity is invented.
@@ -258,18 +305,21 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
             mid=None
         if mid:
             item['material_id']=mid
-            material_map.setdefault(mid,{'material_id':mid,'biological_unit_id':biological,'pair_id':pair,'source':source})
+            if automatic('materials',mid):
+                material_map[mid]={'material_id':mid,'biological_unit_id':biological,'pair_id':pair,'source':source}
         injections.append(item)
     used_materials={i['material_id'] for i in injections if i.get('material_id')}
-    materials=[m for key,m in material_map.items() if key in used_materials]
-    contrasts=deepcopy(previous.get('contrasts') or [])
-    if not contrasts:
+    materials=[material_map[mid] for mid in dict.fromkeys(i['material_id'] for i in injections if i.get('material_id')) if mid in material_map]
+    contrasts=[deepcopy(c) for c in previous.get('contrasts',[]) if not automatic('contrasts',c['contrast_id'])]
+    if not contrasts or len(contrasts)<len([c for c in conditions if c.get('role')!='reference']):
         references=[c for c in conditions if c.get('role')=='reference']
         for c in conditions:
             if c.get('role')=='reference':continue
+            if any(v.get('target_condition_id')==c['condition_id'] for v in contrasts):continue
             reference=c.get('reference_condition_id') or (references[0]['condition_id'] if len(references)==1 else None)
             if reference:
-                contrasts.append({'contrast_id':stable_id('contrast',c['condition_id']+'|'+reference),
+                old=next((v for v in previous.get('contrasts',[]) if v['target_condition_id']==c['condition_id'] and v['reference_condition_id']==reference),{})
+                contrasts.append({'contrast_id':old.get('contrast_id') or stable_id('contrast',c['condition_id']+'|'+reference),
                     'target_condition_id':c['condition_id'],'reference_condition_id':reference,
                     'pairing':manifest.get('pairing') if declared_samples else context.get('pairing_policy','unknown'),
                     'purpose':'target_vs_declared_reference','source':'declared_condition_reference' if c.get('reference_condition_id') else 'single_existing_reference_group'})
@@ -277,6 +327,7 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
     for arm in arms:
         if not arm.get('treatments') and arm.get('name')==context.get('treatment'):
             arm['treatments']=[{'name':context.get('treatment'),'dose':None,'unit':None,'dose_status':'unknown'}]
+    arms=[a for a in arms if any(c['arm_id']==a['arm_id'] for c in conditions) or not automatic('arms',a['arm_id'])]
     legacy_dose=(context.get('acquisition_metadata') or {}).get('insulin_concentration')
     if legacy_dose not in (None,'','unknown'):
         if str(context.get('treatment','')).strip().casefold()=='insulin':
@@ -298,6 +349,12 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
         'temporal_windows':clean_context(context.get('temporal_windows') or previous.get('temporal_windows') or {})}
     for key,value in study['original_context'].items():
         provenance['study.'+key]=_origin('analysis_context.'+key,value,'provided' if value is not None else 'unknown')
+    for collection,key in [('conditions','condition_id'),('injections','injection_id'),('materials','material_id'),('contrasts','contrast_id'),('arms','arm_id')]:
+        for row in design[collection]:
+            if automatic(collection,row[key]):_record_generated(provenance,f'{collection}.{row[key]}',row)
+        active={row[key] for row in design[collection]}
+        for path in list(provenance):
+            if path.startswith(collection+'.') and path.split('.')[1] not in active:provenance.pop(path)
     errors.extend(validate_study_design(design,rows=rows))
     # Retain unresolved materials as explicit descriptive-only observations.
     if any(not i.get('material_id') for i in injections):

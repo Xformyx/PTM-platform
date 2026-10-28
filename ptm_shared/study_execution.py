@@ -7,6 +7,9 @@ from .annotation_registry import require_compatible
 
 def resolve_context(context,sample_config,*,taxonomy_id=None,species=None,ptm_type='phosphorylation'):
     context=dict(context or {})
+    if str(context.get('quantitation_export_mode','')).startswith('astra_analysis.'):
+        from .study_input_metadata import reconcile_diann_version
+        context,_=reconcile_diann_version(context)
     context['study_design']=resolve_study_design(context,sample_config,taxonomy_id=taxonomy_id,species=species,ptm_type=ptm_type)
     return context
 

@@ -59,6 +59,22 @@ def merge_analysis_context(existing, patch):
     for key, value in (patch or {}).items():
         if value is None:
             result.pop(key, None)
+            # Clear the corresponding canonical fallback as well. A deleted
+            # source must not be resurrected from its last preview on resolve.
+            design=result.get('study_design') or {}
+            study=design.get('study') or {}
+            study.get('original_context',{}).pop(key,None)
+            study.pop(key,None)
+            if key in {'replication_declaration','validation_panel','temporal_windows'}:
+                design.pop(key,None)
+            if key in {'science','processing','acquisition_metadata'} and (result.get('metadata_provenance') or {}).get('diann_version'):
+                linked=result['metadata_provenance'].pop('diann_version')
+                for section,field in [('science','diann_version'),('processing','software_version'),('acquisition_metadata','diann_version')]:
+                    metadata=result.get(section) or {}
+                    recorded=metadata.get(field)
+                    if isinstance(recorded,dict):recorded=recorded.get('value')
+                    if recorded==linked.get('resolved_value'):metadata.pop(field,None)
+                study.get('processing',{}).pop('software_version',None)
         else:
             result[key] = deepcopy(value)
     policy = result.get("normalization_policy", "legacy_median.v1")

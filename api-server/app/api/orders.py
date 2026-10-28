@@ -500,7 +500,7 @@ async def resolve_order_design(body:dict=Body(...),user=Depends(get_current_user
             sources=read_source_pin(get_settings().REFERENCE_DIR,pin) if pin and not context.get('refresh_references',False) else None
             plan['source_execution']=source_execution_record(context,pin,sources,preview=True)
             plan['source_policy']=plan['source_execution']['message']
-        return {'study_design':context['study_design'],'analysis_plan':plan}
+        return {'study_design':context['study_design'],'analysis_context':context,'analysis_plan':plan}
     except (ValueError,TypeError,KeyError) as error:
         raise HTTPException(status_code=422,detail={'code':'design_input_invalid','message':str(error)}) from error
 
@@ -1121,6 +1121,7 @@ async def get_order(
 
 
 class UpdateOrderOptionsRequest(BaseModel):
+    sample_config: Optional[dict | list] = None
     analysis_context: Optional[dict] = None
     analysis_options: Optional[dict] = None
     report_options: Optional[dict] = None
@@ -1150,10 +1151,12 @@ async def update_order_options(
         )
     if body.analysis_options is not None:
         order.analysis_options = body.analysis_options
+    if body.sample_config is not None:
+        order.sample_config = body.sample_config
     if body.analysis_context is not None:
         _reject_undeclared_export_mode(order.analysis_context, body.analysis_context)
         order.analysis_context = _updated_analysis_context(order, body.analysis_context)
-    elif body.analysis_options is not None:
+    elif body.analysis_options is not None or body.sample_config is not None:
         order.analysis_context = _updated_analysis_context(order, {})
     if body.report_options is not None:
         order.report_options = _normalize_report_options(body.report_options)
@@ -1165,6 +1168,7 @@ async def update_order_options(
         "id": order.id,
         "order_code": order.order_code,
         "analysis_context": order.analysis_context,
+        "sample_config": order.sample_config,
         "analysis_options": order.analysis_options,
         "report_options": order.report_options,
         "rag_collections": order.rag_collections,
@@ -1453,6 +1457,7 @@ async def create_order(
 
 class DuplicateOrderRequest(BaseModel):
     new_order_name: str
+    sample_config: Optional[dict | list] = None
     report_options: Optional[dict] = None
     analysis_options: Optional[dict] = None
     analysis_context: Optional[dict] = None
@@ -1529,7 +1534,7 @@ async def duplicate_order(
             ptm_type=source.ptm_type,
             species=source.species,
             organism_code=source.organism_code,
-            sample_config=source.sample_config,
+            sample_config=body.sample_config if body.sample_config is not None else source.sample_config,
             analysis_context=analysis_ctx,
             analysis_options=analysis_opts,
             report_options=report_opts,
