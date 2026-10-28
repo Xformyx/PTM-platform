@@ -4131,6 +4131,7 @@ export default function OrderDetail() {
   }, [duplicateModalOpen, order]);
 
   const handleDuplicateConfirm = async (opts: {
+    sample_config?: unknown;
     analysis_context: Record<string, unknown>;
     analysis_options: Record<string, unknown>;
     report_options: Record<string, unknown>;
@@ -4140,6 +4141,7 @@ export default function OrderDetail() {
     try {
       const result = await api.post<{ id: number; order_code: string }>(`/orders/${order.id}/duplicate`, {
         new_order_name: dupName.trim(),
+        sample_config: opts.sample_config,
         report_options: opts.report_options,
         analysis_options: opts.analysis_options,
         analysis_context: opts.analysis_context,

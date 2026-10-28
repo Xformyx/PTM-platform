@@ -19,7 +19,8 @@ import QuickAnalysisCustomFields from "./QuickAnalysisOptions";
 import { cn } from "@/lib/utils";
 import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 import SampleDesignFields from "./SampleDesignFields";
-import { designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode, persistedLiteratureSelection } from "@/lib/analysisContext";
+import StudyInputFields from "./StudyInputFields";
+import { resolveSubmission, designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode, persistedLiteratureSelection } from "@/lib/analysisContext";
 
 const CLOUD_PROVIDERS = ["gemini", "openai", "anthropic"] as const;
 
@@ -77,6 +78,7 @@ interface LlmModelOption {
 }
 
 export interface RerunConfirmPayload {
+  sample_config?: unknown;
   analysis_context: Record<string, unknown>;
   analysis_options: Record<string, unknown>;
   report_options: Record<string, unknown>;
@@ -117,6 +119,8 @@ export default function RerunOptionsModal({
   onDuplicateNameChange,
 }: Props) {
   const [analysisContext, setAnalysisContext] = useState<Record<string, string>>(DEFAULT_CONTEXT);
+  const [sourceSamples,setSourceSamples]=useState<ReturnType<typeof designSamples>>([]);
+  const [editingInput,setEditingInput]=useState(false);
   const [structuredContext, setStructuredContext] = useState<Record<string, unknown>>({});
   const [analysisMode, setAnalysisMode] = useState<"ptm_only" | "ptm_nonptm_network">("ptm_only");
   const [temporalContract, setTemporalContract] = useState<TemporalContract>(DEFAULT_TEMPORAL_CONTRACT);
@@ -194,6 +198,8 @@ export default function RerunOptionsModal({
 
   useLayoutEffect(() => {
     if (!open || !order) return;
+    setEditingInput(false);
+    setSourceSamples(designSamples(order.sample_config));
     setStructuredContext(withPersistedExportMode((order.analysis_context || {}) as Record<string, unknown>));
   }, [open, order]);
 
@@ -294,8 +300,8 @@ export default function RerunOptionsModal({
     if (!order) return;
     setSubmitting(true);
     try {
-      const savedContext = withPersistedExportMode(mergeAnalysisContext(structuredContext, analysisContext));
-      const errors = designErrors(savedContext, designSamples(order.sample_config), designSamples(order.secondary_sample_config));
+      const savedContext = await resolveSubmission(withPersistedExportMode(mergeAnalysisContext(structuredContext, analysisContext)), sourceSamples, order.species??'human', order.ptm_type??'phosphorylation', body=>api.post('/orders/resolve-design',body));
+      const errors = designErrors(savedContext, sourceSamples, designSamples(order.secondary_sample_config));
       if (errors.length) throw new Error(errors.join(" "));
       const optsForApi: Record<string, unknown> = {
         mode: analysisOptions.mode,
@@ -326,6 +332,7 @@ export default function RerunOptionsModal({
         ...researcherReportConfigFields(Boolean(reportConfig.reader_authoring_shadow)),
       };
       await onConfirm({
+        ...(String(savedContext.quantitation_export_mode).startsWith("astra_analysis.")&&JSON.stringify(sourceSamples)!==JSON.stringify(designSamples(order.sample_config))?{sample_config:{...(Array.isArray(order.sample_config)?{}:order.sample_config as object??{}),samples:sourceSamples}}:{}),
         analysis_context: savedContext,
         analysis_options: optsForApi,
         rag_collections: useAllCollections ? null : selectedCollectionIds,
@@ -373,6 +380,7 @@ export default function RerunOptionsModal({
   };
 
   if (!order) return null;
+  const astra=String(structuredContext.quantitation_export_mode).startsWith('astra_analysis.');
   const generic=['enrichment_free_timecourse.v3','astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode));
 
   return (
@@ -380,15 +388,15 @@ export default function RerunOptionsModal({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{duplicateMode ? "Duplicate Order — Options" : "Analysis Focus & Report Options"}</DialogTitle>
+            <DialogTitle>{astra&&!duplicateMode?"Astra 패키지 생성":duplicateMode ? "Duplicate Order — Options" : "Analysis Focus & Report Options"}</DialogTitle>
             <DialogDescription>
-              {duplicateMode
+              {astra ? "저장된 입력 정보를 자동 반영합니다. 변경할 항목이 있으면 입력 정보 수정에서 편집하세요." : duplicateMode
                 ? "Duplicate 시 분석 설정을 변경할 수 있습니다. 기존 Order 설정값이 표시됩니다."
                 : "전체 또는 단계별 Re-run 시 반드시 이 화면에서 설정을 확인·수정한 뒤 Confirm 해주세요. 기존 Order 설정값이 표시됩니다."}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6">
+          <fieldset disabled={submitting} className="space-y-6">
             {duplicateMode && (
               <div className="space-y-2">
                 <Label className="text-sm font-semibold">New Order Name</Label>
@@ -405,7 +413,7 @@ export default function RerunOptionsModal({
               <h4 className="text-sm font-semibold flex items-center gap-2">
                 <FlaskConical className="h-4 w-4" /> Analysis Focus
               </h4>
-              {generic&&<p className="text-xs">Primary A uses full PR/PG input. Legacy LLM, RAG, Network and temporal-contract controls below are inactive for this profile.</p>}
+              {generic&&!astra&&<p className="text-xs">Primary A uses full PR/PG input. Legacy LLM, RAG, Network and temporal-contract controls below are inactive for this profile.</p>}
               <fieldset disabled={generic} className={generic?'hidden':'space-y-4'}>
               <div
                 className={cn(
@@ -511,6 +519,7 @@ export default function RerunOptionsModal({
                 </div>
               </div>
               </fieldset>
+              <div hidden={String(structuredContext.quantitation_export_mode).startsWith('astra_analysis.')&&!editingInput} className="space-y-3" id="rerun-data-information">
               <div className="grid gap-2">
                 <Label className="text-xs">Cell Type</Label>
                 <Input
@@ -549,9 +558,11 @@ export default function RerunOptionsModal({
                   className="h-8 text-sm"
                 />
               </div>
+              {String(structuredContext.quantitation_export_mode).startsWith('astra_analysis.')&&<StudyInputFields context={mergeAnalysisContext(structuredContext,analysisContext)} onChange={setStructuredContext} samples={sourceSamples} species={order.species??'human'} ptmType={order.ptm_type??'phosphorylation'} onSamplesChange={setSourceSamples}/>}
+              </div>
               <SampleDesignFields context={mergeAnalysisContext(structuredContext,analysisContext)} onChange={setStructuredContext}
-                samples={designSamples(order.sample_config)} secondarySamples={designSamples(order.secondary_sample_config)} species={order.species} ptmType={order.ptm_type} />
-              <div className="flex items-center gap-3">
+                samples={sourceSamples} secondarySamples={designSamples(order.secondary_sample_config)} species={order.species} ptmType={order.ptm_type} onEdit={()=>{setEditingInput(true);setTimeout(()=>document.getElementById("rerun-data-information")?.scrollIntoView({behavior:"smooth",block:"start"}),0);}} />
+              <div hidden={astra} className={astra?"hidden":"flex items-center gap-3"}>
                 <Label className="text-xs">Analysis Options (protein selection)</Label>
                 <Button
                   type="button"
@@ -567,7 +578,7 @@ export default function RerunOptionsModal({
             </div>
 
             {/* Report Options */}
-            {generic&&<p className="text-sm">This run generates the evidence report and Astra bundle. Saved literature collection selections are retained as interpretation context; their contents are not bundled.</p>}
+            {generic&&!astra&&<p className="text-sm">This run generates the evidence report and Astra bundle. Saved literature collection selections are retained as interpretation context; their contents are not bundled.</p>}
             <fieldset disabled={generic} className={generic?'hidden':'space-y-4'}>
               <h4 className="text-sm font-semibold flex items-center gap-2">
                 <Brain className="h-4 w-4" /> Report Options
@@ -973,7 +984,8 @@ export default function RerunOptionsModal({
             </fieldset>
 
             {/* Advanced Report Settings */}
-            {['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(structuredContext.quantitation_export_mode))&&<AstraWritingIntent questions={researchQuestions} setQuestions={setResearchQuestions} collections={ragCollections} selected={selectedCollectionIds} setSelected={setSelectedCollectionIds} all={useAllCollections} setAll={setUseAllCollections}/>}
+            {String(structuredContext.quantitation_export_mode).startsWith('astra_analysis.')&&!editingInput&&<div className="text-sm"><p>연구 질문: {researchQuestions.join(' · ')||'미기록'}</p><p>참고문헌: {useAllCollections?'전체 활성 collection':selectedCollectionIds.length?selectedCollectionIds.join(', '):'선택 없음'}</p></div>}
+            {String(structuredContext.quantitation_export_mode).startsWith('astra_analysis.')&&editingInput&&<AstraWritingIntent questions={researchQuestions} setQuestions={setResearchQuestions} collections={ragCollections} selected={selectedCollectionIds} setSelected={setSelectedCollectionIds} all={useAllCollections} setAll={setUseAllCollections}/>}
                 <fieldset disabled={generic} className={generic?'hidden':'rounded-lg border'}>
               <button
                 type="button"
@@ -1077,7 +1089,7 @@ export default function RerunOptionsModal({
                 </div>
               )}
             </fieldset>
-          </div>
+          </fieldset>
 
           <DialogFooter>
             <div className="flex flex-wrap items-center gap-2 mr-auto">
@@ -1105,7 +1117,7 @@ export default function RerunOptionsModal({
               Cancel
             </Button>
             <Button onClick={handleConfirm} disabled={submitting}>
-              {submitting ? "Saving..." : (["astra_analysis.v4","astra_analysis.v5","astra_analysis.v6"].includes(String(structuredContext.quantitation_export_mode)) && confirmLabel !== "Create Duplicate" ? "Confirm & create Astra package" : confirmLabel)}
+              {submitting ? "Saving..." : (["astra_analysis.v4","astra_analysis.v5","astra_analysis.v6"].includes(String(structuredContext.quantitation_export_mode)) && confirmLabel !== "Create Duplicate" ? "Astra 패키지 생성" : confirmLabel)}
             </Button>
           </DialogFooter>
         </DialogContent>

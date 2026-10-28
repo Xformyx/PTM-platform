@@ -1,4 +1,11 @@
 export type AnalysisContext = Record<string, unknown>;
+
+/** Submission resolves the current source, including a pending debounced preview. */
+export async function resolveSubmission(context: AnalysisContext, samples: DesignSample[], species: string, ptmType: string,
+  post: (body: unknown) => Promise<{analysis_context: AnalysisContext}>) {
+  if (!String(context.quantitation_export_mode).startsWith('astra_analysis.')) return context;
+  return (await post({analysis_context:context,sample_config:samples,species,ptm_type:ptmType})).analysis_context;
+}
 /** An explicitly empty selection must not become all active collections on rerun. */
 export function persistedLiteratureSelection(ids: number[] | null | undefined) {
   return { useAllCollections: ids == null, selectedCollectionIds: [...(ids ?? [])] };
@@ -24,6 +31,11 @@ export function mergeAnalysisContext(existing: AnalysisContext | null | undefine
 /** Prepare a new request/rerun with current Astra; recorded archives stay pinned. */
 export function withPersistedExportMode(context: AnalysisContext | null | undefined): AnalysisContext {
   const next: AnalysisContext = { ...(context ?? {}) };
+  const study=(next.study_design as {study?:AnalysisContext}|undefined)?.study;
+  if(String(next.quantitation_export_mode??'astra_analysis.v5').startsWith('astra_analysis.')&&study){
+    const recorded={...((study.original_context??{}) as AnalysisContext),...Object.fromEntries(['acquisition','processing','pre_treatment','enrichment_status','design_axis','analysis_target'].filter(key=>key in study).map(key=>[key,study[key]]))};
+    for(const [key,value] of Object.entries(recorded))if(!(key in next))next[key]=value;
+  }
   const mode = next.quantitation_export_mode;
   if (typeof mode === "string" && mode.trim() !== "" && mode !== "astra_analysis.v4") return next;
   next.quantitation_export_mode = "astra_analysis.v5";

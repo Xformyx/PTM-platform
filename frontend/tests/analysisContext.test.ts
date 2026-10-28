@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { designSamples, designErrors, mergeAnalysisContext, withPersistedExportMode, persistedLiteratureSelection } from '../src/lib/analysisContext.ts';
+import { designSamples, designErrors, mergeAnalysisContext, withPersistedExportMode, persistedLiteratureSelection, resolveSubmission } from '../src/lib/analysisContext.ts';
 
 test('rerun keeps empty, explicit and all-active literature selections distinct', () => {
   for (const ids of [[], [7], null, undefined]) {
@@ -52,4 +52,29 @@ test('v4 reruns select current Astra without dropping design or science inputs',
   assert.equal(next.normalization_policy, old.normalization_policy);
   assert.deepEqual(next.study_design, old.study_design);
   assert.deepEqual(next.science, old.science);
+});
+
+test('submission awaits the current source instead of a previous debounced preview', async () => {
+  const context={quantitation_export_mode:'astra_analysis.v5',time_points:'0,45min',study_design:{conditions:[{label:'30min'}]}};
+  const samples=[{sample_id:'f',condition:'45min'}];
+  const updated={...context,study_design:{conditions:[{label:'45min'}]}};
+  let finish:(response:{analysis_context:typeof updated})=>void=()=>{};
+  const saved=resolveSubmission(context,samples,'human','phosphorylation',body=>{
+    assert.deepEqual(body,{analysis_context:context,sample_config:samples,species:'human',ptm_type:'phosphorylation'});
+    return new Promise(resolve=>{finish=resolve;});
+  });
+  finish({analysis_context:updated});
+  assert.deepEqual(await saved,updated);
+  const legacy={quantitation_export_mode:'legacy_only.v1'};
+  assert.equal(await resolveSubmission(legacy,samples,'human','phosphorylation',()=>{throw new Error('Legacy must not resolve here');}),legacy);
+});
+
+test('rerun restores recorded-only metadata without replacing explicit source values', () => {
+  const context={quantitation_export_mode:'astra_analysis.v5',cell_type:'current cells',study_design:{study:{original_context:{cell_type:'recorded cells',treatment:'recorded treatment'},design_axis:'cross_sectional',acquisition:{instrument:'recorded instrument'}}}};
+  const restored=withPersistedExportMode(context);
+  assert.equal(restored.cell_type,'current cells');
+  assert.equal(restored.treatment,'recorded treatment');
+  assert.equal(restored.design_axis,'cross_sectional');
+  assert.deepEqual(restored.acquisition,{instrument:'recorded instrument'});
+  assert.equal(withPersistedExportMode({...context,treatment:null}).treatment,null);
 });

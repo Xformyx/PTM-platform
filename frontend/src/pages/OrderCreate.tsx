@@ -34,7 +34,8 @@ import AnalysisOptionsModal from "@/components/AnalysisOptionsModal";
 import QuickAnalysisCustomFields from "@/components/QuickAnalysisOptions";
 import { CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 import SampleDesignFields from "@/components/SampleDesignFields";
-import { designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode } from "@/lib/analysisContext";
+import StudyInputFields from "@/components/StudyInputFields";
+import { resolveSubmission, designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode } from "@/lib/analysisContext";
 
 const STEPS = ["Project & Files", "Sample Config", "Analysis Focus", "Report Options"];
 
@@ -427,7 +428,7 @@ export default function OrderCreate() {
     setCopyFromLoading(true);
     try {
       const order = await api.get<{ analysis_context: Record<string, unknown> }>(`/orders/${orderId}`);
-      const ctx = order.analysis_context || {};
+      const ctx = withPersistedExportMode(order.analysis_context);
       setStructuredContext(ctx);
       const str = (v: unknown) => (v != null && typeof v === "string" ? v : "");
 
@@ -553,7 +554,7 @@ export default function OrderCreate() {
       setError("Sample configuration is required. Go back to Step 2 and configure samples.");
       return;
     }
-    const submittedContext = withPersistedExportMode(mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions}));
+    let submittedContext = withPersistedExportMode(mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions}));
     const submittedAstra = ["astra_analysis.v4", "astra_analysis.v5", "astra_analysis.v6"].includes(String(submittedContext.quantitation_export_mode));
     const submittedReferenceId = String((((submittedContext.science ?? {}) as Record<string, unknown>).reference as Record<string, unknown> | undefined)?.reference_id ?? "").trim();
     if (submittedAstra && !scienceFiles.fasta_file) {
@@ -587,6 +588,11 @@ export default function OrderCreate() {
         replicate: s.replicate,
       })),
     };
+
+    try {
+      submittedContext = await resolveSubmission(submittedContext, designSamples(sampleConfig), form.species, form.ptm_type,
+        body => api.post('/orders/resolve-design', body));
+    } catch (e) { setError(e instanceof Error ? e.message : '입력 정보 해석 실패'); setLoading(false); return; }
 
     const formData = new FormData();
     formData.append("project_name", form.project_name);
@@ -695,7 +701,7 @@ export default function OrderCreate() {
     : [];
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <fieldset disabled={loading} className="mx-auto max-w-3xl space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">Create New Order</h1>
 
       {/* Step Indicator */}
@@ -1302,6 +1308,7 @@ export default function OrderCreate() {
 
                 <Separator />
 
+                <div id="original-data-information" className="space-y-4">
                 <div className="space-y-2">
                   <Label>Cell Type</Label>
                   <Input value={form.cell_type}
@@ -1360,8 +1367,7 @@ export default function OrderCreate() {
                     placeholder="e.g., 0, 5, 15, 30 min"
                   />
                 </div>
-                <SampleDesignFields context={mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions})} onChange={setStructuredContext}
-                  samples={designSamples(samples)} secondarySamples={designSamples(secondarySamples)} species={form.species} ptmType={form.ptm_type} />
+
                 <div className="space-y-2">
                   <Label>Biological Question</Label>
                   <Textarea value={form.biological_question}
@@ -1377,6 +1383,11 @@ export default function OrderCreate() {
                     placeholder="e.g., hypoxia, serum starvation, knockdown"
                   />
                 </div>
+
+                {astraOrder&&<StudyInputFields context={mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions})} onChange={setStructuredContext} samples={designSamples(samples)} species={form.species} ptmType={form.ptm_type}/>}
+                </div>
+                <SampleDesignFields context={mergeAnalysisContext(structuredContext,{cell_type:form.cell_type,treatment:form.treatment,time_points:form.time_points,biological_question:form.biological_question,special_conditions:form.special_conditions})} onChange={setStructuredContext}
+                  samples={designSamples(samples)} secondarySamples={designSamples(secondarySamples)} species={form.species} ptmType={form.ptm_type} onEdit={() => document.getElementById("original-data-information")?.scrollIntoView({behavior:"smooth",block:"start"})} />
 
                 <div className="flex justify-between">
                   <Button variant="outline" onClick={() => goTo(1)}>
@@ -2087,6 +2098,6 @@ export default function OrderCreate() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </fieldset>
   );
 }

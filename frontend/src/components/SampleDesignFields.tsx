@@ -6,19 +6,19 @@ import { Label } from "@/components/ui/label";
 import { designErrors, sampleManifest } from "@/lib/analysisContext";
 import type { AnalysisContext, DesignSample, SampleManifest } from "@/lib/analysisContext";
 
-export default function SampleDesignFields({ context, onChange, samples, secondarySamples = [], species='human', ptmType='phosphorylation' }: {
+export default function SampleDesignFields({ context, onChange, samples, secondarySamples = [], species='human', ptmType='phosphorylation', onEdit }: {
   context: AnalysisContext;
   onChange: (context: AnalysisContext) => void;
   samples: DesignSample[];
   secondarySamples?: DesignSample[];
   species?:string;
   ptmType?:string;
+  onEdit?:()=>void;
 }) {
   const put = (key: string, value: unknown) => onChange({ ...context, [key]: value });
   const errors = designErrors(context, samples, secondarySamples);
   const mode = typeof context.quantitation_export_mode === "string" ? context.quantitation_export_mode : "";
   const astra=['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(mode);
-  const science=(context.science??{}) as Record<string,unknown>;
   const generic=astra||mode==='enrichment_free_timecourse.v3';
   return <div className="space-y-4 rounded-lg border p-4">
     <div className="space-y-2">
@@ -33,9 +33,6 @@ export default function SampleDesignFields({ context, onChange, samples, seconda
       </select>
       {astra && <div className="space-y-2">
         <p className="text-xs text-muted-foreground">종: {species}. 측정·서열 근거와 분석 가능한 범위를 패키지에 함께 기록합니다.</p>
-        <label className="block text-sm">Design axis<select aria-label="Design axis" value={String(context.design_axis??'time_course')} onChange={e=>put('design_axis',e.target.value)}><option value="time_course">Time course</option><option value="cross_sectional">Condition contrasts without time</option></select></label>
-        <label className="block text-sm">DIA-NN version (only when a report is provided)<Input value={String(science.diann_version??'')} onChange={e=>put('science',{...science,diann_version:e.target.value})}/></label>
-        <label className="block text-sm">등록 Reference ID (비우면 이 종의 선언된 등록본, 분석 FASTA를 올리면 그 파일)<Input value={String((science.reference as Record<string,unknown>|undefined)?.reference_id??'')} onChange={e=>put('science',{...science,reference:{...((science.reference??{}) as Record<string,unknown>),reference_id:e.target.value}})}/></label>
       </div>}
       <details><summary className="cursor-pointer text-sm">Advanced normalization override</summary>
         <p className="text-xs">New Astra studies preserve supplied intensities. This does not establish upstream DIA-NN normalization. The alternative scaling track is calculated automatically.</p>
@@ -58,7 +55,7 @@ export default function SampleDesignFields({ context, onChange, samples, seconda
       </div>}
       {!generic && mode !== "" && <p className="text-xs text-muted-foreground">The legacy additional export requires a complete sample design and unique condition times, with Control at 0 minutes. It includes joint observation masks and parent sensitivity. Existing precursor vectors keep their estimator.</p>}
     </div>
-    {generic&&<CanonicalStudyFields {...{context,onChange,samples,species,ptmType}}/>}
+    {generic&&<CanonicalStudyFields {...{context,onChange,samples,species,ptmType,onEdit}}/>}
     {!generic&&[["sample_manifest", samples, "Primary"], ["secondary_sample_manifest", secondarySamples, "Secondary"]].map(([keyValue, rowValues, label]) => {
       const key = String(keyValue);
       const rows = rowValues as DesignSample[];
