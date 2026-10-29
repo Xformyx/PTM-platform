@@ -575,6 +575,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      additional_contexts:
+        ptm_shared: ./ptm_shared
       args:
         VERSION: ${VERSION_FRONTEND:-001}
     image: ptm-frontend:${VERSION_FRONTEND:-001}

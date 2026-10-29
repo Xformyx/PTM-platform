@@ -5,6 +5,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# analysisContext.ts imports this from the repo root. The frontend build
+# context is only ./frontend, so the file is supplied as an extra context.
+COPY --from=ptm_shared study_display.json /ptm_shared/study_display.json
 RUN npm run build
 
 FROM nginx:alpine
