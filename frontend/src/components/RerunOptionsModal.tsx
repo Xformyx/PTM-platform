@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { CLOUD_PROVIDER_SENTINEL, CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 import SampleDesignFields from "./SampleDesignFields";
 import StudyInputFields from "./StudyInputFields";
-import { resolveSubmission, designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode, persistedLiteratureSelection } from "@/lib/analysisContext";
+import { BIOLOGICAL_DESIGN, resolveSubmission, designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode, persistedLiteratureSelection } from "@/lib/analysisContext";
 
 const CLOUD_PROVIDERS = ["gemini", "openai", "anthropic"] as const;
 
@@ -542,11 +542,12 @@ export default function RerunOptionsModal({
                   placeholder="e.g., 0, 5, 15, 30 min"
                   className="h-8 text-sm"
                 />
-                <Label className="text-xs">Biological Question</Label>
+                <Label htmlFor="rerun-biological-design" className="text-xs">{BIOLOGICAL_DESIGN.label}</Label>
                 <Textarea
+                  id="rerun-biological-design" aria-label={BIOLOGICAL_DESIGN.label}
                   value={analysisContext.biological_question}
                   onChange={(e) => setAnalysisContext((p) => ({ ...p, biological_question: e.target.value }))}
-                  placeholder="e.g., What signaling pathways are activated?"
+                  placeholder={BIOLOGICAL_DESIGN.help}
                   rows={2}
                   className="text-sm"
                 />

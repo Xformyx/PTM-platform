@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { designSamples, designErrors, mergeAnalysisContext, withPersistedExportMode, persistedLiteratureSelection, resolveSubmission } from '../src/lib/analysisContext.ts';
+import { BIOLOGICAL_DESIGN, studyFieldLabel, newExperimentContext, designSamples, designErrors, mergeAnalysisContext, withPersistedExportMode, persistedLiteratureSelection, resolveSubmission } from '../src/lib/analysisContext.ts';
 
 test('rerun keeps empty, explicit and all-active literature selections distinct', () => {
   for (const ids of [[], [7], null, undefined]) {
@@ -9,6 +9,30 @@ test('rerun keeps empty, explicit and all-active literature selections distinct'
     assert.deepEqual(payload, ids ?? null);
     if (Array.isArray(ids)) assert.notEqual(state.selectedCollectionIds, ids);
   }
+});
+
+test('new planned default is distinct from actual Rep IDs and never added on rerun', () => {
+  const samples=[{sample_id:'a',condition:'Control',replicate:1},{sample_id:'b',condition:'Control',replicate:2}];
+  assert.deepEqual(newExperimentContext().replication_plan,{default_replicates_per_condition:3,source:'new_experiment_default'});
+  for(const count of [2,4]){
+    const existing={replication_plan:{default_replicates_per_condition:count,source:'user_input'},legacy_samples:samples};
+    assert.deepEqual(newExperimentContext(existing).replication_plan,existing.replication_plan);
+    assert.deepEqual(withPersistedExportMode(existing).replication_plan,existing.replication_plan);
+    assert.deepEqual(newExperimentContext(existing).legacy_samples,samples);
+  }
+  assert.equal(newExperimentContext({replication_plan:null}).replication_plan,null);
+  assert.equal(withPersistedExportMode({legacy_samples:samples}).replication_plan,undefined);
+  assert.deepEqual(designSamples(samples).map(row=>row.replicate),[1,2]);
+});
+
+test('Biological Design keeps the compatibility key and exact content', () => {
+  const original='  모델 α\n반복 설계와 분석 목적  ';
+  const saved=withPersistedExportMode(mergeAnalysisContext({}, {biological_question:original}));
+  assert.equal(BIOLOGICAL_DESIGN.label,'Biological Design');
+  assert.equal(studyFieldLabel('biological_question'),'Biological Design');
+  assert.equal(studyFieldLabel('research_questions'),'research questions');
+  assert.equal(saved.biological_question,original);
+  assert.equal(saved.biological_design,undefined);
 });
 
 test('copy and rerun text edits retain complete structured context', () => {

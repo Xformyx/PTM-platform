@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { AnalysisContext, DesignSample } from '@/lib/analysisContext';
+import { BIOLOGICAL_DESIGN, type AnalysisContext, type DesignSample, type StudyDisplay } from '@/lib/analysisContext';
 
 type Condition={condition_id:string;arm_id:string;label:string;role:string;time:{value:number;unit:string;minutes:number;original:string}|null;reference_condition_id?:string;time_conflict_resolution?:string};
 type Material={material_id:string;biological_unit_id:string|null;pair_id:string|null;source?:string};
-type Injection={injection_id:string;input_column:string;condition_id:string;material_id:string|null;technical_injection_id:string|null};
+type Injection={injection_id:string;input_column:string;condition_id:string;material_id:string|null;technical_injection_id:string|null;legacy_replicate?:string|number|null};
 type Treatment={name:string;dose:number|null;unit:string|null;dose_status:string;source?:string};
 type Arm={arm_id:string;name:string;treatments:Treatment[]};
 type Contrast={contrast_id:string;target_condition_id:string;reference_condition_id:string;pairing:string;purpose?:string};
@@ -15,6 +15,7 @@ type Design={schema_version:string;status:string;replication_declaration:string;
 export default function CanonicalStudyFields({context,onChange,samples,species,ptmType,sourceEditor=false,onEdit}:{context:AnalysisContext;onChange:(v:AnalysisContext)=>void;samples:DesignSample[];species:string;ptmType:string;sourceEditor?:boolean;onEdit?:()=>void}) {
   const astra=['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(context.quantitation_export_mode));
   const [plan,setPlan]=useState<Record<string,unknown>|null>(null);
+  const [display,setDisplay]=useState<StudyDisplay|null>(null);
   const [error,setError]=useState('');const [pending,setPending]=useState(false);const [revision,setRevision]=useState(0);
   const current=useRef({context,onChange});current.current={context,onChange};
   const accepted=useRef('');
@@ -23,9 +24,9 @@ export default function CanonicalStudyFields({context,onChange,samples,species,p
   useEffect(()=>{
     if(sourceEditor||accepted.current===input)return;
     let active=true;
-    setPending(true);setPlan(null);setError('');
-    const timer=setTimeout(()=>{api.post<{study_design:Design;analysis_context?:AnalysisContext;analysis_plan?:Record<string,unknown>}>('/orders/resolve-design',JSON.parse(input))
-      .then(response=>{if(!active)return;setError('');setPlan(response.analysis_plan??null);const state=current.current;
+    setPending(true);setPlan(null);setDisplay(null);setError('');
+    const timer=setTimeout(()=>{api.post<{study_design:Design;study_display?:StudyDisplay;analysis_context?:AnalysisContext;analysis_plan?:Record<string,unknown>}>('/orders/resolve-design',JSON.parse(input))
+      .then(response=>{if(!active)return;setError('');setPlan(response.analysis_plan??null);setDisplay(response.study_display??null);const state=current.current;
         const next=response.analysis_context??{...state.context,study_design:response.study_design};
         accepted.current=JSON.stringify({...JSON.parse(input),analysis_context:next});setResolvedInput(accepted.current);
         if(JSON.stringify(state.context)!==JSON.stringify(next))state.onChange(next);})
@@ -64,9 +65,21 @@ export default function CanonicalStudyFields({context,onChange,samples,species,p
         <p>기준 조건: {ordered.filter(c=>c.role==='reference').map(c=>c.label).join(', ')||'미기록'}</p>
         <p>처리 조건: {ordered.filter(c=>c.role!=='reference').map(c=>`${c.label}${c.time?` (${c.time.value} ${c.time.unit})`:''}`).join(', ')}</p>
         <p>비교: {design.contrasts.map(c=>`${condition(c.target_condition_id)} vs ${condition(c.reference_condition_id)}`).join(' · ')}</p>
-        <p>반복 정보: {design.materials.length?`${design.materials.length} material · ${new Set(design.materials.flatMap(m=>m.biological_unit_id?[m.biological_unit_id]:[])).size} biological unit`:'미기록 — descriptive 분석'} · {design.injections.length} injection</p>
+        {display?<>
+          <p>{display.replication.summary}</p>
+          {display.replication.planned_summary&&<p className="text-sm">{display.replication.planned_summary}</p>}
+          <details><summary>반복 번호·주입·유형 상세</summary>
+            <p>반복 유형: {display.replication.replication_type==='unknown'?'미지정':display.replication.replication_type}</p>
+            <p>{display.replication.material_count} material · {display.replication.biological_unit_count} biological unit · {display.replication.injection_count} injection</p>
+            {display.replication.unmapped_injection_count>0&&<p className="text-xs">material/biological mapping 미지정 주입 {display.replication.unmapped_injection_count}개: 기존 descriptive/추론 제한을 유지합니다.</p>}
+            <p className="text-xs">{display.replication.interpretation}</p>
+            <table className="w-full text-xs"><thead><tr><th>조건</th><th>등록 Rep. ID</th><th>등록 반복</th><th>측정 파일</th><th>주입</th><th>예정 반복</th><th>상태</th></tr></thead>
+              <tbody>{display.replication.conditions.map(c=><tr key={c.condition_id}><td>{c.label}</td><td>{c.replicate_ids.join(', ')||'미기록'}</td><td>{c.registered_replicate_count}</td><td>{c.measurement_file_count}</td><td>{c.injection_count}</td><td>{c.planned_replicate_count??'미기록'}</td><td>{c.statuses.map(status=>({replicate_id_missing:'반복 번호 누락',multiple_injections_per_replicate_id:'같은 반복 ID에 여러 주입',nonconsecutive_replicate_ids:'비연속 반복 번호',duplicate_injection_records:'중복 주입 기록',injection_mapping_conflict:'주입 매핑 불일치',injection_identity_missing:'파일/주입 ID 누락',no_registered_injections:'등록 주입 없음'} as Record<string,string>)[status]??status).join(' · ')}{c.plan_comparison==='differs'?' · 예정/등록 수 다름':''}</td></tr>)}</tbody>
+            </table>
+          </details>
+        </>:<p role="status">등록 반복 집계 결과를 아직 받지 못했습니다.</p>}
         <p>Pairing: {[...new Set(design.contrasts.map(c=>c.pairing))].join(', ')||'unknown'}</p>
-        <dl className="grid grid-cols-2 gap-1 text-sm">{[['cell_type','Cell Type'],['treatment','Treatment'],['time_points','Time Points'],['biological_question','Biological Question'],['special_conditions','Special Conditions'],['enrichment_status','Enrichment']].map(([key,label])=><div key={key}><dt className="text-muted-foreground">{label}</dt><dd>{String(context[key]??'unknown')||'unknown'}</dd></div>)}</dl>
+        <dl className="grid grid-cols-2 gap-1 text-sm">{[['cell_type','Cell Type'],['treatment','Treatment'],['time_points','Time Points'],['biological_question',BIOLOGICAL_DESIGN.label],['special_conditions','Special Conditions'],['enrichment_status','Enrichment']].map(([key,label])=><div key={key}><dt className="text-muted-foreground">{label}</dt><dd className="whitespace-pre-wrap">{String(context[key]??'unknown')||'unknown'}</dd></div>)}</dl>
         <p>DIA-NN version: {String((context.science as Record<string,unknown>|undefined)?.diann_version??'unknown')||'unknown'}</p>
         <p>등록 Reference: {String(((context.science as {reference?:{reference_id?:string}}|undefined)?.reference?.reference_id)||'업로드 FASTA 또는 등록된 종 reference')}</p>
         {design.issues.map((i,index)=><p key={index} role={i.severity==='error'?'alert':'status'} className="text-xs">{i.path}: {i.message}{i.severity==='error'?' — 입력 정보의 해당 항목을 수정하세요.':''}</p>)}

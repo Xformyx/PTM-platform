@@ -1,4 +1,24 @@
+import studyDisplay from '../../../ptm_shared/study_display.json' with {type:'json'};
+
 export type AnalysisContext = Record<string, unknown>;
+export const BIOLOGICAL_DESIGN = studyDisplay.biological_question;
+export function studyFieldLabel(key: string): string {
+  return key === 'biological_question' ? BIOLOGICAL_DESIGN.label : key.replace(/_/g, ' ');
+}
+
+/** A plan for a new experiment, never an assignment to sample rows or old orders. */
+export function newExperimentContext(existing: AnalysisContext = {}): AnalysisContext {
+  return {quantitation_export_mode:'astra_analysis.v5',normalization_policy:'already_normalized.v1',...existing,
+    ...('replication_plan' in existing?{}:{replication_plan:{default_replicates_per_condition:studyDisplay.default_planned_replicates_per_condition,source:'new_experiment_default'}})};
+}
+
+export type StudyDisplay = {
+  biological_question: {label:string;description:string;storage_key:string;value:string|null};
+  replication: {summary:string;planned_summary:string|null;measurement_file_count:number;injection_count:number;
+    material_count:number;biological_unit_count:number;unmapped_injection_count:number;replication_type:string;pairing:string[];interpretation:string;
+    conditions:Array<{condition_id:string;label:string;replicate_ids:string[];registered_replicate_count:number;measurement_file_count:number;injection_count:number;
+      planned_replicate_count:number|null;missing_replicate_id_count:number;multiple_injection_replicate_ids:string[];plan_comparison:string;statuses:string[]}>};
+};
 
 /** Submission resolves the current source, including a pending debounced preview. */
 export async function resolveSubmission(context: AnalysisContext, samples: DesignSample[], species: string, ptmType: string,

@@ -108,6 +108,8 @@ def test_saved_values_na_scope_links_questions_and_writer(saved, tmp_path):
         assert q['temporal_evidence']['evidence']
     assert 'feature_id' in p['authoring_rules']['temporal_evidence']['required_evidence_anchor']
     assert 'TEMPORAL_EVIDENCE.md' in (tmp_path/'reader/READ_ME.md').read_text()
+    assert '## Biological Design' in (tmp_path/'reader/READ_ME.md').read_text()
+    assert p['study_metadata_provenance']['study_display']['replication']['summary'] in (tmp_path/'reader/READ_ME.md').read_text()
     assert '\n\n| ---' not in (tmp_path/'reader/TEMPORAL_EVIDENCE.md').read_text()
     links = pd.read_csv(tmp_path/'reader/temporal_links.csv')
     assert not links.duplicated(['finding_id','source_table','source_key_json']).any()

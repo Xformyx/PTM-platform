@@ -33,7 +33,7 @@ from .generic_kinase import fasta_taxonomy
 VERSION='astra_analysis_package.v4'
 READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py','astra_literature_review.py']
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
-    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','study_input_metadata.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
+    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','study_input_metadata.py','study_display.py','study_display.json','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py']))
 EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['candidate_id','contrast_id','track'],
     'substrate_contributions':['contribution_id'],'candidate_sensitivity':['candidate_id','contrast_id','track','omission_kind','omitted_id'],
@@ -51,8 +51,10 @@ EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['ca
 
 def write_study_inputs(directory, snapshot, context, design):
     """The package's input metadata boundary, usable without scientific execution."""
+    from .study_display import study_display
     for name,value in [('user_input_snapshot',snapshot),('study_context',context),('study_design',design)]:
         json_write(Path(directory)/'study'/(name+'.json'),value)
+    json_write(Path(directory)/'study/study_display.json',study_display(design,context))
 
 
 def finding_execution_code(root, pin, preferred_run=None):
@@ -477,6 +479,7 @@ from .astra_figures import figure_packet
 
 
 def start_here(snapshot,counts,readiness):
+    from .study_display import DISPLAY
     original=snapshot['original']
     method_path='reader/PHOSX_TIME_COURSE.md' if readiness.get('native_method_runtime') else 'kinase/method_executions.csv'
     return '\n\n'.join(['# START HERE — Astra analysis package',f"Project: {original.get('project_name')} | Order: {original.get('order_code')}",
@@ -485,7 +488,7 @@ def start_here(snapshot,counts,readiness):
         'Stage status: '+json.dumps({'calculation':readiness.get('completion_status'),'reference':readiness.get('source_execution',{}).get('status'),'incomplete_reference_queries':len(readiness.get('source_execution',{}).get('incomplete_queries',[])),
             'literature':readiness.get('literature',{}).get('status'),'site_attribution':readiness.get('strict_attribution',{}).get('status')},ensure_ascii=False)+
             '. research_full is a policy, not collection completion. Partial references, missing localization and uncalibrated calls remain separate limits.',
-        'Use the complete biological question, report_options.research_questions, special conditions and selected literature. Do not ask again for information already supplied. Expectations are not measurements.',
+        f"Use the complete {DISPLAY['biological_question']['label']} (compatibility key: biological_question), separate report_options.research_questions, special conditions and selected literature. Do not ask again for information already supplied. Expectations are not measurements.",
         'Primary quantitative evidence: quant/primary_A_input.csv. Check actual masks and rows when a summary conflicts; record the conflict.',
         ('Whole evidence access: [catalog and query guide](reader/EVIDENCE_ACCESS.md). Selected findings are a summary preview. Unselected, withheld and no-call rows remain accessible; availability is not evidence of review. [Typed literature review plan](reader/LITERATURE_REVIEW_PLAN.md) is separate from actual search and comparison.' if readiness.get('reader') else ''),
         json.dumps(counts,ensure_ascii=False),'Profile rows are candidate × contrast × track, not discovered or activated kinase counts.',

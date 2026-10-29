@@ -1,0 +1,8 @@
+{
+  "biological_question": {
+    "label": "Biological Design",
+    "help": "실험 모델, 처리 조건, 시간 계획, 반복 설계와 분석 목적을 설명하세요.",
+    "description": "Biological Design 설명을 담는 기존 호환 필드 (biological_question). 원문을 보존하며 report_options.research_questions와 별도로 저장합니다."
+  },
+  "default_planned_replicates_per_condition": 3
+}

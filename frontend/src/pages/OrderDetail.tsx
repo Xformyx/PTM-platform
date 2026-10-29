@@ -1,3 +1,4 @@
+import { studyFieldLabel } from "@/lib/analysisContext";
 import {SignalingEvidenceExplorer} from "../components/SignalingEvidenceExplorer";
 import PrimaryAEvidence from "../components/PrimaryAEvidence";
 import {VirtualFeatureList} from "../components/VirtualFeatureList";
@@ -4885,7 +4886,7 @@ export default function OrderDetail() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm">Analysis Context</CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">Cell type, treatment, time points, biological question</p>
+              <p className="text-xs text-muted-foreground mt-1">Cell type, treatment, time points, Biological Design</p>
             </CardHeader>
             <CardContent>
               {order.analysis_context && Object.keys(order.analysis_context).some((k) => (order.analysis_context as any)[k]) ? (
@@ -4893,7 +4894,7 @@ export default function OrderDetail() {
                   {(["cell_type", "treatment", "time_points", "biological_question", "special_conditions"] as const).map((key) => {
                     const val = (order.analysis_context as any)?.[key];
                     if (val == null || val === "") return null;
-                    const label = key.replace(/_/g, " ");
+                    const label = studyFieldLabel(key);
                     const isLong = key === "biological_question";
                     return (
                       <div key={key} className={isLong ? "sm:col-span-2" : ""}>

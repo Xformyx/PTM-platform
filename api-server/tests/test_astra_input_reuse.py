@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -21,10 +22,18 @@ from app.models.rag_collection import RagCollection
 from app.services.astra_input_capture import prepare_astra_inputs
 from ptm_shared.astra_package import write_study_inputs
 from ptm_shared.tests.test_study_input_reuse import inputs
+from ptm_shared.study_display import study_display
 
 
-def test_resolve_save_reload_rerun_dispatch_and_package_metadata(tmp_path, monkeypatch):
+@pytest.mark.parametrize('replicates,planned', [(2,2),(3,4)])
+def test_resolve_save_reload_rerun_dispatch_and_package_metadata(tmp_path, monkeypatch, replicates, planned):
     context, rows, manifest = inputs()
+    if replicates == 3:
+        extra = [{**r,'sample_id':r['sample_id'][:-1]+'3','replicate':3} for r in rows if r['replicate']==2]
+        rows += extra
+        manifest['samples'] += [{**r,'biological_unit':'donor_3','technical_injection':'1'} for r in extra]
+    context.update(biological_question='  모델 α · 시간 및 반복 설계\n분석 목적 원문  ',
+                   replication_plan={'default_replicates_per_condition':planned,'source':'user_input'})
     context.update(science={'diann_version': '2.7.0'},
                    acquisition={'instrument': {'value': 'recorded instrument'}},
                    astra_source_pin_sha256=None)
@@ -53,6 +62,10 @@ def test_resolve_save_reload_rerun_dispatch_and_package_metadata(tmp_path, monke
             assert preview.status_code == 200, preview.text
             initial = preview.json()['analysis_context']
             assert initial['study_design']['materials'] == []
+            display = preview.json()['study_display']
+            assert display == study_display(initial['study_design'],initial)
+            assert display['biological_question']['value'] == context['biological_question']
+            assert display['replication']['summary'] == f'등록 반복: 조건별 {replicates}반복 · 총 {len(rows)}개 측정 파일'
             response = await client.post('/orders', data={'project_name': 'Input_reuse_synthetic', 'species': 'human', 'ptm_type': 'phosphorylation',
                 'sample_config': json.dumps(rows), 'analysis_context': json.dumps(initial), 'rag_collections': '[]',
                 'report_options': json.dumps({'research_questions': ['Recorded research question']})},
@@ -63,7 +76,7 @@ def test_resolve_save_reload_rerun_dispatch_and_package_metadata(tmp_path, monke
             patched = await client.patch(f'/orders/{order_id}', json={'analysis_context': {'sample_manifest': manifest}})
             assert patched.status_code == 200, patched.text
             resolved = patched.json()['analysis_context']
-            assert len(resolved['study_design']['materials']) == 12
+            assert len(resolved['study_design']['materials']) == len(rows)
             direct = await client.post('/orders/resolve-design', json={**body, 'analysis_context': {**context, 'sample_manifest': manifest}})
             assert resolved['study_design'] == direct.json()['study_design']
             # Omitted fields survive; resolving an unchanged draft is idempotent.
@@ -88,6 +101,9 @@ def test_resolve_save_reload_rerun_dispatch_and_package_metadata(tmp_path, monke
                 order.status = 'completed'; await db.commit()
             read = await client.get(f'/orders/{order_id}')
             assert read.status_code == 200, read.text
+            assert read.json()['analysis_context']['biological_question'] == context['biological_question']
+            assert read.json()['analysis_context']['replication_plan'] == context['replication_plan']
+            assert read.json()['report_options']['research_questions'] == ['Recorded research question']
             async with sessions() as db:
                 order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one()
                 assert order.analysis_context == final
@@ -102,6 +118,10 @@ def test_resolve_save_reload_rerun_dispatch_and_package_metadata(tmp_path, monke
             write_study_inputs(tmp_path/'package-metadata', snapshot, execution, execution['study_design'])
             saved = json.loads((tmp_path/'package-metadata/study/study_design.json').read_text())
             assert saved == final['study_design']
+            saved_display = json.loads((tmp_path/'package-metadata/study/study_display.json').read_text())
+            assert saved_display == study_display(final['study_design'],final)
+            assert saved_display['biological_question']['value'] == context['biological_question']
+            assert saved_display['replication']['injection_count'] == len(rows)
             assert saved['study']['original_context']['cell_type'] == context['cell_type']
             assert saved['study']['acquisition']['instrument']['value'] == 'recorded instrument'
             assert snapshot['original']['rag_collections'] == []

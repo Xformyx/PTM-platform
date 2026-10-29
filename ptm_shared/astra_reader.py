@@ -617,12 +617,17 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         + kinase_link_sentence(kinase_summary) + ' '
         '이 선정만으로 insulin cascade를 구성하지 마세요. 전체 emergence, protein, kinase 표로 범위를 넓히세요. '
         'method_id가 repository_measured_gene_zscore인 행은 PhosX 결과가 아닙니다. PhosX_native_functions와 method_executions가 있을 때만 PhosX로 읽습니다.',
-        '## 저장된 연구 질문']
+        ]
+    from .study_display import DISPLAY, study_display, study_display_markdown
+    metadata=packet['study_metadata_provenance']
+    projection=metadata.get('study_display') or study_display(packet['canonical_study_design'],metadata['recorded_context'])
+    lines.extend([study_display_markdown(projection),'## 저장된 연구 질문'])
     if packet.get('literature_subject_execution'):
         summary=packet['literature_subject_execution']['summary']
         lines.insert(1,f"[실제 M4 문헌 실행](LITERATURE_SUBJECT_REVIEW.md): 요청 범위 {summary['requested_scope_status']}; 전체 {summary['status']}. 계획과 실제 검색·비교·의미 승인은 별도 상태입니다.")
     for q in packet['research_question_evidence_map']['questions']:
-        lines.extend([f"### {q['question_id']}", q['original_text'], f"상태: {q['answer_status']}; {q['answer_scope']}",
+        title=DISPLAY['biological_question']['label']+' — 기존 연결 '+q['question_id'] if q['question_id']=='BQ-001' else q['question_id']
+        lines.extend([f"### {title}", q['original_text'], f"상태: {q['answer_status']}; {q['answer_scope']}",
                       '연결 결과: '+(', '.join(q['finding_ids']) or '없음'), '부족한 근거: '+' '.join(q['missing_evidence'])])
     if not packet['original_questions']['research_questions']:
         lines.append('추가 research_questions: '+packet['original_questions']['research_questions_status']+' (원문 값은 packet에 그대로 보존).')

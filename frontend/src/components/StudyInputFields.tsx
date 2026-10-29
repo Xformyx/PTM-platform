@@ -25,7 +25,10 @@ export default function StudyInputFields({context,onChange,samples,species,ptmTy
     <label className="block text-sm">DIA-NN version (알려진 경우에만)<Input aria-label="DIA-NN version" value={String(science.diann_version??'')} onChange={e=>setVersion(e.target.value)}/></label>
     <label className="block text-sm">등록 Reference ID<Input aria-label="Registered reference ID" value={String((science.reference as Record<string,unknown>|undefined)?.reference_id??'')} onChange={e=>put('science',{...science,reference:{...((science.reference??{}) as Record<string,unknown>),reference_id:e.target.value}})}/></label>
     <details><summary className="cursor-pointer text-sm">추가 데이터 정보 / 해당 항목 수정 (선택)</summary>
-      <p className="text-xs">이미 선언한 값만 기록하세요. 반복 정보가 없으면 descriptive 분석을 유지합니다. 파일·조건·Control 분류는 Sample Config에서 수정합니다.</p>
+      <p className="text-xs">이미 선언한 값만 기록하세요. 반복 유형과 biological mapping이 없으면 descriptive 분석을 유지합니다. 파일·조건·Control 분류는 Sample Config에서 수정합니다.</p>
+      <label className="block text-sm">예정 반복 수 (조건별, 실제 Rep. 번호와 별도)<Input aria-label="예정 반복 수" type="number" min="1" step="1"
+        value={String((context.replication_plan as {default_replicates_per_condition?:number}|undefined)?.default_replicates_per_condition??'')}
+        onChange={e=>put('replication_plan',{...((context.replication_plan??{}) as Record<string,unknown>),default_replicates_per_condition:e.target.value===''?null:Number(e.target.value),source:'user_input'})}/></label>
       <CanonicalStudyFields {...{context,onChange,samples,species,ptmType}} sourceEditor/>
       <details><summary>기존 sample manifest 가져오기 / 수정</summary>
         <p className="text-xs">선언된 condition, biological_unit, technical_injection, pairing을 가져옵니다. Rep. 번호로 관계를 추정하지 않습니다.</p>

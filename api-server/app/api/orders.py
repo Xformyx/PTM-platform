@@ -500,7 +500,9 @@ async def resolve_order_design(body:dict=Body(...),user=Depends(get_current_user
             sources=read_source_pin(get_settings().REFERENCE_DIR,pin) if pin and not context.get('refresh_references',False) else None
             plan['source_execution']=source_execution_record(context,pin,sources,preview=True)
             plan['source_policy']=plan['source_execution']['message']
-        return {'study_design':context['study_design'],'analysis_context':context,'analysis_plan':plan}
+        from ptm_shared.study_display import study_display
+        return {'study_design':context['study_design'],'analysis_context':context,'analysis_plan':plan,
+                'study_display':study_display(context['study_design'],context)}
     except (ValueError,TypeError,KeyError) as error:
         raise HTTPException(status_code=422,detail={'code':'design_input_invalid','message':str(error)}) from error
 

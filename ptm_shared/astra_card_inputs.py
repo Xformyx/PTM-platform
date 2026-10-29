@@ -75,6 +75,7 @@ def precursor_membership(path, summary, design):
 
 
 def metadata_packet(design, context, snapshot):
+    from .study_display import study_display
     original = (snapshot or {}).get('original', {})
     raw = original.get('analysis_context', {})
     # The legacy resolver sees the recorded fields, never invented dose or hardware.
@@ -102,6 +103,7 @@ def metadata_packet(design, context, snapshot):
             conflicts.append({'field': key, 'raw': value, 'canonical': design['study'][key],
                               'status': 'raw_canonical_difference_preserved'})
     return {'contract': contract, 'recorded_context': source, 'contract_input_sources': projection_sources,
+            'study_display': study_display(design, source),
             'snapshot_ref': 'study/user_input_snapshot.json#/original/analysis_context',
             'snapshot_status': 'provided' if snapshot is not None else 'unavailable_context_fallback',
             'canonical_study': design.get('study', {}), 'arms': design.get('arms', []),

@@ -35,7 +35,7 @@ import QuickAnalysisCustomFields from "@/components/QuickAnalysisOptions";
 import { CLOUD_MODEL_PRESETS, type CloudProvider } from "@/lib/llm-models";
 import SampleDesignFields from "@/components/SampleDesignFields";
 import StudyInputFields from "@/components/StudyInputFields";
-import { resolveSubmission, designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode } from "@/lib/analysisContext";
+import { BIOLOGICAL_DESIGN, newExperimentContext, resolveSubmission, designErrors, designSamples, mergeAnalysisContext, withPersistedExportMode } from "@/lib/analysisContext";
 
 const STEPS = ["Project & Files", "Sample Config", "Analysis Focus", "Report Options"];
 
@@ -198,7 +198,7 @@ export default function OrderCreate() {
   const [direction, setDirection] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [structuredContext, setStructuredContext] = useState<Record<string, unknown>>({quantitation_export_mode:"astra_analysis.v5",normalization_policy:"already_normalized.v1"});
+  const [structuredContext, setStructuredContext] = useState<Record<string, unknown>>(() => newExperimentContext());
 
   // Step 0: Project & Files
   const [form, setForm] = useState({
@@ -1369,10 +1369,10 @@ export default function OrderCreate() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Biological Question</Label>
-                  <Textarea value={form.biological_question}
+                  <Label htmlFor="biological-design">{BIOLOGICAL_DESIGN.label}</Label>
+                  <Textarea id="biological-design" aria-label={BIOLOGICAL_DESIGN.label} value={form.biological_question}
                     onChange={(e) => setForm({ ...form, biological_question: e.target.value })}
-                    placeholder="e.g., What signaling pathways are activated by irisin in skeletal muscle?"
+                    placeholder={BIOLOGICAL_DESIGN.help}
                     rows={3}
                   />
                 </div>

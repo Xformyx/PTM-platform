@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright, expect
 from ptm_shared.study_execution import resolve_context
+from ptm_shared.study_display import study_display
 
 
 async def validate(url, output):
@@ -24,7 +25,7 @@ async def validate(url, output):
                 calls.append(cells)
                 if cells == 'slow cells': await asyncio.sleep(.8)
                 context = resolve_context(body['analysis_context'], body['sample_config'], taxonomy_id=9606, species=body['species'], ptm_type=body['ptm_type'])
-                value = {'analysis_context': context, 'study_design': context['study_design'], 'analysis_plan': {'source_execution': {'message': 'local fixture'}}}
+                value = {'analysis_context': context, 'study_design': context['study_design'], 'study_display': study_display(context['study_design'],context), 'analysis_plan': {'source_execution': {'message': 'local fixture'}}}
             elif '/rag/collections' in request.url: value = {'collections': []}
             elif '/llm/models' in request.url: value = {'models': []}
             elif '/sessions' in request.url: value = []
@@ -35,7 +36,7 @@ async def validate(url, output):
         summary = page.get_by_label('입력 정보 요약', exact=True)
         await expect(summary).to_contain_text('기준 조건: Control')
         await expect(summary).to_contain_text('90min vs Control')
-        await expect(summary).to_contain_text('미기록 — descriptive 분석')
+        await expect(summary).to_contain_text('등록 반복: 조건별 2반복 · 총 4개 측정 파일')
         assert await summary.locator('select,input[type="text"],input[type="number"]').count() == 0
         await summary.screenshot(path=str(output/'initial-summary.png'))
         await summary.get_by_role('button', name='입력 정보 수정').click()

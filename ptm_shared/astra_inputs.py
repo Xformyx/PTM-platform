@@ -66,6 +66,7 @@ def leaves(value, path=''):
 
 def transfer_contract(snapshot, design, context, literature):
     """Every provided leaf has one disposition; raw-only is an explicit valid outcome."""
+    from .study_display import DISPLAY, study_display, study_display_markdown
     original = snapshot['original']; fields = []
     direct = {'species', 'ptm_type', 'organism_code'}
     study_fields = set(design.get('study', {}))
@@ -81,6 +82,7 @@ def transfer_contract(snapshot, design, context, literature):
         elif root == 'rag_collections':
             canonical = 'references/literature_pin.json#/collections'
         fields.append({'source_field_path': path, 'source_record_id': snapshot['source_record_id'],
+            **({'display_name': DISPLAY['biological_question']['label'], 'field_description': DISPLAY['biological_question']['description']} if parts[-1]=='biological_question' else {}),
             'scope': 'injection' if root == 'sample_config' else 'study',
             'original_value_ref': 'study/user_input_snapshot.json#/original' + path,
             'canonical_value_ref': canonical, 'value_status': 'null' if value is None else 'provided',
@@ -106,7 +108,8 @@ def transfer_contract(snapshot, design, context, literature):
              '## Conditions and references', '| Condition ID | Arm | Label | Original time | Minutes |', '|---|---|---|---|---|']
     for c in design['conditions']:
         brief.append(f"| {c['condition_id']} | {c['arm_id']} | {c['label']} | {c.get('time')} | {(c.get('time') or {}).get('minutes')} |")
-    brief += ['## Contrasts', json.dumps(design['contrasts'], ensure_ascii=False, indent=2),
+    brief += [study_display_markdown(study_display(design, context)),
+              '## Contrasts', json.dumps(design['contrasts'], ensure_ascii=False, indent=2),
               '## User research questions — complete original', json.dumps(questions, ensure_ascii=False, indent=2),
               '## Experimental context — complete original', json.dumps(original.get('analysis_context'), ensure_ascii=False, indent=2),
               '## Requested analysis and report preferences', json.dumps({k: original.get(k) for k in ('analysis_options','report_options')}, ensure_ascii=False, indent=2),
