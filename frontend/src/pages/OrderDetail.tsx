@@ -4203,6 +4203,7 @@ export default function OrderDetail() {
               )}
               {(() => {
                 const isHalted = order.stage_detail?.startsWith("Halted:");
+                const isQuietRunning = order.stage_detail?.startsWith("Running:");
                 if (isHalted) {
                   return (
                     <>
@@ -4211,6 +4212,18 @@ export default function OrderDetail() {
                       </Badge>
                       <span className="text-xs text-red-500 ml-1" title={order.stage_detail ?? ""}>
                         {(order.stage_detail ?? "").replace("Halted: ", "")}
+                      </span>
+                    </>
+                  );
+                }
+                if (isQuietRunning) {
+                  return (
+                    <>
+                      <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30">
+                        Running
+                      </Badge>
+                      <span className="text-xs text-amber-600 dark:text-amber-400 ml-1" title={order.stage_detail ?? ""}>
+                        {(order.stage_detail ?? "").replace("Running: ", "")}
                       </span>
                     </>
                   );

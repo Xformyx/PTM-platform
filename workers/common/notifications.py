@@ -183,7 +183,7 @@ def notify_watchdog_alert(
 ):
     """
     Create in-app notification (+ optional email) when the watchdog detects a stalled order.
-    action_taken: 'none', 'auto_restart', 'halted'
+    action_taken: 'none', 'auto_restart', 'halted', 'still_running'
     """
     user_id, email, email_enabled = _get_user_for_order(order_id)
     if user_id is None:
@@ -207,6 +207,14 @@ def notify_watchdog_alert(
             f"'{stage_label}' 단계가 멈춤 감지되어 분석이 중단되었습니다.\n"
             f"원인: {reason}\n"
             f"수동 확인이 필요합니다."
+        )
+    elif action_taken == "still_running":
+        ntype = "watchdog_warning"
+        title = f"분석 진행 중 — {display_name}"
+        message = (
+            f"'{stage_label}' 단계의 작업은 실행 중입니다.\n"
+            f"진행 로그가 없어 상태만 갱신했습니다.\n"
+            f"{reason}"
         )
     else:
         ntype = "watchdog_warning"

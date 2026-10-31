@@ -668,10 +668,18 @@ export default function OrderList() {
                     <TableCell>
                       {(() => {
                         const isHalted = order.stage_detail?.startsWith("Halted:");
+                        const isQuietRunning = order.stage_detail?.startsWith("Running:");
                         if (isHalted) {
                           return (
                             <Badge variant="destructive" className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
                               Halted
+                            </Badge>
+                          );
+                        }
+                        if (isQuietRunning) {
+                          return (
+                            <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30">
+                              Running
                             </Badge>
                           );
                         }
@@ -703,6 +711,7 @@ export default function OrderList() {
                                 indicatorClassName={
                                   order.status === "failed" ? "bg-destructive"
                                     : order.stage_detail?.startsWith("Halted:") ? "bg-red-400"
+                                    : order.stage_detail?.startsWith("Running:") ? "bg-amber-400"
                                     : undefined
                                 }
                               />

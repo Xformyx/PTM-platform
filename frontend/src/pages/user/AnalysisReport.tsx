@@ -464,6 +464,7 @@ function friendlyMessage(stage: string, detail: string): string {
   
   // ── Preprocessing stage ──
   if (stage === "preprocessing") {
+    if (detail.startsWith("Running:")) return "분석은 계속 진행 중입니다. 진행 로그만 아직 없습니다.";
     if (detail.includes("Loading input")) return "입력 파일을 불러오는 중...";
     if (detail.includes("PTM quantification")) {
       if (detail.includes("complete")) return "PTM 정량 분석 완료";

@@ -3585,4 +3585,15 @@
 - **해석 한계:** 시간순 저장은 활성이나 비활성이 아니다. 미기록 시간을 0분으로 만들지 않는다. repository z-score 행은 PhosX가 아니다.
 - **결정성:** 새 seed·solver 없음. 회귀 검사는 `PYTHONPATH=.:workers python -m pytest ptm_shared/tests/test_method_score_order.py`. g8 1,859행을 method_result_id로 맞춰 셀이 같음을 확인했다. 정량·PhosX·문헌 검색·LLM은 실행하지 않았다.
 
+### [2026-10-31] 살아 있는 Celery 작업의 watchdog 문구
+
+- **분류:** 정정
+- **대상:** `workers/watchdog/tasks.py` `stage_detail_for_quiet_order`, `workers/common/notifications.py` `notify_watchdog_alert`
+- **구현 대상 설계:** `docs/BUILD_AND_DEPLOY.md` §5.2
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). Order 47·48에서 참조 수집 중 `stage_detail`이 Halted로 보인 뒤. 새 측정 임계 없음.
+- **내용:** `order_logs`가 60분 없어도 Celery 작업이 있으면 `stage_detail`은 `Running:`으로 시작한다. `Halted:`는 활성 작업이 없을 때만 쓴다. 주문 status와 재시작 횟수, 60분 임계는 바꾸지 않는다.
+- **논문에서의 용도:** 사용 안 함
+- **해석 한계:** Running은 그 단계의 완료나 kinase 활성이 아니다. 진행률이 50%인 것은 Astra 전처리 콜백의 고정 표시일 수 있다.
+- **결정성:** 새 seed·solver·dtype 없음. 정량·PhosX·문헌 검색은 실행하지 않았다.
+
 

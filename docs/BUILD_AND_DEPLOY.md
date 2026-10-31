@@ -136,3 +136,7 @@ records jsonl이 32MB(`EXPLORER_JSONL_CHUNK_BYTES`)를 넘으면 `explorer_recor
 Report 봉인 인덱스(`report_explorer_index.v2`)도 같은 청크 COPY를 쓴다.
 256MB + `ORDER BY kind,record_id`는 Insulin-scale sealed packet에서 OOM이다.
 부분 파일은 `records-part-*.parquet`이고 조회가 glob한다. TMM NNLS·τ를 바꾸지 않는다.
+
+### 5.2 살아 있는 작업은 Halted가 아니다 (2026-10-31 선언)
+
+`WATCHDOG_NO_PROGRESS_STALL_MINUTES`(60) 동안 `order_logs`가 없어도 Celery 작업이 `inspect.active`에 있으면 주문 status는 바꾸지 않는다. `stage_detail`은 `Running:`으로 시작한다. `Halted:`는 활성 Celery 작업이 없고 로그도 없을 때만 쓴다. 진행률이 그대로인 것은 `progress_pct unchanged`로 적고, hang으로 적지 않는다. 이 문구는 그 단계의 완료나 kinase 활성이 아니다. 자동 재시작이 켜져 있고 재시작 횟수가 남아 있으면 기존 재시작 경로는 유지한다.

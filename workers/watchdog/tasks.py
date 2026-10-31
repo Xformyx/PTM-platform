@@ -8,7 +8,8 @@ Detection strategy (2-stage to avoid false positives):
      b. Whether order_logs received any new entry within the stall threshold
      c. Whether DB progress_pct changed in the last check window
   3. If both (a) no active task AND (b) no recent log → likely stalled.
-     If (a) task exists but (b+c) no progress for extended time → likely hung.
+     If (a) task exists but (b+c) no progress for extended time → still running.
+     A live task is labeled Running. Halted is only for a missing task.
 
 Thresholds are generous to avoid false positives with long LLM calls:
   - WATCHDOG_NO_TASK_STALL_MINUTES:  minutes with no active Celery task (default: 15)
@@ -153,16 +154,36 @@ def live_task_keeps_execution_lock(has_celery_task):
     return bool(has_celery_task)
 
 
-def _handle_stalled_order(order: dict, reason: str):
-    """Take action on a stalled order: notify, optionally restart or halt."""
+def stage_detail_for_quiet_order(minutes_since_log, progress_pct, progress_unchanged):
+    """진행 로그가 없어도 Celery 작업이 있으면 Halted로 적지 않는다.
+
+    구현 대상: docs/BUILD_AND_DEPLOY.md §5.2
+    사전등록: 2026-10-31. Order 47·48의 참조 수집 중 stage_detail이 Halted로
+    보인 뒤. 탐색적. primary 승격 금지.
+    해석 한계: 진행 로그가 없다는 관찰이다. 그 단계가 완료된다는 뜻이 아니다.
+    주장 금지: 이 문구로 kinase 활성, 비활성, 참조 수집 완료를 말하지 않는다.
+    """
+    unchanged = (
+        f", progress_pct unchanged at {float(progress_pct):.1f}%"
+        if progress_unchanged else ""
+    )
+    return (
+        "Running: Celery task is active with no progress log for "
+        f"{int(minutes_since_log)} minutes{unchanged}"
+    )
+
+
+def _handle_stalled_order(order: dict, reason: str, *, task_alive: bool = False):
+    """Take action on a quiet order: notify, optionally restart, or record the state."""
     order_id = order["id"]
     stage = order["status"]
     restart_count = order["watchdog_restart_count"]
     auto_restart = get_bool("WATCHDOG_AUTO_RESTART", False)
     max_restarts = get_int("WATCHDOG_MAX_RESTARTS", 2)
 
+    state = "still running" if task_alive else "stalled"
     logger.warning(
-        f"[Watchdog] Order {order_id} ({order['order_code']}) stalled at "
+        f"[Watchdog] Order {order_id} ({order['order_code']}) {state} at "
         f"'{stage}' — {reason}"
     )
 
@@ -177,9 +198,13 @@ def _handle_stalled_order(order: dict, reason: str):
             order_id, reason, stage, action_taken="auto_restart"
         )
     else:
-        detail = f"Halted: {reason}"
+        if task_alive:
+            detail = reason if reason.startswith("Running:") else f"Running: {reason}"
+            action = "still_running"
+        else:
+            detail = f"Halted: {reason}"
+            action = "halted" if auto_restart else "none"
         update_watchdog_alert(order_id, detail)
-        action = "halted" if auto_restart else "none"
         notify_watchdog_alert(
             order_id, reason, stage, action_taken=action
         )
@@ -313,15 +338,12 @@ def check_stalled_orders(self):
             elif has_celery_task and minutes_since_log >= no_progress_stall:
                 if not live_task_keeps_execution_lock(has_celery_task):
                     _clear_stale_locks(order_id)
-                _pct_info = (
-                    f", progress_pct stuck at {_cur_pct.get(order_id, 0):.1f}%"
-                    if _pct_unchanged else ""
+                reason = stage_detail_for_quiet_order(
+                    minutes_since_log,
+                    _cur_pct.get(order_id, 0),
+                    _pct_unchanged,
                 )
-                reason = (
-                    f"Celery task is running but no progress updates for "
-                    f"{int(minutes_since_log)} minutes (possible hang){_pct_info}"
-                )
-                _handle_stalled_order(order, reason)
+                _handle_stalled_order(order, reason, task_alive=True)
 
         logger.info(
             f"[Watchdog] Check complete — {len(active_orders)} active orders, "
