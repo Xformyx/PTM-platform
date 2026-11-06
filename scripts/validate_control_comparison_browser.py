@@ -58,6 +58,11 @@ async def validate(args):
         await expect(dialog.get_by_text('현재 방식: Control 직접 연결',exact=True)).to_be_visible()
         assert await dialog.get_by_role('radio').count()==2
         assert await dialog.get_by_role('radio').evaluate_all('(rows)=>rows.every(r=>!r.checked)')
+        # A failed rerun can still have a published success; changing its next
+        # draft must display the same preservation notice.
+        await dialog.get_by_role('radio',name='시간대별 Control 기준 (Time-matched controls)',exact=True).click()
+        await expect(dialog.get_by_label('입력 정보 요약')).to_contain_text('Control 비교 방식: 시간대별 Control 기준')
+        await expect(dialog.get_by_text('비교 기준이 변경되었습니다. 기존 결과는 유지되며, 새 기준은 다음 분석 실행에 적용됩니다.',exact=True)).to_be_visible()
         await dialog.get_by_role('button',name='Astra 패키지 생성',exact=True).click();await expect(dialog).not_to_be_visible()
         await shared.click();await page.get_by_label('공통 Control',exact=True).select_option(thirty)
         await expect(summary).to_contain_text('Control 비교 방식: 공통 Control 기준')

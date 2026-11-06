@@ -50,12 +50,12 @@ def resolve_plan(context, hashes=None, source_pin=None, taxa=None):
             for row in sorted(design[collection],key=lambda row:row[keys[0]])]
     # Strategy/effect scope changes temporal interpretation even when the actual
     # numerical contrast is identical. Labels and assignment provenance do not.
-    effect_scope = [{k:c.get(k) for k in ('contrast_id','reference_strategy','effect_kind','control_family')}
+    effect_scope = [{k:c.get(k) for k in ('contrast_id','reference_strategy','effect_kind','control_family','design_scope')}
                     for c in sorted(design['contrasts'],key=lambda c:c['contrast_id'])]
     code=lambda names:{name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() for name in names}
     quant_code=code(['contrast_quantification.py','report_compatible_quantification.py','normalization_provenance.py','study_design.py','generic_workflow.py','generic_kinase.py','strict_parent_paired.py','report_compatible_extensions.py'])
     discovery_code=code(['astra_discovery.py','generic_kinase.py','motif_candidate_calibration.py','motif_library.json'])
-    temporal_code=code(['astra_temporal.py','substrate_temporal_dynamics.py','kinase_trajectory_evidence.py'])
+    temporal_code=code(['effect_series.py','astra_temporal.py','substrate_temporal_dynamics.py','kinase_trajectory_evidence.py'])
     quant = stable_id('quant', [hashes, numeric_design, design['study']['ptm_type'], design['study']['taxonomy_id'], estimator, ctx['normalization_policy'],quant_code])
     discovery = stable_id('discovery', [quant, source_pin, ctx.get('localization_evidence'), discovery_code])
     temporal = stable_id('temporal', [discovery, ctx.get('temporal_policy', {}), effect_scope, temporal_code])

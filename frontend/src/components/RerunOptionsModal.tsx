@@ -52,6 +52,7 @@ function isRagModelTooSmall(modelName: string): boolean {
 
 interface Order {
   status?:string;
+  result_files?:{enrichment_free?:unknown};
   species?:string;
   ptm_type?:string;
   id: number;
@@ -560,7 +561,7 @@ export default function RerunOptionsModal({
                   className="h-8 text-sm"
                 />
               </div>
-              {String(structuredContext.quantitation_export_mode).startsWith('astra_analysis.')&&<StudyInputFields context={mergeAnalysisContext(structuredContext,analysisContext)} onChange={setStructuredContext} samples={sourceSamples} species={order.species??'human'} ptmType={order.ptm_type??'phosphorylation'} onSamplesChange={setSourceSamples} publishedContext={order.status==='completed'?order.analysis_context:undefined}/>}
+              {String(structuredContext.quantitation_export_mode).startsWith('astra_analysis.')&&<StudyInputFields context={mergeAnalysisContext(structuredContext,analysisContext)} onChange={setStructuredContext} samples={sourceSamples} species={order.species??'human'} ptmType={order.ptm_type??'phosphorylation'} onSamplesChange={setSourceSamples} publishedContext={(order.status==='completed'||Boolean(order.result_files?.enrichment_free))?order.analysis_context:undefined}/>}
               </div>
               <SampleDesignFields context={mergeAnalysisContext(structuredContext,analysisContext)} onChange={setStructuredContext}
                 samples={sourceSamples} secondarySamples={designSamples(order.secondary_sample_config)} species={order.species} ptmType={order.ptm_type} onEdit={()=>{setEditingInput(true);setTimeout(()=>document.getElementById("rerun-data-information")?.scrollIntoView({behavior:"smooth",block:"start"}),0);}} />

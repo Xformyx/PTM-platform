@@ -158,7 +158,11 @@ def project_card_inputs(tables, inputs, design, context, snapshot=None):
         identity_rows.append({'form_id': fid, 'schema_version': VERSION, 'identity_json': encode(row),
                               'summary_json': encode(form), 'site_mappings_json': encode(mappings)})
     rows = []
-    for raw in tables['quant/comparisons'].to_dict('records'):
+    from .effect_series import resolve_series
+    comparisons=tables['quant/comparisons']
+    scoped_design=design if 'contrasts' in design else {**design,'contrasts':comparisons[['contrast_id','target_condition_id','reference_condition_id','pairing']].drop_duplicates().to_dict('records')}
+    scopes,lookup=resolve_series(scoped_design)
+    for raw in comparisons.to_dict('records'):
         c = clean(raw); fid = c['form_id']; cid = c['contrast_id']
         # CSV caches read an empty reason/mask cell as NA. Canonicalize only
         # these optional table cells so fresh and cached projections replay alike.
@@ -168,8 +172,11 @@ def project_card_inputs(tables, inputs, design, context, snapshot=None):
         restrictions = list(identity['adapter_restrictions'])
         if not c['included']: restrictions.append('quant_comparison_excluded')
         # One consumer state per form/arm/reference/pairing. No gene-key pooling.
-        state_id = stable_id('card_state', [fid, c['arm_id'], c['reference_condition_id'], c['pairing']])
-        row = {**identity, **c, 'condition': f"{c['target_label']} vs {c['reference_label']} [{cid}]",
+        scope = scopes[lookup[cid]]
+        matched = scope['reference_strategy'] == 'time_matched'
+        state_id = stable_id('card_state', [fid, scope['series_id']]) if matched else stable_id('card_state', [fid, c['arm_id'], c['reference_condition_id'], c['pairing']])
+        row = {**identity, **c, 'effect_series_id':scope['series_id'], 'reference_strategy':scope['reference_strategy'],
+               'effect_kind':scope['effect_kind'], 'control_family':scope['control_family'], 'condition': f"{c['target_label']} vs {c['reference_label']} [{cid}]",
                'time_minutes': c['time_min'], 'reference_time_minutes': c['reference_time_min'],
                'reference_id': c['reference_condition_id'], 'unadjusted_source_field': 'quant/comparisons.U_joint',
                'localization_ids': [r['localization_id'] for r in localization],

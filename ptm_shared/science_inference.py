@@ -16,6 +16,8 @@ ANCHOR_COLUMNS=['anchor_id','candidate_id','contrast_id','track','excluded_kind'
 
 
 def identifiability(discovery, temporal, design):
+    from .effect_series import resolve_series
+    _,series_lookup=resolve_series(design)
     members=discovery['substrate_contributions'];profiles=discovery['kinase_temporal_profiles'];edges=discovery['kinase_candidate_edges']
     anchors=[];calls=[];index=defaultdict(set)
     for r in members.to_dict('records'):
@@ -40,7 +42,7 @@ def identifiability(discovery, temporal, design):
                     'remaining_contribution_ids':';'.join(remaining.contribution_id),'score':score,'remaining_genes':remaining.substrate_gene.nunique(),
                     'remaining_measurement_groups':len({g for value in remaining.measurement_group_id for g in str(value).split(';')}),'independent_validation':False})
                 if kind=='gene' and np.isfinite(score) and np.isfinite(p['activity_magnitude']) and score*p['activity_magnitude']<0:reasons.append('gene_omission_unstable')
-        c=contrasts[cid];sid=stable_id('series',[conditions[c['target_condition_id']]['arm_id'],c['reference_condition_id'],c.get('pairing')])
+        c=contrasts[cid];sid=series_lookup[cid]
         fixed=temporal.get('kinase_fixed_membership',pd.DataFrame())
         if len(fixed):
             f=fixed.loc[fixed.candidate_id.eq(candidate)&fixed.series_id.eq(sid)&fixed.track.eq(track)]

@@ -93,16 +93,9 @@ def order_intervals(source,target):
 def integrate_temporal(tables,discovery,design,context,source_context=None,impacts=None):
     threshold=float(context.get('temporal_policy',{}).get('effect_threshold_log2',.5))
     if not np.isfinite(threshold) or threshold<=0:raise ValueError('Temporal effect threshold must be positive and finite')
-    conditions={c['condition_id']:c for c in design['conditions']};series={};contrast_series={}
-    for c in design['contrasts']:
-        target=conditions[c['target_condition_id']]
-        sid=stable_id('series',[target['arm_id'],c['reference_condition_id'],c.get('pairing')])
-        series.setdefault(sid,{'series_id':sid,'arm_id':target['arm_id'],'reference_condition_id':c['reference_condition_id'],
-            'contrast_ids':[],'reference_strategy':'one_declared_reference; matched_time_controls_remain_separate_series',
-            'pairing':c.get('pairing'),'paired_biological_units':c.get('pairing')=='paired' and design['replication_declaration']!='technical_per_condition'})['contrast_ids'].append(c['contrast_id'])
-        contrast_series[c['contrast_id']]=sid
-    for s in series.values():
-        s['contrast_ids']=sorted(s['contrast_ids'],key=lambda cid:(conditions[next(c['target_condition_id'] for c in design['contrasts'] if c['contrast_id']==cid)]['time']['minutes'],cid))
+    from .effect_series import resolve_series
+    conditions={c['condition_id']:c for c in design['conditions']}
+    series,contrast_series=resolve_series(design)
     impacts_by_form={fid:rows for fid,rows in impacts.groupby('form_id')} if impacts is not None else {}
     features=[];protein=[];kinase=[];fixed=[];anchors=[];membership=discovery['substrate_contributions'];profiles=discovery['kinase_temporal_profiles']
     def feature(entity,sid,track,rows,column):
@@ -218,7 +211,12 @@ def integrate_temporal(tables,discovery,design,context,source_context=None,impac
                     for group in gene_groups.get(b,[]):
                         target=pindex.get((group,sid,'PG'))
                         if target:link(source,target,'network_relation_context_not_direct_substrate',item['query_id'])
-    return {'temporal_series':pd.DataFrame([{**s,'contrast_ids':';'.join(s['contrast_ids'])} for s in series.values()],columns=['series_id','arm_id','reference_condition_id','contrast_ids','reference_strategy','pairing','paired_biological_units']),
+    from .effect_series import POINT_COLUMNS, has_matched
+    from .evidence_temporal import effect_intervals
+    series_columns=['series_id','arm_id','reference_condition_id','contrast_ids','reference_strategy','pairing','paired_biological_units']
+    if has_matched(design):series_columns += ['series_schema_version','control_family','effect_kind','inference_status']
+    return {'effect_interval_contrasts':effect_intervals(tables,design),'effect_series_points':pd.DataFrame([p for s in series.values() for p in s['points']],columns=POINT_COLUMNS),
+        'temporal_series':pd.DataFrame([{**s,'contrast_ids':';'.join(s['contrast_ids'])} for s in series.values()],columns=series_columns),
         'ptm_temporal_features':pd.DataFrame(features,columns=FEATURE_COLUMNS),'protein_temporal_features':pd.DataFrame(protein,columns=FEATURE_COLUMNS),
         'kinase_temporal_features':pd.DataFrame(kinase,columns=FEATURE_COLUMNS),
         'kinase_fixed_membership':pd.DataFrame(fixed,columns=['candidate_id','series_id','contrast_id','track','fixed_common_score','fixed_common_sites','available_sites','entered_sites','departed_sites','membership_turnover']),

@@ -103,12 +103,14 @@ def quantitative_evidence(tables,alternative,design,normalization,alternative_no
     referenced={(r['form_id'],r['condition_id']) for r in scopes}
     scopes += [{'form_id':fid,'condition_id':cid} for fid,cid in sorted(observations) if (fid,cid) not in referenced]
     contrast_by_id={c['contrast_id']:c for c in design['contrasts']}
+    from .effect_series import resolve_series
+    _,series_lookup=resolve_series(design)
     for d in scopes:
         fid,cid=d['form_id'],d['condition_id'];group=observations[(fid,cid)]
         positive=group.loc[group.U_observed,'ptm_intensity'];parent=group.loc[group.P_observed,'parent_intensity'];form=form_index.loc[fid]
         contrast_id=d.get('contrast_id');reference_id=d.get('reference_condition_id')
         pairing=contrast_by_id.get(contrast_id,{}).get('pairing')
-        series_id=stable_id('series',[conditions[cid]['arm_id'],reference_id,pairing]) if contrast_id else None
+        series_id=series_lookup.get(contrast_id)
         candidates=candidateedges.loc[candidateedges.form_id.eq(fid)]
         emergence.append({'emergence_id':stable_id('emergence',[fid,cid,contrast_id]),'contrast_id':contrast_id,'reference_condition_id':reference_id,'series_id':series_id,'form_id':fid,'condition_id':cid,'arm_id':conditions[cid]['arm_id'],
             'time_min':(conditions[cid].get('time') or {}).get('minutes'),'detected_n':len(positive),'scheduled_n':len(group),'parent_n':len(parent),
@@ -117,6 +119,8 @@ def quantitative_evidence(tables,alternative,design,normalization,alternative_no
             'positive_intensity_max':positive.max() if len(positive) else np.nan,'repeatability_tier':'repeated_detection' if len(positive)>=2 else 'single_detection' if len(positive) else 'not_detected',
             'repeatability_policy':'at_least_two_technical_observations.v1','candidate_ids':';'.join(sorted(set(candidates.candidate_id))),
             'candidate_edge_ids':';'.join(sorted(set(candidates.edge_id))),'parent_eligible':bool(form.primary_adjustment_eligible),
+            'reference_detection_scope':'recorded_zero_time_reference' if reference_id and conditions[reference_id].get('time',{}).get('minutes')==0 else 'actual_nonzero_or_unknown_time_reference' if reference_id else 'condition_only',
+            'reference_detection_status':d.get('baseline_status'),
             'baseline_score_contributor':False if d is not None and d.get('baseline_status')=='undetected' else None,
             'post_reference_condition_id':d.get('post_reference_condition_id') if d is not None else None,
             'post_reference_A':d.get('eligible_A') if d is not None else np.nan,'post_reference_caveat':'conditioned_on_first_repeated_detection; not_baseline_fold_change',
@@ -147,7 +151,7 @@ def quantitative_evidence(tables,alternative,design,normalization,alternative_no
                 'log2_SD':vals.std(ddof=1) if len(vals)>=2 else np.nan,'statistical_scope':'within_material_technical_dispersion; not_population_CI' if pd.notna(mid) else 'unconfirmed_material_measurement_dispersion; not_population_CI'})
     return {'parent_adjustment_impact':pd.DataFrame(impacts,columns=list(tables['comparisons'])+['impact_id','paired_parent_A','complete_parent_A','alternative_normalization_A','normalization_delta','alternative_parent_delta','classification','parent_or_normalization_sensitive','technical_LOO_min','technical_LOO_max','technical_unstable','observation_tier','classification_policy']),
         'technical_injection_omissions':loo,'normalization_offsets':pd.DataFrame(offsets,columns=['form_id','contrast_id','expected_A_offset','observed_A_offset','same_factor_PR_PG_cancels','normalization_scope']),
-        'emergence_evidence':pd.DataFrame(emergence,columns=['emergence_id','contrast_id','reference_condition_id','series_id','form_id','condition_id','arm_id','time_min','detected_n','scheduled_n','parent_n','detected_injection_ids','parent_injection_ids','positive_intensity_min','positive_intensity_median','positive_intensity_max','repeatability_tier','repeatability_policy','candidate_ids','candidate_edge_ids','parent_eligible','baseline_score_contributor','post_reference_condition_id','post_reference_A','post_reference_caveat','LOD_bound_status','population_detection_p_value']),
+        'emergence_evidence':pd.DataFrame(emergence,columns=['emergence_id','contrast_id','reference_condition_id','series_id','form_id','condition_id','arm_id','time_min','detected_n','scheduled_n','parent_n','detected_injection_ids','parent_injection_ids','positive_intensity_min','positive_intensity_median','positive_intensity_max','repeatability_tier','repeatability_policy','candidate_ids','candidate_edge_ids','parent_eligible','reference_detection_scope','reference_detection_status','baseline_score_contributor','post_reference_condition_id','post_reference_A','post_reference_caveat','LOD_bound_status','population_detection_p_value']),
         'feature_evidence_ledger':pd.DataFrame(ledger,columns=['evidence_id','form_id','contrast_id','parent_quantification_eligible','site_attribution_eligible','candidate_count','candidate_ids','edge_ids','A_available','reason_codes','independent_biological_pq']),
         'technical_dispersion':pd.DataFrame(qc,columns=['form_id','condition_id','material_id','track','observed_n','scheduled_n','log2_SD','statistical_scope'])}
 

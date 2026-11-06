@@ -100,10 +100,12 @@ def project_full(tables, catalog):
         lid=stable_id('whole_temporal_link',[subject,table,key,role])
         temporal[lid]=dict(zip(LINK_COLUMNS,[lid,subject,table,key,eid,role,'linked',None]))
     all_subjects=[{**c,'subject_id':c['card_id']} for c in observations]
-    covered={(c['form_id'],b['arm_id'],b['reference_condition_id'],b['pairing']) for c in observations for b in c['source_bindings']}
+    from .effect_series import resolve_series
+    scopes,lookup=resolve_series(packet['canonical_study_design'])
+    covered={(c['form_id'],lookup[b['contrast_id']]) for c in observations for b in c['source_bindings']}
     raw_groups=defaultdict(list)
     for r in tables['reader_adapter/form_contrasts'].itertuples():
-        b=json.loads(r.row_json); scope=(r.form_id,b['arm_id'],b['reference_condition_id'],b['pairing'])
+        b=json.loads(r.row_json); scope=(r.form_id,lookup[b['contrast_id']])
         if scope not in covered: raw_groups[scope].append(b)
     # A raw subject is explicitly a form/scope, never a fabricated observation card.
     for scope,bindings in sorted(raw_groups.items(),key=lambda x:encode(x[0])):
@@ -134,7 +136,8 @@ def project_full(tables, catalog):
             reasons=[]; scope={}
             if len(matches)==1:
                 s=matches[0];scope={k:s[k] for k in ['series_id','arm_id','reference_condition_id','pairing']}
-                if any(k in r and r[k]!=s[k] for k in ['arm_id','reference_condition_id','pairing']): raise ValueError('Direct subject scope conflict')
+                actual=next(p for p in scopes[lookup[r['contrast_id']]]['points'] if p['contrast_id']==r['contrast_id'])
+                if any(k in r and r[k]!=actual[k] for k in ['arm_id','reference_condition_id','pairing']): raise ValueError('Direct subject scope conflict')
                 bind(eid,name,r,'native_method_observation' if kind=='method_result' else 'protein_observation')
                 bind(eid,SERIES,s,'series')
                 if kind=='protein':

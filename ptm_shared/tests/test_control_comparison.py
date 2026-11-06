@@ -125,3 +125,13 @@ def test_legacy_support_rejects_pooling_but_not_three_replicates():
     assert legacy_support(context,rows)['status']=='unsupported'
     shared=[r for r in rows if r['condition'] not in ['Control 30min','Control 60min']]
     assert legacy_support({},shared)['status']=='supported'
+
+
+@pytest.mark.parametrize('policy',[
+    {'strategy':'shared_reference','reference_condition_id':['invalid']},
+    {'strategy':'explicit_custom','mappings':{'target':{'reference':'invalid'}}},
+    {'strategy':'time_matched','arm_control_families':{'arm':None}},
+])
+def test_policy_identifiers_are_validated_before_assignment(policy):
+    context,rows=inputs();context['control_comparison']=policy
+    with pytest.raises(ValueError,match='control_comparison'):resolved(context,rows)

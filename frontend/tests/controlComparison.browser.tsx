@@ -13,7 +13,7 @@ function Fixture(){
   const [context,setContext]=useState<AnalysisContext>({quantitation_export_mode:'astra_analysis.v6',biological_question:'원본 설계 설명',replication_declaration:'independent_biological_units',pairing_policy:'unpaired'});
   const [rows,setRows]=useState(initialRows);const [initial,setInitial]=useState<AnalysisContext>();
   const [payload,setPayload]=useState<unknown>(null);const [rerun,setRerun]=useState(false);
-  const [order,setOrder]=useState({id:1,order_code:'synthetic_control',status:'completed',species:'human',ptm_type:'phosphorylation',analysis_context:context,sample_config:rows,rag_collections:[],report_options:{research_questions:['별도 연구 질문']}});
+  const [order,setOrder]=useState({id:1,order_code:'synthetic_control',status:'failed',result_files:{enrichment_free:{run_id:'saved-synthetic-success'}},species:'human',ptm_type:'phosphorylation',analysis_context:context,sample_config:rows,rag_collections:[],report_options:{research_questions:['별도 연구 질문']}});
   useEffect(()=>{if(!initial&&context.study_design)setInitial(context);},[context,initial]);
   return <main className="mx-auto max-w-5xl space-y-4 p-6">
     <StudyInputFields {...{context,rows}} onChange={setContext} samples={rows} onSamplesChange={setRows} species="human" ptmType="phosphorylation" publishedContext={initial}/>

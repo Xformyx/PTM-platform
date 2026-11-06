@@ -19,6 +19,7 @@ export function ControlComparisonPreview({resolution}:{resolution?:ControlResolu
         <td>{point.target_label}</td><td>{timeText(point.target_time)}</td><td>{point.reference_label??'미지정'}</td><td>{timeText(point.reference_time)}</td>
         <td>{point.status==='resolved'?'연결됨':point.issues.map(i=>i.message).join(' ')||'미해결'}</td>
       </tr>)}</tbody></table></div>
+    {policy.strategy==='time_matched'&&resolution.readiness.matched_temporal==='descriptive_effect_series_v2'&&<p className="text-xs">동일 시간 Control 대비 효과를 시계열로 요약합니다. 생물학적 p/q 및 처리×시간 상호작용 검정은 수행하지 않습니다.</p>}
     {policy.strategy==='time_matched'&&resolution.readiness.matched_temporal==='not_yet_supported'&&<p role="status">비교 연결과 비교별 정량을 지원합니다. 시간대별 Control 효과의 통합 시계열은 아직 지원하지 않습니다.</p>}
   </section>;
 }

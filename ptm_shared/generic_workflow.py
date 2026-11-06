@@ -22,7 +22,7 @@ from .generic_kinase import map_edges, score_contrasts, fasta_taxonomy, VERSION 
 from .study_temporal_context_resolution import resolve_study_temporal_context
 
 VERSION='astra_contrast_bundle.v3'
-CODE_FILES=['study_design.py','study_design.schema.json','study_presets.py','contrast_quantification.py','annotation_registry.py','generic_kinase.py',
+CODE_FILES=['effect_series.py','astra_inputs.py','control_comparison.py','study_display.json','study_input_metadata.py','study_design.py','study_design.schema.json','study_presets.py','contrast_quantification.py','annotation_registry.py','generic_kinase.py',
     'generic_workflow.py','normalization_provenance.py','report_compatible_quantification.py','report_compatible_kinase.py',
     'study_temporal_context.py','study_temporal_context_resolution.py','probabilistic_cowave.py']
 TABLE_KEYS={'summary':['form_id'],'comparisons':['form_id','contrast_id'],'primary_A_input':['form_id','contrast_id'],
@@ -38,7 +38,7 @@ TABLE_KEYS={'summary':['form_id'],'comparisons':['form_id','contrast_id'],'prima
     'kinase_sensitivity':['entity','mode','contrast_id'],'kinase_injection_omissions':['entity','contrast_id','omitted_injection_id'],
     'emergent_kinase_evidence':['form_id','contrast_id','entity','site_id','kinase_gene'],
     'form_evidence_status':['form_id','contrast_id'],'validation_panel':['protein_group','contrast_id','layer'],
-    'temporal_protein_summary':['protein_group','arm_id','reference_condition_id','layer']}
+    'temporal_protein_summary':['protein_group','series_id','layer']}
 TABLE_MEANINGS={
     'summary':'Charge-collapsed PTM identity, raw and representative accession coordinates, exact FASTA mapping and parent eligibility.',
     'comparisons':'All form contrasts. A is usable for adjusted evidence only when included=true; raw values of ineligible forms are calculation traces.',
@@ -78,7 +78,9 @@ def object_hash(value):return hashlib.sha256(json_bytes(value)).hexdigest()
 def temporal_layers(analysis,design,context):
     if design.get('study',{}).get('design_axis')=='cross_sectional':
         return {'validation_panel':pd.DataFrame(columns=KEY_COLUMNS+['protein_group','gene','layer','log2_change','declared_windows','selection_timing','interpretation']),
-                'temporal_protein_summary':pd.DataFrame(columns=['protein_group','arm_id','reference_condition_id','layer','measured_contrasts','evaluable_contrasts','first_evaluable_time_min','last_evaluable_time_min','observed_direction_changes','grid_resolution_minutes','temporal_context_status','interpretation'])},{'status':'not_applicable'}
+                'temporal_protein_summary':pd.DataFrame(columns=['protein_group','series_id','arm_id','reference_condition_id','layer','measured_contrasts','evaluable_contrasts','first_evaluable_time_min','last_evaluable_time_min','observed_direction_changes','grid_resolution_minutes','temporal_context_status','interpretation'])},{'status':'not_applicable'}
+    from .effect_series import resolve_series
+    scopes, lookup = resolve_series(design)
     conditions={c['condition_id']:c for c in design['conditions']};by_arm=defaultdict(set)
     for c in design['contrasts']:
         arm=conditions[c['target_condition_id']]['arm_id']
@@ -100,17 +102,19 @@ def temporal_layers(analysis,design,context):
                     'layer':layer,'log2_change':row['log2_change'],'declared_windows':';'.join(sorted(tags)),
                     'selection_timing':panel.get('selection_timing','unknown'),
                     'interpretation':'same_experiment_descriptive_consistency_not_independent_validation'})
-        for (group,arm,ref),rows in table.groupby(['protein_group','arm_id','reference_condition_id'],sort=True):
+        scoped=table.assign(series_id=table.contrast_id.map(lookup))
+        for (group,sid),rows in scoped.groupby(['protein_group','series_id'],sort=True):
+            scope=scopes[sid];arm=scope['arm_id'];ref=scope['reference_condition_id']
             measured=rows.loc[np.isfinite(rows.log2_change)].sort_values(['time_min','condition_id'])
             record=temporal.get(arm,{})
-            summaries.append({'protein_group':group,'arm_id':arm,'reference_condition_id':ref,'layer':layer,
+            summaries.append({'protein_group':group,'series_id':sid,'arm_id':arm,'reference_condition_id':ref,'layer':layer,
                 'measured_contrasts':len(rows),'evaluable_contrasts':len(measured),'first_evaluable_time_min':measured.time_min.iloc[0] if len(measured) else None,
                 'last_evaluable_time_min':measured.time_min.iloc[-1] if len(measured) else None,
                 'observed_direction_changes':int(np.sum(np.diff(np.sign(measured.log2_change.to_numpy()))!=0)) if len(measured)>1 else None,
                 'grid_resolution_minutes':record.get('context',{}).get('nominal_grid_interval_minutes'),
                 'temporal_context_status':record.get('status'),'interpretation':'observed_timecourse_no_precise_lag_or_causal_estimate'})
     return {'validation_panel':pd.DataFrame(panel_rows,columns=KEY_COLUMNS+['protein_group','gene','layer','log2_change','declared_windows','selection_timing','interpretation']),
-        'temporal_protein_summary':pd.DataFrame(summaries,columns=['protein_group','arm_id','reference_condition_id','layer','measured_contrasts','evaluable_contrasts','first_evaluable_time_min','last_evaluable_time_min','observed_direction_changes','grid_resolution_minutes','temporal_context_status','interpretation'])},temporal
+        'temporal_protein_summary':pd.DataFrame(summaries,columns=['protein_group','series_id','arm_id','reference_condition_id','layer','measured_contrasts','evaluable_contrasts','first_evaluable_time_min','last_evaluable_time_min','observed_direction_changes','grid_resolution_minutes','temporal_context_status','interpretation'])},temporal
 
 
 def calculate(inputs,design,context,registration=None,*,raw_pr=None,raw_pg=None):

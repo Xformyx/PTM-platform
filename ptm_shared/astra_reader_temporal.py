@@ -18,6 +18,8 @@ PTM = 'temporal/ptm_temporal_features'
 PROTEIN = 'temporal/protein_temporal_features'
 KINASE = 'temporal/kinase_temporal_features'
 INTERVAL = 'temporal/interval_contrasts'
+EFFECT_INTERVAL = 'temporal/effect_interval_contrasts'
+POINTS = 'temporal/effect_series_points'
 FIXED = 'temporal/kinase_fixed_membership'
 ANCHOR = 'temporal/target_excluded_anchors'
 COWAVE = 'temporal/group_excluded_cowave'
@@ -25,7 +27,7 @@ PROFILE = 'kinase/kinase_temporal_profiles'
 CONTRIBUTION = 'kinase/substrate_contributions'
 KEYS = {
     SERIES: ['series_id'], PTM: ['feature_id'], PROTEIN: ['feature_id'], KINASE: ['feature_id'],
-    INTERVAL: ['interval_id'], FIXED: ['candidate_id', 'series_id', 'contrast_id', 'track'],
+    INTERVAL: ['interval_id'], EFFECT_INTERVAL: ['interval_id'], POINTS: ['series_id','contrast_id'], FIXED: ['candidate_id', 'series_id', 'contrast_id', 'track'],
     ANCHOR: ['candidate_id', 'series_id', 'track', 'site_key'], COWAVE: ['cowave_id'],
     PROFILE: ['candidate_id', 'contrast_id', 'track'], CONTRIBUTION: ['contribution_id'],
     'quant/summary': ['form_id'], 'quant/comparisons': ['form_id', 'contrast_id'],
@@ -39,7 +41,7 @@ LIMITS = [
     'observed_peak_time_min is the time of maximum ABSOLUTE observed effect; signed_peak retains its sign. It is not necessarily a positive peak.',
     'Onset/recovery are sampled observation brackets, not precisely measured event times. Preserve censoring, NA masks and irregular spacing; never bridge gaps.',
     'PTM A is inclusion-masked; U_joint/P_joint and U_all are distinct saved tracks. PG and strict_unmodified protein tracks are separate from joint-mask P_joint.',
-    'Adjacent U_joint/P_joint/A and run IDs are saved interval contrasts, never differences between two baseline contrasts.',
+    'interval_contrasts records target-condition changes. effect_interval_contrasts separately records differences of same-time treatment effects using actual endpoint units and joint masks; neither is an interaction test.',
     'AUC only covers the stored supported duration; report gap_intervals alongside it. Threshold sensitivity and LOTO are same-data robustness diagnostics.',
     'Available/fixed membership and target/gene/measurement-group exclusion are same-data consistency checks, not independent validation, biological significance or kinase-site causality.',
     'First-time entered_sites is initialization of the compared membership sets, not baseline-undetected emergence. No common sites means fixed score NA, not zero.',
@@ -84,6 +86,9 @@ def project_temporal(tables, packet, *, subjects=None, links_only=False):
     Duplicate source keys are rejected. Nonunique series or feature scope is
     reported as ambiguous and not resolved by picking a first row.
     """
+    from .effect_series import resolve_series
+    design=packet['canonical_study_design']
+    canonical_series,contrast_series=resolve_series(design)
     used = {name: set() for name in KEYS}
     links = {}
     for name, keys in KEYS.items():
@@ -128,23 +133,33 @@ def project_temporal(tables, packet, *, subjects=None, links_only=False):
     for card in subjects:
         fid, form = card['subject_id'], card['form_id']
         bindings = card['source_bindings']
-        scopes = {(b['arm_id'], b['reference_condition_id'], b['pairing']) for b in bindings}
+        scopes = {contrast_series[b['contrast_id']] for b in bindings}
         item = {'finding_id': fid, 'card_id': card.get('card_id'), 'form_id': form,
                 'label': card['feature_label'], 'status': 'unlinked', 'reasons': [],
                 'features': [], 'intervals': [], 'candidates': [], 'source_observations': []}
         findings.append(item)
         if len(scopes) != 1:
             item.update(status='ambiguous', reasons=['multiple_card_scopes']); continue
-        arm, reference, pairing = next(iter(scopes))
+        expected=canonical_series[next(iter(scopes))]
+        arm,reference,pairing=(expected[k] for k in ['arm_id','reference_condition_id','pairing'])
         cids = {b['contrast_id'] for b in bindings}
+        # Legacy archives may use a recorded series ID rather than today's key.
         matches = [r for r in rows(SERIES, arm_id=arm, reference_condition_id=reference, pairing=pairing)
-                   if cids.issubset(_parts(r['contrast_ids']))]
+                   if cids.issubset(_parts(r['contrast_ids'])) and all(contrast_series.get(cid)==expected['series_id'] for cid in _parts(r['contrast_ids']))]
         if len(matches) != 1:
             item.update(status='ambiguous' if matches else 'unlinked',
                         reasons=['nonunique_series_scope' if matches else 'no_saved_series_for_card_scope']); continue
         series = matches[0]; sid = series['series_id']
         item['series'] = bind(fid, SERIES, series, 'series')
         item['scope'] = {'series_id': sid, 'arm_id': arm, 'reference_condition_id': reference, 'pairing': pairing}
+        if expected['reference_strategy']=='time_matched':
+            item['scope'].update(reference_strategy='time_matched',effect_kind=expected['effect_kind'],control_family=expected['control_family'])
+            saved_points=rows(POINTS,series_id=sid)
+            if {p['contrast_id'] for p in saved_points}!=set(expected['contrast_ids']):raise ValueError('Missing matched effect point bindings')
+            canonical_points={p['contrast_id']:p for p in expected['points']}
+            for p in saved_points:
+                if any(p.get(k)!=v for k,v in canonical_points[p['contrast_id']].items()):raise ValueError('Effect point binding conflict')
+                bind(fid,POINTS,p,'actual_effect_point')
         # Validate exact contrast membership and canonical numeric times, not ID order.
         design = packet['canonical_study_design']
         conditions = {r['condition_id']: r for r in design['conditions']}
@@ -152,12 +167,12 @@ def project_temporal(tables, packet, *, subjects=None, links_only=False):
         ordered = sorted(_parts(series['contrast_ids']), key=lambda cid: (conditions[contrasts[cid]['target_condition_id']]['time']['minutes'], cid))
         for cid in ordered:
             c = contrasts[cid]; target = conditions[c['target_condition_id']]
-            if (target['arm_id'], c['reference_condition_id'], c['pairing']) != (arm, reference, pairing):
+            if contrast_series[cid] != expected['series_id']:
                 raise ValueError('Temporal series scope conflict: ' + sid)
         item['ordered_contrast_ids'] = ordered
         for cid in ordered:
             for r in rows('quant/comparisons', form_id=form, contrast_id=cid):
-                if (r['arm_id'], r['reference_condition_id'], r['pairing']) != (arm, reference, pairing):
+                if (r['arm_id'], r['reference_condition_id'], r['pairing']) != (arm, contrasts[cid]['reference_condition_id'], contrasts[cid]['pairing']):
                     raise ValueError('Temporal observation scope conflict: ' + cid)
                 if r['time_min'] != conditions[contrasts[cid]['target_condition_id']]['time']['minutes']:
                     raise ValueError('Temporal observation time conflict: ' + cid)
@@ -199,6 +214,16 @@ def project_temporal(tables, packet, *, subjects=None, links_only=False):
                 raise ValueError('Adjacent interval outside series: ' + r['interval_id'])
             item['intervals'].append(bind(fid, INTERVAL, r, 'adjacent_joint_contrast'))
 
+        for r in rows(EFFECT_INTERVAL,form_id=form,series_id=sid):
+            a,b=r['from_contrast_id'],r['to_contrast_id']
+            if a not in ordered or b not in ordered or ordered.index(b)!=ordered.index(a)+1:
+                raise ValueError('Effect interval bridges an unobserved scheduled point')
+            for prefix,cid in [('from',a),('to',b)]:
+                for side in ['target','reference']:
+                    if r[prefix+'_'+side+'_condition_id']!=contrasts[cid][side+'_condition_id']:raise ValueError('Effect interval point conflict')
+                if r[prefix+'_min']!=conditions[contrasts[cid]['target_condition_id']]['time']['minutes']:raise ValueError('Effect interval time conflict')
+            item['intervals'].append(bind(fid,EFFECT_INTERVAL,r,'matched_effect_change'))
+
         selected = members.iloc[member_lookup.get(form, [])] if len(members) else members
         if len(selected): selected = selected.loc[selected.contrast_id.isin(ordered)]
         for (candidate, track), group in selected.groupby(['candidate_id', 'track'], sort=True) if len(selected) else []:
@@ -209,7 +234,7 @@ def project_temporal(tables, packet, *, subjects=None, links_only=False):
             evidence['features'] = list(features(KINASE, candidate, 'descriptive_kinase', track))
             for cid in ordered:
                 for r in rows(PROFILE, candidate_id=candidate, contrast_id=cid, track=track):
-                    if (r['arm_id'], r['reference_condition_id']) != (arm, reference): raise ValueError('Footprint scope conflict')
+                    if (r['arm_id'], r['reference_condition_id']) != (arm, contrasts[cid]['reference_condition_id']): raise ValueError('Footprint scope conflict')
                     evidence['profiles'].append(bind(fid, PROFILE, r, 'available_footprint'))
                 for r in rows(FIXED, candidate_id=candidate, series_id=sid, contrast_id=cid, track=track):
                     entry = bind(fid, FIXED, r, 'fixed_footprint')
@@ -320,10 +345,17 @@ def write_temporal(directory, packet):
                       f"[{fmt(r['recovery_lower_min'])}, {fmt(r['recovery_upper_min'])}] / {r['right_censored']}",
                       r['pattern'], f"{r['threshold']} / {r['threshold_sensitive']}", f"{fmt(r['loto_pattern_stability'])} / {r['observed_points']}",
                       f"{fmt(r['adjacent_trapezoid_auc'])} / {r['auc_supported_duration_min']} / {r['gap_intervals']}") for r in [e['row'] for e in f['features']]]),
-                  '### 인접 joint-mask 비교',
+                  '### 인접 조건 자체의 joint-mask 비교',
                   '원래 interval_id와 run IDs는 JSON/대응표에 보존됩니다. baseline 대비 값의 차분이 아닙니다.',
-                  *table(['min 구간', 'U_joint', 'P_joint', 'A', 'joint n ref/target', '상태', 'interval ID'],
-                    [(f"{r['from_min']} → {r['to_min']}", r['U_joint'], r['P_joint'], r['A'], f"{r['reference_joint_n']}/{r['target_joint_n']}", r['status'], r['interval_id']) for r in [e['row'] for e in f['intervals']]])]
+                  *table(['min 구간', 'U_joint', 'P_joint', 'A', 'joint 주입 수 ref/target', '상태', 'interval ID'],
+                    [(f"{r['from_min']} → {r['to_min']}", r['U_joint'], r['P_joint'], r['A'], f"{r['reference_joint_n']}/{r['target_joint_n']}", r['status'], r['interval_id']) for r in [e['row'] for e in f['intervals'] if e['source']['table']==INTERVAL+'.csv']])]
+        effects=[e['row'] for e in f['intervals'] if e['source']['table']==EFFECT_INTERVAL+'.csv']
+        if effects:
+            lines += ['### 시간대별 Control 보정 효과의 변화',
+                '[T(t2)−C(t2)]−[T(t1)−C(t1)]: 실제 양 끝점의 단위와 joint mask를 사용한 기술적 요약입니다. 상호작용 검정이나 생물학적 유의성이 아닙니다. 각 집계 단위·주입 ID는 원본 표에 보존됩니다.',
+                *table(['min 구간','ΔU_joint','ΔP_joint','ΔA','첫점 ref/target joint 주입 수','다음점 ref/target joint 주입 수','상태','interval ID'],
+                    [(f"{r['from_min']} → {r['to_min']}",r['U_joint'],r['P_joint'],r['A'],
+                      f"{r['from_reference_joint_n']}/{r['from_target_joint_n']}",f"{r['to_reference_joint_n']}/{r['to_target_joint_n']}",r['status'],r['interval_id']) for r in effects])]
         if not f['candidates']: lines += ['이 form/series에 연결된 저장 기질 기여도가 없습니다. 후보 곡선을 gene 이름으로 추정하여 붙이지 않았습니다.']
         for c in f['candidates']:
             profiles = {e['row']['contrast_id']: e['row'] for e in c['profiles']}

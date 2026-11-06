@@ -130,13 +130,11 @@ def integrate_temporal(tables,discovery,design,context,source_context=None,impac
     # Empty schema uses the same constructor with no temporal comparisons. No fake time.
     empty=copy.deepcopy(design);empty['contrasts']=[]
     result=base_temporal(tables,discovery,empty,context,source_context,impacts)
-    conditions={c['condition_id']:c for c in design['conditions']};groups={}
-    for contrast in design['contrasts']:
-        arm=conditions[contrast['target_condition_id']]['arm_id'];ref=contrast['reference_condition_id'];pair=contrast.get('pairing')
-        sid=stable_id('series',[arm,ref,pair])
-        groups.setdefault(sid,{'series_id':sid,'arm_id':arm,'reference_condition_id':ref,'contrast_ids':[],
-            'reference_strategy':'cross_sectional_contrast_set_no_time_order','pairing':pair,'paired_biological_units':pair=='paired'})['contrast_ids'].append(contrast['contrast_id'])
-    result['temporal_series']=pd.DataFrame([{**r,'contrast_ids':';'.join(r['contrast_ids'])} for r in groups.values()],columns=result['temporal_series'].columns)
+    from .effect_series import resolve_series, POINT_COLUMNS
+    groups,_=resolve_series(design)
+    result['temporal_series']=pd.DataFrame([{**r,'contrast_ids':';'.join(r['contrast_ids']),
+        'reference_strategy':'cross_sectional_contrast_set_no_time_order'} for r in groups.values()],columns=result['temporal_series'].columns)
+    result['effect_series_points']=pd.DataFrame([p for s in groups.values() for p in s['points']],columns=POINT_COLUMNS)
     return result
 
 

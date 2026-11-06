@@ -20,7 +20,10 @@ def curve_series(frame,entity,value,design,track=None,candidate_edges=None):
     exclusions. Plot keys are presentation crosswalks, not new scientific IDs.
     """
     f=frame.loc[frame.track.eq(track)].copy() if track is not None else frame.copy()
-    keys=[entity,'arm_id','reference_condition_id','pairing']
+    from .effect_series import resolve_series, has_matched, series_label
+    scopes,lookup=resolve_series(design);matched=has_matched(design)
+    if matched:f['effect_series_id']=f.contrast_id.map(lookup)
+    keys=[entity,'effect_series_id'] if matched else [entity,'arm_id','reference_condition_id','pairing']
     columns=keys+['plot_series_key','display_label','candidate_taxa','candidate_accessions','candidate_resolution',
                   'finite_observation_count','finite_timepoint_count','source_row_count','missing_value_count',
                   'coverage_adequate_observations','selected','selection_rank','selection_reason','selection_policy']
@@ -63,6 +66,10 @@ def curve_series(frame,entity,value,design,track=None,candidate_edges=None):
              'finite_observation_count':int(valid.sum()),'finite_timepoint_count':int(g.loc[valid,'time_min'].nunique()),
              'source_row_count':len(g),'missing_value_count':int(g[value].isna().sum()),
              'coverage_adequate_observations':int((g.coverage_adequate.eq(True) & valid).sum()) if 'coverage_adequate' in g else None}
+        if matched:
+            scope=scopes[key[1]]
+            row.update({k:scope[k] for k in ['arm_id','reference_condition_id','pairing']})
+            row['display_label']+=' / '+series_label(scope,'en')
         rows.append(row);points[plot_key]=g
     selection=pd.DataFrame(rows).sort_values(['finite_observation_count']+keys,ascending=[False]+[True]*len(keys)).reset_index(drop=True)
     selection['selected']=selection.finite_observation_count.gt(0) & (selection.index<12)
@@ -85,8 +92,9 @@ def curve_series(frame,entity,value,design,track=None,candidate_edges=None):
     arms={a['arm_id']:a['name'] for a in design['arms']}
     if len(selection[['arm_id','reference_condition_id','pairing']].drop_duplicates())>1:
         for i,r in selection.iterrows():
-            ref=estimator.conditions[r.reference_condition_id]
-            selection.at[i,'display_label']+=f' / {arms[r.arm_id]} vs {ref["label"]} / {r.pairing}'
+            ref=estimator.conditions.get(r.reference_condition_id)
+            ref_label=ref['label'] if ref else series_label(scopes[r.effect_series_id],'en')
+            selection.at[i,'display_label']+=f' / {arms[r.arm_id]} vs {ref_label} / {r.pairing}'
         # Identical human labels must not hide distinct arm/reference IDs.
         for _,indices in selection.groupby('display_label',sort=True).groups.items():
             if len(indices)>1:
@@ -150,7 +158,13 @@ def heatmap_grid(frame,index,column,value,design):
             agrees=same_time(row[key],expected[key]) if key=='time_min' else row[key]==expected[key]
             if not agrees:raise ValueError(f'Conflicting heatmap {key}: {row[column]}')
     if column=='contrast_id':
-        order=metadata.sort_values(['arm_label','arm_id','reference_time_min','reference_label','reference_condition_id','pairing','time_min','column_id'])
+        from .effect_series import resolve_series, has_matched
+        if has_matched(design):
+            scopes,lookup=resolve_series(design)
+            metadata['effect_series_id']=metadata.column_id.map(lookup)
+            order=metadata.sort_values(['arm_id','effect_series_id','time_min','column_id'])
+        else:
+            order=metadata.sort_values(['arm_label','arm_id','reference_time_min','reference_label','reference_condition_id','pairing','time_min','column_id'])
         multiple=len(metadata[['arm_id','reference_condition_id','pairing']].drop_duplicates())>1
         labels=[condition_label(r.condition_id)+(f'\n{r.arm_label} / vs {condition_label(r.reference_condition_id)}\n{r.pairing}' if multiple else '')
                 for r in order.itertuples()]
@@ -275,13 +289,16 @@ def figure_packet(tables,directory,design):
             line,=ax.plot(g.time_min.to_numpy(float),g[value].to_numpy(float),marker='o',markersize=4,
                          label=f'{r.display_label} (n={r.finite_observation_count})')
             line.set_gid(f'curve-series-{n}')
-        ax.set_xlabel('Actual target time (minutes), recorded reference')
+        from .effect_series import resolve_series, series_label
+        labels=sorted({series_label(s) for s in resolve_series(design)[0].values()})
+        ax.set_xlabel('Actual target time (minutes) / '+', '.join(sorted({series_label(s,'en') for s in resolve_series(design)[0].values()})))
         ax.set_ylabel('Substrate footprint (log2, parent-adjusted)' if track else 'Protein abundance contrast (log2)')
         if selection.selected.any():ax.legend(fontsize=8,loc='upper left',bbox_to_anchor=(1.01,1),title='Finite observations (n)',title_fontsize=8)
         else:ax.text(.5,.5,'Not evaluable: no finite observations\nat recorded times'+(f' in {track}' if track else ''),
                      ha='center',va='center',transform=ax.transAxes)
         return {'selection_metadata':name+'_selection.csv','plotted_data':name+'_points.csv','selection_policy':CURVE_SELECTION_POLICY,
-                'series_grain':[entity,'arm_id','reference_condition_id','pairing','track'] if track else [entity,'arm_id','reference_condition_id','pairing'],
+                'series_grain':[entity,'effect_series_id']+(['track'] if track else []),
+                'control_comparison_labels':labels,'effect_series_contract':'effect_series.v2',
                 'selected_series':int(selection.selected.sum()),'plotted_points':int(selection.loc[selection.selected,'finite_observation_count'].sum()),
                 'coverage_policy':'no_coverage_threshold_for_display; recorded coverage retained in points',
                 'display_title':f'Kinase substrate footprints ({track}; exploratory)' if track else 'Protein abundance trajectories'}

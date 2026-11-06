@@ -47,7 +47,7 @@ def _bind(card, state, source):
     selected_rows = [source[p['condition']] for p in card['trajectory']] if card.get('trajectory') else [source[card['condition']]]
     first = selected_rows[0]
     card.update(selection_unit_id=state['consumer_state_id'],
-                selection_scope=encode([first['arm_id'], first['reference_id'], first['pairing']]),
+                selection_scope=encode([first['effect_series_id']]) if first.get('reference_strategy')=='time_matched' else encode([first['arm_id'], first['reference_id'], first['pairing']]),
                 form_id=first['form_id'], measurement_group_ids=first['measurement_group_ids'],
                 taxon_ids=first['taxa'], consumer_state_id=state['consumer_state_id'],
                 replication_declaration=state['replication_declaration'], units='log2 fold change',
@@ -56,12 +56,15 @@ def _bind(card, state, source):
                 source_bindings=[{k: r.get(k) for k in [
                     'adapter_row_id','form_id','contrast_id','arm_id','target_condition_id','reference_condition_id',
                     'target_label','reference_label','time_min','reference_time_min','pairing',
+                    'effect_series_id','reference_strategy','effect_kind','control_family',
                     'U_joint','P_joint','A','U_all','P_all','included','exclusion_reasons',
                     'reference_joint_run_ids','target_joint_run_ids','reference_joint_n','target_joint_n',
                     'statistical_unit','inference_status','estimator_version','mapping_ids','membership_ids',
                     'mapping_status','localization_ids','localization_status','source_refs']} for r in selected_rows])
     # A generic caution is not opposing experimental evidence.
     card['interpretation_limits'] = LIMITS + [card.pop('counterevidence', '')]
+    if first.get('reference_strategy')=='time_matched':
+        card['interpretation_limits'] += ['시간대별 Control 기준: 각 점은 같은 시간의 실제 Control 대비 효과입니다. 0 효과로의 복귀는 시작 상태로의 복귀를 뜻하지 않습니다. Reference 미검출은 시작 시점 미검출과 다릅니다.']
     card['opposing_evidence_status'] = 'inspect_all_timepoints_and_parent_comparisons; no_independent_counterexperiment'
     if card['category'] == 'quantitation_comparison':
         card['reader_summary'] = card['reader_summary'].replace('independently calculated unadjusted PTM contrast', 'unadjusted PTM contrast on the joint mask (U_joint)')
@@ -317,7 +320,15 @@ def phosx_time_views(tables):
         raise ValueError('Conflicting PhosX contrast metadata or execution records')
     meta = metadata.merge(executions, on='contrast_id', validate='one_to_one')
     if len(meta) != len(executions): raise ValueError('PhosX execution without canonical contrast')
-    meta = meta.sort_values(['arm_id','reference_condition_id','pairing','time_min','contrast_id'], na_position='last')
+    from .effect_series import ordered_contrast_ids
+    points=tables.get('temporal/effect_series_points',pd.DataFrame())
+    matched=not points.empty and points.reference_strategy.eq('time_matched').any()
+    order={cid:i for i,cid in enumerate(ordered_contrast_ids(points=points.to_dict('records')))} if matched else {}
+    if matched:
+        if not set(meta.contrast_id)<=set(order):raise ValueError('Missing saved PhosX effect point')
+        meta=meta.assign(_effect_order=meta.contrast_id.map(order)).sort_values('_effect_order').drop(columns='_effect_order')
+    else:
+        meta = meta.sort_values(['arm_id','reference_condition_id','pairing','time_min','contrast_id'], na_position='last')
     ids = tables['science/site_identity_audit']
     scores = tables['science/specificity_scores']
     membership = tables['kinase/method_membership']
@@ -361,8 +372,11 @@ def phosx_time_views(tables):
     assays = methods.merge(labels, on='candidate_id', how='left', validate='many_to_one')
     assays = assays.merge(meta[KEY_COLUMNS], on='contrast_id', validate='many_to_one')
     if len(assays) != len(methods): raise ValueError('PhosX result without contrast metadata')
-    assays = assays.sort_values(['candidate_accession','candidate_id','arm_id','reference_condition_id',
-                                'pairing','time_min','contrast_id'], na_position='last').reset_index(drop=True)
+    if matched:
+        assays=assays.assign(_effect_order=assays.contrast_id.map(order)).sort_values(['candidate_accession','candidate_id','_effect_order']).drop(columns='_effect_order').reset_index(drop=True)
+    else:
+        assays = assays.sort_values(['candidate_accession','candidate_id','arm_id','reference_condition_id',
+                                    'pairing','time_min','contrast_id'], na_position='last').reset_index(drop=True)
     assays['result_source'] = 'kinase/method_scores.csv'
     assays['membership_source'] = 'kinase/method_membership.csv'
     return timeline, assays
@@ -621,7 +635,8 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
     from .study_display import DISPLAY, study_display, study_display_markdown
     metadata=packet['study_metadata_provenance']
     projection=metadata.get('study_display') or study_display(packet['canonical_study_design'],metadata['recorded_context'])
-    lines.extend([study_display_markdown(projection),'## 저장된 연구 질문'])
+    from .control_comparison import comparison_markdown
+    lines.extend([study_display_markdown(projection),comparison_markdown(packet['canonical_study_design']),'## 저장된 연구 질문'])
     if packet.get('literature_subject_execution'):
         summary=packet['literature_subject_execution']['summary']
         lines.insert(1,f"[실제 M4 문헌 실행](LITERATURE_SUBJECT_REVIEW.md): 요청 범위 {summary['requested_scope_status']}; 전체 {summary['status']}. 계획과 실제 검색·비교·의미 승인은 별도 상태입니다.")

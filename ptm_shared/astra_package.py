@@ -33,11 +33,11 @@ from .generic_kinase import fasta_taxonomy
 VERSION='astra_analysis_package.v4'
 READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py','astra_literature_review.py']
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
-    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','study_input_metadata.py','study_display.py','study_display.json','control_comparison.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
+    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','study_input_metadata.py','study_display.py','study_display.json','control_comparison.py','effect_series.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py']))
 EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['candidate_id','contrast_id','track'],
     'substrate_contributions':['contribution_id'],'candidate_sensitivity':['candidate_id','contrast_id','track','omission_kind','omitted_id'],
-    'temporal_series':['series_id'],'ptm_temporal_features':['feature_id'],'protein_temporal_features':['feature_id'],
+    'temporal_series':['series_id'],'effect_series_points':['series_id','contrast_id'],'effect_interval_contrasts':['interval_id'],'ptm_temporal_features':['feature_id'],'protein_temporal_features':['feature_id'],
     'kinase_temporal_features':['feature_id'],'kinase_fixed_membership':['candidate_id','series_id','contrast_id','track'],
     'target_excluded_anchors':['candidate_id','series_id','track','site_key'],'cross_layer_links':['link_id'],
     'parent_adjustment_impact':['impact_id'],'technical_injection_omissions':['form_id','contrast_id','omitted_injection_id'],
@@ -93,7 +93,8 @@ def quant_cached(inputs,design,context,root,fingerprint,calculator=None):
         if valid:
             from .contrast_quantification import ContrastEstimator
             from .study_design import same_time
-            metadata={c['contrast_id']:ContrastEstimator(design).metadata(c) for c in design['contrasts']}
+            estimator=ContrastEstimator(design)
+            metadata={c['contrast_id']:estimator.metadata(c) for c in design['contrasts']}
             for table in tables.values():
                 if 'contrast_id' not in table:continue
                 for row in table.to_dict('records'):
@@ -274,11 +275,24 @@ def validate_science(tables,design):
     conditions={c['condition_id'] for c in design['conditions']}
     series=set(tables['temporal/temporal_series'].series_id)
     feature_ids=set().union(*(set(tables['temporal/'+k].feature_id) for k in ['ptm_temporal_features','kinase_temporal_features','protein_temporal_features']))
-    missing=(set(TABLE_KEYS)|set(EXTRA_KEYS)-{'input_field_manifest'})-{name.rsplit('/',1)[-1] for name in tables}
+    missing=(set(TABLE_KEYS)|set(EXTRA_KEYS)-{'input_field_manifest','effect_series_points','effect_interval_contrasts'})-{name.rsplit('/',1)[-1] for name in tables}
     if missing:raise ValueError('Required scientific table missing: '+','.join(sorted(missing)))
+    from .effect_series import has_matched, resolve_series
+    if has_matched(design):
+        expected,lookup=resolve_series(design)
+        required={'temporal/effect_series_points','temporal/effect_interval_contrasts'}
+        if not required<=set(tables):raise ValueError('Matched effect extension missing')
+        actual=tables['temporal/effect_series_points']
+        if set(actual.contrast_id)!=set(lookup):raise ValueError('Effect point population mismatch')
+        for point in actual.to_dict('records'):
+            canonical=next(p for p in expected[lookup[point['contrast_id']]]['points'] if p['contrast_id']==point['contrast_id'])
+            from .astra_card_inputs import equivalent
+            if any(not equivalent(point.get(k),v) for k,v in canonical.items()):raise ValueError('Effect point metadata conflict')
     checks=[]
     for name,df in tables.items():
         short=name.split('/')[-1];keys=TABLE_KEYS.get(short) if name.startswith('quant/') else EXTRA_KEYS.get(short)
+        if short=='temporal_protein_summary' and 'series_id' not in df:
+            keys=['protein_group','arm_id','reference_condition_id','layer']
         if name.startswith('science/'):
             keys=science_engine.KEYS.get(short)
         elif science_engine and hasattr(science_engine,'ADDITIONAL_KEYS'):
@@ -301,7 +315,7 @@ def validate_science(tables,design):
         missing_science={'science/'+key for key in science_engine.KEYS}-set(tables)
         # Adapter tables are additive to v6; old immutable v6 packages predate
         # this export. Once any adapter table exists its complete contract is checked.
-        missing_science|={k for k in getattr(science_engine,'ADDITIONAL_KEYS',{}) if not k.startswith(('reader_adapter/','reader/'))}-set(tables)
+        missing_science|={k for k in getattr(science_engine,'ADDITIONAL_KEYS',{}) if not k.startswith(('reader_adapter/','reader/')) and k!='temporal/effect_interval_contrasts'}-set(tables)
         if missing_science:raise ValueError('Required science table missing: '+','.join(sorted(missing_science)))
     if any(name.startswith('science/') for name in tables):
         science_engine.validate_tables(tables,design)
@@ -435,8 +449,17 @@ def order_method_scores(frame, *, design=None, comparisons=None):
         work['_scope_version'] = frame['method_version'].map(lambda value: '' if pd.isna(value) else str(value)).to_numpy()
         keys.append('_scope_version')
         public.append('method_version')
-    keys += ['_scope_arm', '_scope_reference', '_scope_pairing']
-    public += ['arm_id', 'reference_condition_id', 'pairing']
+    from .effect_series import resolve_series, has_matched, ordered_contrast_ids
+    matched = design is not None and has_matched(design)
+    if matched:
+        scopes, lookup = resolve_series(design)
+        work['_effect_series'] = contrast_ids.map(lookup).to_numpy()
+        canonical_order=ordered_contrast_ids(design=design)
+        keys += ['_scope_arm', '_effect_series']
+        public += ['arm_id', 'effect_series_id']
+    else:
+        keys += ['_scope_arm', '_scope_reference', '_scope_pairing']
+        public += ['arm_id', 'reference_condition_id', 'pairing']
     if 'track' in frame.columns:
         keys.append('track')
         public.append('track')
@@ -455,6 +478,12 @@ def order_method_scores(frame, *, design=None, comparisons=None):
     unresolved.sort(key=lambda item: item['contrast_id'])
     audit.update(sort_keys=public, unresolved_time_contrasts=unresolved,
                  time_order_complete=not unresolved, status='ordered' if not unresolved else 'ordered_with_unresolved_time')
+    if matched:
+        checked=work.sort_values(keys,kind='mergesort',na_position='last')
+        group_keys=[k for k in keys if k not in ['_scope_time','contrast_id','candidate_id','score_name','method_result_id']]
+        audit['effect_series_time_monotonic']=all(g._scope_time.dropna().is_monotonic_increasing for _,g in checked.groupby(group_keys,dropna=False))
+        audit['effect_series_schema']='effect_series.v2'
+        audit['ordered_contrast_ids']=[cid for cid in canonical_order if cid in set(contrast_ids)]
     return ordered, audit
 
 
@@ -477,6 +506,8 @@ def write_tables(tables, directory, *, design=None):
         read=pd.read_csv(path,low_memory=False)
         if list(read)!=list(frame) or len(read)!=len(frame):raise ValueError('CSV write truncated: '+name)
         short=name.split('/')[-1];keys=TABLE_KEYS.get(short) if name.startswith('quant/') else EXTRA_KEYS.get(short)
+        if short=='temporal_protein_summary' and 'series_id' not in frame:
+            keys=['protein_group','arm_id','reference_condition_id','layer']
         if name.startswith('science/'):
             keys=science_engine.KEYS.get(short)
         elif science_engine and hasattr(science_engine,'ADDITIONAL_KEYS'):
@@ -494,6 +525,8 @@ def write_tables(tables, directory, *, design=None):
             entry.update(row_order_policy=score_audit['policy'], row_order_metadata_source=score_audit['metadata_source'],
                 row_order_keys=score_audit['sort_keys'], unresolved_time_contrasts=score_audit['unresolved_time_contrasts'],
                 time_order_complete=score_audit['time_order_complete'], row_order_status=score_audit['status'])
+            if 'effect_series_time_monotonic' in score_audit:
+                entry['effect_series_time_monotonic']=score_audit['effect_series_time_monotonic']
         dictionary[name+'.csv']=entry
     return dictionary
 
@@ -516,7 +549,7 @@ def start_here(snapshot,counts,readiness):
         ('Whole evidence access: [catalog and query guide](reader/EVIDENCE_ACCESS.md). Selected findings are a summary preview. Unselected, withheld and no-call rows remain accessible; availability is not evidence of review. [Typed literature review plan](reader/LITERATURE_REVIEW_PLAN.md) is separate from actual search and comparison.' if readiness.get('reader') else ''),
         json.dumps(counts,ensure_ascii=False),'Profile rows are candidate × contrast × track, not discovered or activated kinase counts.',
         'Kinase protein abundance, observed kinase regulatory sites and substrate footprints are separate evidence. Curated native, orthology, motif, KEA/network and literature hypotheses must remain distinct.',
-        'Include baseline-undetected emergence and post-reference evidence without inventing baseline FC. Different post-references cannot be averaged as one baseline curve.',
+        'Reference-undetected evidence describes detection in each actual reference; it is baseline-undetected only for a recorded zero-time reference. Never invent a baseline FC. Time-matched effects form declared effect series with real point references, not a common-baseline curve.',
         'Explain U/P/A and alternate-parent/normalization effects using parent_adjustment_impact and raw masks. Ratios are not absolute occupancy.',
         'Evaluate direction, observed onset/peak/duration/recovery/order on the measured grid, including gaps and censoring; do not infer precise lag or causality from sparse sampling.',
         'Full PG and strict-unmodified proteins are same-experiment supporting evidence. Mathematical parent coupling and shared normalization/baseline are not independent validation.',

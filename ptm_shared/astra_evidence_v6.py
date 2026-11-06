@@ -27,7 +27,7 @@ KEYS={**legacy.KEYS,'site_report_observations':['site_report_row_id'],
       'calibrated_calls':['call_id'],'evidence_dependency_groups':['dependency_id'],'calibration_provenance':['policy_id']}
 normalized_reference=legacy.normalized_reference
 validate_execution=legacy.validate_execution
-ADDITIONAL_KEYS={'temporal/interval_contrasts':['interval_id'],'temporal/group_excluded_cowave':['cowave_id'],'kinase/method_scores':['method_result_id'],
+ADDITIONAL_KEYS={'temporal/interval_contrasts':['interval_id'],'temporal/effect_interval_contrasts':['interval_id'],'temporal/group_excluded_cowave':['cowave_id'],'kinase/method_scores':['method_result_id'],
                 'kinase/method_membership':['method_membership_id'],'kinase/method_executions':['execution_id'],**CARD_INPUT_KEYS,**READER_KEYS,**LITERATURE_KEYS}
 
 

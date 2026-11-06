@@ -37,8 +37,12 @@ def resolve_assignments(context, conditions, previous, preserved, default_pairin
     if requested and requested.get('strategy') not in STRATEGIES:
         raise ValueError('Unknown control comparison strategy')
     for key in ['mappings', 'arm_control_families']:
-        if requested and key in requested and not isinstance(requested[key], dict):
-            raise ValueError('control_comparison.' + key + ' must be an object')
+        if requested and key in requested:
+            mapping=requested[key]
+            if not isinstance(mapping,dict) or any(not isinstance(k,str) or not isinstance(v,str) for k,v in mapping.items()):
+                raise ValueError('control_comparison.' + key + ' must map string IDs to string IDs')
+    if requested and requested.get('reference_condition_id') is not None and not isinstance(requested['reference_condition_id'],str):
+        raise ValueError('control_comparison.reference_condition_id must be a string ID')
     changed = requested is not None and requested != old_extension.get('requested_policy')
     families = {reference_family(c) for c in references}
     def family(target):
@@ -143,7 +147,7 @@ def resolve_assignments(context, conditions, previous, preserved, default_pairin
     extension = {'schema_version': VERSION, 'requested_policy': requested, 'effective_policy': effective,
         'assignments': assignments, 'status': 'draft' if errors else 'resolved',
         'readiness': {'design_assignment': 'supported', 'contrast_quantification': 'existing_estimator',
-                      'matched_temporal': 'not_yet_supported', 'biological_pq': 'not_implemented', 'legacy_multiple_controls': 'unsupported'}}
+                      'matched_temporal': 'descriptive_effect_series_v2', 'biological_pq': 'not_implemented', 'legacy_multiple_controls': 'unsupported'}}
     return contrasts, extension, errors
 
 
