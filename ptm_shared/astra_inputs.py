@@ -67,6 +67,7 @@ def leaves(value, path=''):
 def transfer_contract(snapshot, design, context, literature):
     """Every provided leaf has one disposition; raw-only is an explicit valid outcome."""
     from .study_display import DISPLAY, study_display, study_display_markdown
+    from .control_comparison import comparison_markdown
     original = snapshot['original']; fields = []
     direct = {'species', 'ptm_type', 'organism_code'}
     study_fields = set(design.get('study', {}))
@@ -108,7 +109,7 @@ def transfer_contract(snapshot, design, context, literature):
              '## Conditions and references', '| Condition ID | Arm | Label | Original time | Minutes |', '|---|---|---|---|---|']
     for c in design['conditions']:
         brief.append(f"| {c['condition_id']} | {c['arm_id']} | {c['label']} | {c.get('time')} | {(c.get('time') or {}).get('minutes')} |")
-    brief += [study_display_markdown(study_display(design, context)),
+    brief += [study_display_markdown(study_display(design, context)),comparison_markdown(design),
               '## Contrasts', json.dumps(design['contrasts'], ensure_ascii=False, indent=2),
               '## User research questions — complete original', json.dumps(questions, ensure_ascii=False, indent=2),
               '## Experimental context — complete original', json.dumps(original.get('analysis_context'), ensure_ascii=False, indent=2),

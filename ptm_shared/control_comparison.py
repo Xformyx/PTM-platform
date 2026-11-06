@@ -178,3 +178,32 @@ def legacy_support(context, sample_config):
     unsupported = len(references)>1 or policy.get('strategy')=='time_matched'
     return {'status':'unsupported' if unsupported else 'supported', 'code':'legacy_multiple_controls_unsupported' if unsupported else 'legacy_shared_control',
             'message':'Legacy processing은 시간대별/다중 Control을 지원하지 않습니다. Astra 경로에서 비교를 지정하세요.' if unsupported else 'Legacy shared Control supported'}
+
+
+def comparison_summary(design):
+    """Recorded execution display; no live context or new reference matching."""
+    result=deepcopy(design.get('control_comparison'))
+    if not result:return None
+    policy=result['effective_policy'];strategy=policy.get('strategy')
+    result['label']=LABELS[strategy]['label'] if strategy else '미지정'
+    result['english_label']=LABELS.get(strategy,{}).get('english_label')
+    provenance=design.get('field_provenance') or {}
+    for point in result['assignments']:
+        for side in ['target','reference']:
+            point[side+'_time_source']=deepcopy(provenance.get('conditions.'+str(point[side+'_condition_id'])+'.time'))
+    return result
+
+
+def comparison_markdown(design):
+    summary=comparison_summary(design)
+    if not summary:return ''
+    def cell(value):return str(value if value is not None else '미기록').replace('|','\\|').replace('\n','<br>')
+    def time(value):return f"{value['value']} {value['unit']} ({value['minutes']} min)" if value else '미기록'
+    lines=['## '+LABELS['label'], '', summary['label'], '', LABELS['sample_note'], '',
+           '| Contrast ID | 처리 조건 / ID | 처리 시간 | Control 조건 / ID | Control 시간 | 효과 의미 | 연결 출처 / 상태 |',
+           '|---|---|---|---|---|---|---|']
+    for p in summary['assignments']:
+        lines.append('| '+' | '.join(cell(v) for v in [p['contrast_id'],f"{p['target_label']} / {p['target_condition_id']}",time(p['target_time']),
+            f"{p['reference_label']} / {p['reference_condition_id']}",time(p['reference_time']),p['effect_kind'],f"{p['source']} / {p['status']}"])+' |')
+    lines+=['','실행 snapshot의 실제 비교입니다. 생물학적 p/q 검정은 수행하지 않습니다.']
+    return '\n'.join(lines)

@@ -52,9 +52,11 @@ EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['ca
 def write_study_inputs(directory, snapshot, context, design):
     """The package's input metadata boundary, usable without scientific execution."""
     from .study_display import study_display
+    from .control_comparison import comparison_summary
     for name,value in [('user_input_snapshot',snapshot),('study_context',context),('study_design',design)]:
         json_write(Path(directory)/'study'/(name+'.json'),value)
     json_write(Path(directory)/'study/study_display.json',study_display(design,context))
+    json_write(Path(directory)/'study/control_comparison.json',comparison_summary(design))
 
 
 def finding_execution_code(root, pin, preferred_run=None):
@@ -89,6 +91,27 @@ def quant_cached(inputs,design,context,root,fingerprint,calculator=None):
             if not path.is_file() or digest(path)!=item['sha256']:valid=False;break
             tables[name]=pd.read_csv(path,float_precision='round_trip')
         if valid:
+            from .contrast_quantification import ContrastEstimator
+            from .study_design import same_time
+            metadata={c['contrast_id']:ContrastEstimator(design).metadata(c) for c in design['contrasts']}
+            for table in tables.values():
+                if 'contrast_id' not in table:continue
+                for row in table.to_dict('records'):
+                    expected=metadata.get(row['contrast_id'])
+                    if expected is None:valid=False;break
+                    for key in ['target_condition_id','reference_condition_id','arm_id','pairing','time_min','reference_time_min']:
+                        if key not in row:continue
+                        a,b=row[key],expected[key]
+                        agrees=(pd.isna(a) and b is None) or same_time(a,b) if key.endswith('_min') else a==b
+                        if not agrees:valid=False;break
+                if not valid:break
+        if valid:
+            # Only display labels may change on a numerically identical design.
+            # Actual target/reference/time mismatches above force recomputation.
+            for table in tables.values():
+                if 'contrast_id' not in table:continue
+                for key in ['target_label','reference_label']:
+                    if key in table:table[key]=table.contrast_id.map(lambda cid:metadata[cid][key])
             # These v3 context-only projections are rebuilt, never copied from old questions/panels.
             from .generic_workflow import temporal_layers
             layers,_=temporal_layers(tables,design,context);tables.update(layers)
