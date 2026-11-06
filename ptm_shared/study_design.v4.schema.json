@@ -297,6 +297,68 @@
     },
     "temporal_windows": {
       "type": "object"
+    },
+    "control_comparison": {
+      "type": "object",
+      "description": "Versioned extension: requested editable policy, effective execution policy and actual point assignments. No surrogate condition IDs.",
+      "required": [
+        "schema_version",
+        "requested_policy",
+        "effective_policy",
+        "assignments"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "control_comparison.v1"
+        },
+        "requested_policy": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "effective_policy": {
+          "type": "object",
+          "properties": {
+            "strategy": {
+              "enum": [
+                "shared_reference",
+                "time_matched",
+                "explicit_custom",
+                null
+              ]
+            }
+          }
+        },
+        "assignments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "target_condition_id",
+              "reference_condition_id",
+              "status"
+            ],
+            "properties": {
+              "target_condition_id": {
+                "type": "string"
+              },
+              "reference_condition_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "resolved",
+                  "unresolved"
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

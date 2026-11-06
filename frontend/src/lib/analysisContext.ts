@@ -2,6 +2,16 @@ import studyDisplay from '../../../ptm_shared/study_display.json' with {type:'js
 
 export type AnalysisContext = Record<string, unknown>;
 export const BIOLOGICAL_DESIGN = studyDisplay.biological_question;
+export const CONTROL_COMPARISON = studyDisplay.control_comparison;
+export type ControlStrategy = 'shared_reference'|'time_matched'|'explicit_custom';
+export type ControlPolicy = {schema_version?:string;strategy:ControlStrategy|null;source?:string;reference_condition_id?:string;
+  arm_control_families?:Record<string,string>;mappings?:Record<string,string>};
+export type ControlTime = {value:number;unit:string;minutes:number;original?:string}|null;
+export type ControlResolution = {schema_version:string;requested_policy:ControlPolicy|null;effective_policy:ControlPolicy;
+  assignments:Array<{target_condition_id:string;target_label:string;target_time:ControlTime;arm_id:string;
+    reference_condition_id:string|null;reference_label:string|null;reference_time:ControlTime;contrast_id:string|null;
+    reference_strategy:ControlStrategy|null;effect_kind:string;status:string;issues:Array<{message:string}>}>;
+  readiness:{matched_temporal:string;biological_pq:string}};
 export function studyFieldLabel(key: string): string {
   return key === 'biological_question' ? BIOLOGICAL_DESIGN.label : key.replace(/_/g, ' ');
 }

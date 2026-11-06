@@ -302,6 +302,12 @@ def run_preprocessing(self, order_id: int, config: dict):
             return {"order_id": order_id, "status": "completed", "run_id": evidence["run_id"],
                     "provenance_id": evidence["provenance"]["provenance_id"]}
 
+        from ptm_shared.control_comparison import legacy_support
+        for raw_config in [config.get('sample_config'), config.get('secondary_sample_config')]:
+            support=legacy_support(config.get('experimental_context'),raw_config)
+            if support['status']=='unsupported':
+                raise ValueError(support['code']+': '+support['message'])
+
         from preprocessing.core.quick_analysis import (
             is_quick_analysis,
             subset_diann_matrices_for_quick_analysis,

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import CanonicalStudyFields from './CanonicalStudyFields';
+import ControlComparisonFields from './ControlComparisonFields';
 import type { AnalysisContext, DesignSample } from '@/lib/analysisContext';
 
 /** The original data-information state, shared by create and rerun. */
-export default function StudyInputFields({context,onChange,samples,species,ptmType,onSamplesChange}:{context:AnalysisContext;onChange:(value:AnalysisContext)=>void;samples:DesignSample[];species:string;ptmType:string;onSamplesChange?:(value:DesignSample[])=>void}) {
+export default function StudyInputFields({context,onChange,samples,species,ptmType,onSamplesChange,publishedContext}:{context:AnalysisContext;onChange:(value:AnalysisContext)=>void;samples:DesignSample[];species:string;ptmType:string;onSamplesChange?:(value:DesignSample[])=>void;publishedContext?:AnalysisContext}) {
   const [error,setError]=useState('');
   const science=(context.science??{}) as Record<string,unknown>;
   const processing=(context.processing??{}) as Record<string,unknown>;
@@ -17,6 +18,7 @@ export default function StudyInputFields({context,onChange,samples,species,ptmTy
       ...('diann_version' in legacy?{acquisition_metadata:{...legacy,diann_version:value||null}}:{})});
   };
   return <div className="space-y-3" aria-label="원본 데이터 정보">
+    <ControlComparisonFields {...{context,onChange,publishedContext}}/>
     {onSamplesChange&&<div className="overflow-auto"><p>Sample Config</p><table className="w-full text-xs"><thead><tr><th>File</th><th>Condition</th><th>Group</th><th>Rep.</th></tr></thead><tbody>{samples.map((row,index)=>{
       const update=(key:string,value:string)=>onSamplesChange(samples.map((v,i)=>i===index?{...v,[key]:value,...(key==='condition'?{source_condition:value}:{})}:v));
       return <tr key={row.sample_id}><td>{row.sample_id}</td><td><Input aria-label={`Condition ${row.sample_id}`} value={String(row.source_condition??row.condition)} onChange={e=>update('condition',e.target.value)}/></td><td><select aria-label={`Group ${row.sample_id}`} value={row.group??''} onChange={e=>update('group',e.target.value)}><option value="">미기록</option><option>Control</option><option>Treatment</option>{row.group&&!['Control','Treatment'].includes(row.group)&&<option>{row.group}</option>}</select></td><td><Input aria-label={`Rep ${row.sample_id}`} value={row.replicate??''} onChange={e=>update('replicate',e.target.value)}/></td></tr>;

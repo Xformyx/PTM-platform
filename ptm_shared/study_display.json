@@ -4,5 +4,14 @@
     "help": "실험 모델, 처리 조건, 시간 계획, 반복 설계와 분석 목적을 설명하세요.",
     "description": "Biological Design 설명을 담는 기존 호환 필드 (biological_question). 원문을 보존하며 report_options.research_questions와 별도로 저장합니다."
   },
-  "default_planned_replicates_per_condition": 3
+  "default_planned_replicates_per_condition": 3,
+  "control_comparison": {
+    "label": "Control 비교 방식",
+    "english_label": "Control comparison strategy",
+    "shared_reference": {"label": "공통 Control 기준", "english_label": "Shared control", "description": "모든 처리 조건을 하나의 지정된 Control 조건과 비교합니다."},
+    "time_matched": {"label": "시간대별 Control 기준", "english_label": "Time-matched controls", "description": "각 처리 조건을 같은 시간에 측정한 대응 Control 조건과 비교합니다."},
+    "explicit_custom": {"label": "Control 직접 연결", "description": "각 처리 조건에 사용할 Control을 직접 지정합니다."},
+    "sample_note": "Control 하나는 조건이 하나라는 뜻입니다. 해당 조건에 등록된 반복 시료를 모두 사용합니다.",
+    "changed_result_note": "비교 기준이 변경되었습니다. 기존 결과는 유지되며, 새 기준은 다음 분석 실행에 적용됩니다."
+  }
 }

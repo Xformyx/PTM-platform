@@ -33,7 +33,7 @@ from .generic_kinase import fasta_taxonomy
 VERSION='astra_analysis_package.v4'
 READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py','astra_literature_review.py']
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
-    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','study_input_metadata.py','study_display.py','study_display.json','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
+    'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','study_input_metadata.py','study_display.py','study_display.json','control_comparison.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py']))
 EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['candidate_id','contrast_id','track'],
     'substrate_contributions':['contribution_id'],'candidate_sensitivity':['candidate_id','contrast_id','track','omission_kind','omitted_id'],

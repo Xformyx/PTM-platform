@@ -394,6 +394,11 @@ def _updated_analysis_context(order, patch, existing=None, *, for_execution=Fals
         except (ValueError,OSError,StopIteration,TypeError) as error:
             raise HTTPException(status_code=422,detail={'code':getattr(error,'code','study_design_execution_invalid'),'field':getattr(error,'field',None),'issues':getattr(error,'issues',[]),'message':str(error)}) from error
         return _context_with_recorded_source_pin(order,context)
+    from ptm_shared.control_comparison import legacy_support
+    for raw_config in [order.sample_config,getattr(order,'secondary_sample_config',None)]:
+        support=legacy_support(context,raw_config)
+        if for_execution and support['status']=='unsupported':
+            raise HTTPException(status_code=422,detail=support)
     _validated_order_sample_manifest(order, context)
     if context.get("secondary_sample_manifest") is not None:
         _validated_order_sample_manifest(order, context, secondary=True)
@@ -1658,6 +1663,7 @@ async def start_order(
         "secondary_pg_matrix_path": order.secondary_pg_matrix_path,
         "ptm_mode": ptm_mode,
         "condition_map": condition_map if condition_map else None,
+        "sample_config": order.sample_config,
         "sample_manifest": validated_sample_manifest,
             "secondary_sample_manifest": _validated_order_sample_manifest(order, secondary=True),
             "normalization_policy": (order.analysis_context or {}).get("normalization_policy", "legacy_median.v1"),
@@ -2015,6 +2021,7 @@ async def run_stage(
             "secondary_pg_matrix_path": order.secondary_pg_matrix_path,
             "ptm_mode": ptm_mode,
             "condition_map": condition_map if condition_map else None,
+            "sample_config": order.sample_config,
             "single_time_point": single_time_point,
             "species_tax_id": species_context.taxonomy_id,
             "kegg_organism": species_context.kegg_organism,

@@ -77,7 +77,7 @@ def time_list(raw):
     return result
 
 
-def legacy_samples(config):
+def legacy_samples(config, *, preserve_control_labels=False):
     if config is not None and not isinstance(config,(list,dict)):raise ValueError('sample_config must be an object or sample list')
     rows=config if isinstance(config,list) else (config or {}).get('samples',[])
     if not isinstance(rows,list) or any(not isinstance(row,dict) for row in rows):raise ValueError('sample_config.samples must be a list of objects')
@@ -90,7 +90,7 @@ def legacy_samples(config):
         rep=row.get('replicate',row.get('Replicate',row.get('technical_injection')))
         raw_condition=condition
         # Preserve the platform's existing explicitly classified Control group.
-        if group.lower()=='control' and not row.get('condition_id') and not label_time(condition):
+        if group.lower()=='control' and not row.get('condition_id') and not label_time(condition) and not preserve_control_labels and not row.get('control_family') and not row.get('arm_id') and not row.get('time'):
             condition='Control'
         elif rep is not None and condition.endswith('_'+str(rep)):
             condition=condition[:-len(str(rep))-1]
@@ -143,10 +143,16 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
     context=clean_context(context or {})
     for key in ['study_design','sample_manifest','acquisition','processing','acquisition_metadata','validation_panel','temporal_windows']:
         if context.get(key) is not None and not isinstance(context[key],dict):raise ValueError(key+' must be an object')
-    rows=legacy_samples(sample_config)
+    rows=legacy_samples(sample_config, preserve_control_labels=bool(context.get('control_comparison')))
     explicit=deepcopy(context.get('study_design') or {})
     if explicit and explicit.get('schema_version') not in {VERSION,SCIENCE_VERSION}:raise DesignError([issue('schema_version','study_design.schema_version','Unsupported study design schema; explicit migration is required')])
     previous=explicit if explicit.get('schema_version') in {VERSION,SCIENCE_VERSION} else {}
+    old_conditions={c['condition_id']:c for c in previous.get('conditions',[])}
+    old_columns={i['input_column']:old_conditions.get(i['condition_id'],{}) for i in previous.get('injections',[])}
+    for row in rows:
+        old=old_columns.get(row['sample_id'],{})
+        if old.get('label')=='Control' and old.get('role')=='reference' and row['group'].lower()=='control' and row['raw_condition'] in old.get('source_labels',[]) and not label_time(row['raw_condition']) and not any(row.get(k) for k in ['condition_id','control_family','arm_id','arm','time']):
+            row['condition']='Control'  # Preserve the recorded legacy identity when only policy changes.
     science=context.get('quantitation_export_mode') in {'astra_analysis.v5','astra_analysis.v6'} or previous.get('schema_version')==SCIENCE_VERSION
     metadata_issues=[]
     if str(context.get('quantitation_export_mode','')).startswith('astra_analysis.'):
@@ -184,10 +190,14 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
         if automatic('arms',aid):
             arms=[a for a in arms if a['arm_id']!=aid]+[deepcopy(declared)]
             provenance[f'arms.{aid}']=_origin('analysis_context.treatment_arms',declared,'provided')
-    labels=list(dict.fromkeys(r['condition'] for r in rows))
-    # Retire only unchanged automatic records. Unknown historical origins and
-    # user overrides remain visible for field-specific conflict resolution.
-    conditions=[c for c in conditions if c.get('label') in labels or not automatic('conditions',c['condition_id'])]
+    groups=defaultdict(list)
+    for row in rows:
+        role=row.get('role') or ('reference' if row['group'].lower()=='control' else 'target')
+        key=('id',row['condition_id']) if row.get('condition_id') else ('source',row['condition'],role,row.get('arm_id') or row.get('arm') or '',row.get('control_family') or '')
+        groups[key].append(row)
+    label_groups=defaultdict(list)
+    for key,group in groups.items():label_groups[group[0]['condition']].append(key)
+    reference_names={TIME_RE.sub('',r['condition'].replace('_',' ')).strip(' -_') for r in rows if r.get('role')=='reference' or r['group'].lower()=='control'}
     errors=list(metadata_issues); candidates=time_list(context.get('time_points'))
     if explicit and not previous:errors.append(issue('schema_version','study_design.schema_version','Unsupported study design schema'))
     old_treatment=previous.get('study',{}).get('original_context',{}).get('treatment')
@@ -197,22 +207,32 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
         if any(t.get('dose') is not None for arm in arms for t in arm.get('treatments',[])):
             pending_conflicts=[issue('treatment_context_conflict','arms','Treatment description changed while structured doses remain; review their assignment',original_value=old_treatment)]
     errors.extend(pending_conflicts)
-    existing_labels={c.get('label'):c for c in conditions}
-    for label in labels:
-        old_condition=existing_labels.get(label)
-        group=[r for r in rows if r['condition']==label]
-        condition_id=str((old_condition or {}).get('condition_id') or group[0].get('condition_id') or stable_id('condition',label))
+    condition_for_sample={}; active_conditions=set()
+    previous_samples={i['input_column']:i['condition_id'] for i in previous.get('injections',[])}
+    for key,group in groups.items():
+        label=group[0]['condition']
         roles={str(r.get('role') or ('reference' if r['group'].lower()=='control' else 'target')) for r in group}
+        old_matches=[c for c in conditions if (c['condition_id']==group[0]['condition_id'] if group[0].get('condition_id') else
+            c.get('source_identity')==list(key) or (not c.get('source_identity') and c.get('label')==label and c.get('role') in roles and (not group[0].get('arm_id') or c['arm_id']==group[0]['arm_id'])))]
+        if not old_matches and not group[0].get('condition_id'):
+            anchored={previous_samples[r['sample_id']] for r in group if r['sample_id'] in previous_samples}
+            old_matches=[c for c in conditions if c['condition_id'] in anchored and c.get('label')==label and c.get('role') in roles]
+        old_condition=old_matches[0] if len(old_matches)==1 and old_matches[0]['condition_id'] not in active_conditions else None
+        condition_id=str(group[0].get('condition_id') or (old_condition or {}).get('condition_id') or stable_id('condition',label if len(label_groups[label])==1 else json.dumps(key,ensure_ascii=False)))
         parsed=label_time(label)
         arm_name=group[0].get('arm_id') or group[0].get('arm')
         if not arm_name:
             stripped=TIME_RE.sub('',label.replace('_',' ')).strip(' -_') if parsed else ''
-            arm_name=('reference' if roles=={'reference'} else stripped or context.get('treatment') or 'treatment')
-        arm_id=next((a['arm_id'] for a in arms if a.get('name')==arm_name or a.get('arm_id')==arm_name),stable_id('arm',arm_name))
+            arm_name=(stripped if len(reference_names)>1 and stripped and not group[0].get('control_family') else 'reference') if roles=={'reference'} else stripped or context.get('treatment') or 'treatment'
+        arm_id=group[0].get('arm_id') or next((a['arm_id'] for a in arms if a.get('name')==arm_name or a.get('arm_id')==arm_name),stable_id('arm',arm_name))
         if not any(a['arm_id']==arm_id for a in arms):
             arms.append({'arm_id':arm_id,'name':arm_name,'treatments':[],
                          'source':'sample_config.arm' if group[0].get('arm_id') or group[0].get('arm') else 'legacy_condition_or_treatment_description'})
-        c={'condition_id':condition_id,'arm_id':arm_id,'label':label,'role':next(iter(roles)) if len(roles)==1 else 'unknown'}
+        c={'condition_id':condition_id,'arm_id':arm_id,'label':label,'role':next(iter(roles)) if len(roles)==1 else 'unknown','source_identity':list(key)}
+        if any(r.get('control_family') for r in group) or 'control_family' in (old_condition or {}):
+            families={r.get('control_family') for r in group}
+            if len(families)>1:errors.append(issue('condition_family_conflict',f'conditions.{condition_id}.control_family','A condition has conflicting control families'))
+            else:c['control_family']=next(iter(families))
         if len(roles)>1:errors.append(issue('condition_role_conflict',f'conditions.{condition_id}.role','Conflicting condition roles'))
         if old_condition is None:conditions.append(c)
         else:
@@ -223,28 +243,45 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
                     _record_generated(provenance,path,value)
         if old_condition is None:
             for key,value in c.items():_record_generated(provenance,f'conditions.{condition_id}.{key}',value)
-        existing_labels[label]=old_condition or c
+        actual=old_condition or c
+        active_conditions.add(condition_id)
+        for row in group:condition_for_sample[row['sample_id']]=actual
+    # Retire only unchanged automatic records missing from the current source.
+    conditions=[c for c in conditions if c['condition_id'] in active_conditions or not automatic('conditions',c['condition_id'])]
     for c in conditions:
         cid=c.get('condition_id'); path=f'conditions.{cid}.time'
         automatic_time=(cid not in old_records['conditions'] or _generated(old_provenance,path,c.get('time'))) and c.get('time_conflict_resolution')!='use_confirmed_structured'
-        source_labels=sorted({r['raw_condition'] for r in rows if r['condition']==c.get('label')})
+        condition_rows=[r for r in rows if condition_for_sample[r['sample_id']]['condition_id']==cid]
+        source_labels=sorted({r['raw_condition'] for r in condition_rows})
         c['source_labels']=source_labels
         if axis=='cross_sectional':
             c.setdefault('time',None)
             continue
         explicit_time=None if automatic_time else c.get('time')
         parsed=label_time(c.get('label',''))
-        m=manifest_conditions.get(c.get('label'),{})
+        declared_conditions=[m for m in manifest.get('conditions',[]) if m.get('condition_id')==cid or (not m.get('condition_id') and m.get('condition')==c.get('label') and (not m.get('role') or m.get('role')==c.get('role')))]
+        m=declared_conditions[0] if len(declared_conditions)==1 else {}
         imported=None
         if m.get('time_minutes') is not None:
             try:imported=time_value(m['time_minutes'],'min')
             except ValueError:errors.append(issue('invalid_manifest_time',path,'Invalid manifest time'))
+        source_times=[]
+        for r in condition_rows:
+            raw=r.get('time')
+            try:
+                if isinstance(raw,dict):source_times.append(time_value(raw.get('value'),raw.get('unit'),raw.get('original')))
+                elif r.get('time_minutes') is not None:source_times.append(time_value(r['time_minutes'],'min'))
+            except ValueError:errors.append(issue('invalid_source_time',path,'A finite source time and explicit unit are required'))
+        source_time=source_times[0] if source_times else None
+        if source_time and any(not same_time(source_time['minutes'],v['minutes']) for v in source_times):errors.append(issue('source_time_conflict',path,'Samples assigned to one condition have different times'))
         chosen=None
         if explicit_time and explicit_time.get('value') is not None:
             try:chosen=time_value(explicit_time['value'],explicit_time.get('unit'),explicit_time.get('original'))
             except ValueError:errors.append(issue('invalid_time',path,'A finite value and explicit time unit are required'))
         if chosen is None and imported:
             chosen=imported; provenance[path]=_origin('sample_manifest.conditions',m,'confirmed','time_minutes → min')
+        if chosen is None and source_time:
+            chosen=source_time;provenance[path]=_origin('sample_config.time',source_time,'provided','explicit unit → minutes')
         if chosen is None and parsed:
             chosen=parsed; provenance[path]=_origin('sample_config.condition',c.get('label'),'derived','explicit unit label → minutes')
         if chosen is None and re.fullmatch(r'-?\d+(?:\.\d+)?',str(c.get('label',''))):
@@ -256,7 +293,7 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
         if chosen:
             c['time']=chosen
             raw_candidates=[('original_condition_label',label_time(raw)) for raw in source_labels]
-            for source,other in [('condition_label',parsed),('legacy_manifest',imported),*raw_candidates]:
+            for source,other in [('condition_label',parsed),('legacy_manifest',imported),('sample_config.time',source_time),*raw_candidates]:
                 if other and not same_time(chosen['minutes'],other['minutes']) and c.get('time_conflict_resolution')!='use_confirmed_structured':
                     errors.append(issue('time_conflict',path,'Structured time conflicts with imported time',source=source,structured=chosen,candidate=other))
             if candidates and not any(same_time(chosen['minutes'],t['minutes']) for t in candidates) and c.get('time_conflict_resolution')!='use_confirmed_structured':
@@ -275,7 +312,7 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
     if declaration not in {'technical_per_condition','independent_biological_units','mixed','unknown'}:
         errors.append(issue('replication_declaration_invalid','replication_declaration','Unsupported replication declaration'))
     for row in rows:
-        sid=row['sample_id']; c=condition_by_label[row['condition']]; cid=c['condition_id']
+        sid=row['sample_id']; c=condition_for_sample[sid]; cid=c['condition_id']
         old=old_injections.get(sid)
         legacy=declared_samples.get(sid)
         if legacy and legacy.get('condition')!=row['condition']:
@@ -310,20 +347,11 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
         injections.append(item)
     used_materials={i['material_id'] for i in injections if i.get('material_id')}
     materials=[material_map[mid] for mid in dict.fromkeys(i['material_id'] for i in injections if i.get('material_id')) if mid in material_map]
-    contrasts=[deepcopy(c) for c in previous.get('contrasts',[]) if not automatic('contrasts',c['contrast_id'])]
-    if not contrasts or len(contrasts)<len([c for c in conditions if c.get('role')!='reference']):
-        references=[c for c in conditions if c.get('role')=='reference']
-        for c in conditions:
-            if c.get('role')=='reference':continue
-            if any(v.get('target_condition_id')==c['condition_id'] for v in contrasts):continue
-            reference=c.get('reference_condition_id') or (references[0]['condition_id'] if len(references)==1 else None)
-            if reference:
-                old=next((v for v in previous.get('contrasts',[]) if v['target_condition_id']==c['condition_id'] and v['reference_condition_id']==reference),{})
-                contrasts.append({'contrast_id':old.get('contrast_id') or stable_id('contrast',c['condition_id']+'|'+reference),
-                    'target_condition_id':c['condition_id'],'reference_condition_id':reference,
-                    'pairing':manifest.get('pairing') if declared_samples else context.get('pairing_policy','unknown'),
-                    'purpose':'target_vs_declared_reference','source':'declared_condition_reference' if c.get('reference_condition_id') else 'single_existing_reference_group'})
-            else:errors.append(issue('reference_unresolved',f'conditions.{c["condition_id"]}.reference_condition_id','Select the reference condition; multiple/absent controls cannot be resolved silently'))
+    from .control_comparison import resolve_assignments
+    preserved=[deepcopy(c) for c in previous.get('contrasts',[]) if not automatic('contrasts',c['contrast_id'])]
+    contrasts,control_comparison,control_issues=resolve_assignments(context,conditions,previous,preserved,
+        manifest.get('pairing') if declared_samples else context.get('pairing_policy','unknown'))
+    errors.extend(control_issues)
     for arm in arms:
         if not arm.get('treatments') and arm.get('name')==context.get('treatment'):
             arm['treatments']=[{'name':context.get('treatment'),'dose':None,'unit':None,'dose_status':'unknown'}]
@@ -342,7 +370,7 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
     if science:study.update(design_axis=axis,analysis_target=context.get('analysis_target',previous.get('study',{}).get('analysis_target','proteomics' if ptm_type=='proteomics' else 'phosphoproteomics' if ptm_type in {'phospho','phosphorylation'} else 'other_ptm')))
     design={'schema_version':SCIENCE_VERSION if science else VERSION,'migration_version':MIGRATION_VERSION,'study':study,
         'arms':arms,'conditions':conditions,'materials':materials,'injections':injections,'contrasts':contrasts,
-        'replication_declaration':declaration,'field_provenance':provenance,'metadata_conflicts':pending_conflicts,
+        'replication_declaration':declaration,'field_provenance':provenance,'metadata_conflicts':pending_conflicts,'control_comparison':control_comparison,
         'time_policy':{'internal_unit':'min','absolute_tolerance_minutes':TIME_ABS_TOL_MINUTES,'relative_tolerance':1e-12,
                        'interpolation':'not_performed','mapping':'condition_id_and_contrast_id_never_time_only'},
         'validation_panel':clean_context(context.get('validation_panel') or previous.get('validation_panel') or {}),
@@ -367,6 +395,8 @@ def resolve_study_design(context, sample_config, *, taxonomy_id=None, species=No
 def validate_study_design(design, rows=None):
     errors=validate_structure(design)
     if errors:return errors
+    from .control_comparison import validate_assignment_contract
+    errors.extend(validate_assignment_contract(design))
     if design.get('schema_version') not in {VERSION,SCIENCE_VERSION}:return [issue('schema_version','schema_version','Unsupported study design schema')]
     for collection,key in [('arms','arm_id'),('conditions','condition_id'),('materials','material_id'),('injections','injection_id'),('contrasts','contrast_id')]:
         ids=[r.get(key) for r in design.get(collection,[])]

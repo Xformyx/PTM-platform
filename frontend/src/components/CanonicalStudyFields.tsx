@@ -2,15 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { BIOLOGICAL_DESIGN, type AnalysisContext, type DesignSample, type StudyDisplay } from '@/lib/analysisContext';
+import { BIOLOGICAL_DESIGN, type AnalysisContext, type DesignSample, type StudyDisplay, type ControlResolution } from '@/lib/analysisContext';
+import {ControlComparisonPreview} from './ControlComparisonFields';
 
-type Condition={condition_id:string;arm_id:string;label:string;role:string;time:{value:number;unit:string;minutes:number;original:string}|null;reference_condition_id?:string;time_conflict_resolution?:string};
+type Condition={condition_id:string;arm_id:string;label:string;role:string;time:{value:number;unit:string;minutes:number;original:string}|null;reference_condition_id?:string;time_conflict_resolution?:string;control_family?:string};
 type Material={material_id:string;biological_unit_id:string|null;pair_id:string|null;source?:string};
 type Injection={injection_id:string;input_column:string;condition_id:string;material_id:string|null;technical_injection_id:string|null;legacy_replicate?:string|number|null};
 type Treatment={name:string;dose:number|null;unit:string|null;dose_status:string;source?:string};
 type Arm={arm_id:string;name:string;treatments:Treatment[]};
 type Contrast={contrast_id:string;target_condition_id:string;reference_condition_id:string;pairing:string;purpose?:string};
-type Design={schema_version:string;status:string;replication_declaration:string;conditions:Condition[];arms:Arm[];materials:Material[];injections:Injection[];contrasts:Contrast[];issues:Array<{code:string;path:string;message:string;severity:string}>;[key:string]:unknown};
+type Design={schema_version:string;status:string;replication_declaration:string;conditions:Condition[];arms:Arm[];materials:Material[];injections:Injection[];contrasts:Contrast[];control_comparison?:ControlResolution;issues:Array<{code:string;path:string;message:string;severity:string}>;[key:string]:unknown};
 
 export default function CanonicalStudyFields({context,onChange,samples,species,ptmType,sourceEditor=false,onEdit}:{context:AnalysisContext;onChange:(v:AnalysisContext)=>void;samples:DesignSample[];species:string;ptmType:string;sourceEditor?:boolean;onEdit?:()=>void}) {
   const astra=['astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'].includes(String(context.quantitation_export_mode));
@@ -65,6 +66,7 @@ export default function CanonicalStudyFields({context,onChange,samples,species,p
         <p>기준 조건: {ordered.filter(c=>c.role==='reference').map(c=>c.label).join(', ')||'미기록'}</p>
         <p>처리 조건: {ordered.filter(c=>c.role!=='reference').map(c=>`${c.label}${c.time?` (${c.time.value} ${c.time.unit})`:''}`).join(', ')}</p>
         <p>비교: {design.contrasts.map(c=>`${condition(c.target_condition_id)} vs ${condition(c.reference_condition_id)}`).join(' · ')}</p>
+        <ControlComparisonPreview resolution={design.control_comparison}/>
         {display?<>
           <p>{display.replication.summary}</p>
           {display.replication.planned_summary&&<p className="text-sm">{display.replication.planned_summary}</p>}
@@ -107,14 +109,15 @@ export default function CanonicalStudyFields({context,onChange,samples,species,p
         <p>{c.label}: 현재 파일에 연결되지 않은 기록입니다. 과거 출처가 불명확한 값은 자동 삭제하지 않습니다.</p>
         <Button type="button" size="sm" variant="outline" onClick={()=>change({conditions:design.conditions.filter(v=>v.condition_id!==c.condition_id),contrasts:design.contrasts.filter(v=>v.target_condition_id!==c.condition_id&&v.reference_condition_id!==c.condition_id)})}>{c.label} 기록 제거</Button>
       </div>)}
-      <div className="overflow-auto"><table className="w-full text-xs"><thead><tr><th>Condition</th><th>Arm</th><th>Time</th><th>Unit</th><th>Role</th></tr></thead><tbody>
+      <div className="overflow-auto"><table className="w-full text-xs"><thead><tr><th>Condition</th><th>Arm</th><th>Time</th><th>Unit</th><th>Role</th>{astra&&<th>Control family (선택)</th>}</tr></thead><tbody>
         {design.conditions.map(c=><tr key={c.condition_id}><td>{c.label}</td><td><select aria-label={`Arm ${c.label}`} className={selectClass} value={c.arm_id} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,arm_id:e.target.value}:v)})}>
           {design.arms.map(a=><option key={a.arm_id} value={a.arm_id}>{a.name}</option>)}</select></td>
           <td><Input disabled={context.design_axis==='cross_sectional'} aria-label={`Time ${c.label}`} type="number" step="any" value={c.time?.value??''} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,time:e.target.value===''?null:{...(v.time??{unit:'min',minutes:0,original:''}),value:Number(e.target.value)}}:v)})}/></td>
           <td><select disabled={context.design_axis==='cross_sectional'} aria-label={`Time unit ${c.label}`} className={selectClass} value={c.time?.unit??'min'} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,time:{value:v.time?.value??0,minutes:v.time?.minutes??0,original:v.time?.original??'',unit:e.target.value}}:v)})}>
             {[...new Set(['s','min','h','d',c.time?.unit??'min'])].map(u=><option key={u}>{u}</option>)}</select></td>
           <td><select aria-label={`Role ${c.label}`} className={selectClass} value={c.role} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,role:e.target.value}:v),contrasts:[]})}>
-            <option value="target">Target</option><option value="reference">Reference</option><option value="unknown">Unconfirmed</option></select></td></tr>)}
+            <option value="target">Target</option><option value="reference">Reference</option><option value="unknown">Unconfirmed</option></select></td>
+          {astra&&<td><Input aria-label={`Condition control family ${c.condition_id}`} value={c.control_family??''} onChange={e=>change({conditions:design.conditions.map(v=>v.condition_id===c.condition_id?{...v,control_family:e.target.value}:v)})}/></td>}</tr>)}
       </tbody></table></div>
       {!astra&&<div className="space-y-2">{design.conditions.filter(c=>c.role!=='reference').map(c=>{
         const contrast=design.contrasts.find(v=>v.target_condition_id===c.condition_id);

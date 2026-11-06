@@ -65,7 +65,7 @@ def merge_analysis_context(existing, patch):
             study=design.get('study') or {}
             study.get('original_context',{}).pop(key,None)
             study.pop(key,None)
-            if key in {'replication_declaration','validation_panel','temporal_windows'}:
+            if key in {'replication_declaration','validation_panel','temporal_windows','control_comparison'}:
                 design.pop(key,None)
             if key in {'science','processing','acquisition_metadata'} and (result.get('metadata_provenance') or {}).get('diann_version'):
                 linked=result['metadata_provenance'].pop('diann_version')

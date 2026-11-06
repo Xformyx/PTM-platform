@@ -917,6 +917,7 @@ export default function OrderCreate() {
                       <p>Group 1 = <strong>Condition label</strong> (e.g. control, 3h, 6h)</p>
                       <p>Group 2 = <strong>Replicate number</strong> (e.g. 1, 2, 3)</p>
                       <p>If condition matches "{controlKeyword}" → Group = <Badge variant="secondary" className="text-[10px] py-0">Control</Badge>, else → <Badge variant="secondary" className="text-[10px] py-0">Treatment</Badge></p>
+                      <p>시간대별 Control의 조건명과 시간을 유지하고, 각 행의 Group을 Control로 지정하세요.</p>
                       {sampleColumns.length > 0 && (
                         <>
                           <Separator className="my-2" />
