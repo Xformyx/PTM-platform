@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "injected_failure": "before compute_science/publication",
+  "order_status": "failed",
+  "task_id": "29dfb99a-11ed-4f70-806e-091d9ca2d98f",
+  "preserved_run_id": "g2-b37fbc0ac06f4398a10625bc5e2a7ec5",
+  "pointer_sha256": "25ef1899812c823bcc5caa627f4458ee672a4b46b5e64a3abc8bf40a25b4e040",
+  "archive_sha256": "e95238690ed041db09a891192d58d9953052a230f29058534965a2c55f698b08",
+  "original_source_pointer_sha256": "a8ef7ab4d97a47b731ed7d88797b71c34534103c2a7d746715df2d506dcff7ef",
+  "download_pointer_matches_preserved_success": true,
+  "transport": "real API/MySQL/Redis/Celery"
+}

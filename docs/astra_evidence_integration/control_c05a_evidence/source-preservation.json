@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "original_manifest_files_unchanged": 257,
+  "source_pointer_run_id": "g3-173714b8042a41afa0248b88dc49d4c3",
+  "source_pointer_matches_original_platform_run": true,
+  "source_pointer_sha256": "a8ef7ab4d97a47b731ed7d88797b71c34534103c2a7d746715df2d506dcff7ef",
+  "source_archive_sha256": "862be7cbefcd42c24769ea0a6530bc6ba2b1f0fb2f4fa22931d1886e727f19af",
+  "original_uploaded_PR_PG_FASTA_match_archive": true,
+  "free_bytes_end": 30130892800
+}

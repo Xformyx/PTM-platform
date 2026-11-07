@@ -1,0 +1,332 @@
+{
+  "source_run_id": "g3-173714b8042a41afa0248b88dc49d4c3",
+  "source_manifest_verified_files": 257,
+  "source_pin_sha256": "2566fabd9cab0bab1ebeedf55326652ae7808467c9715b00a3a29a1dd91f6160",
+  "source_pin_file_sha256": "f49b30786ce34ddf219aa5d868623d7eff93277752c7571c68869a55b9ef9b33",
+  "replication_declaration": "technical_per_condition",
+  "pairing": {
+    "unknown": 6
+  },
+  "materials": [
+    {
+      "biological_unit_id": "sampled_unit_28f271eaf35d5f62",
+      "material_id": "material_28f271eaf35d5f62",
+      "pair_id": null,
+      "source": "user_replication_declaration"
+    },
+    {
+      "biological_unit_id": "sampled_unit_ea5b9a59da397e6b",
+      "material_id": "material_ea5b9a59da397e6b",
+      "pair_id": null,
+      "source": "user_replication_declaration"
+    },
+    {
+      "biological_unit_id": "sampled_unit_57cb4743c3f9154c",
+      "material_id": "material_57cb4743c3f9154c",
+      "pair_id": null,
+      "source": "user_replication_declaration"
+    },
+    {
+      "biological_unit_id": "sampled_unit_c43e32f1ade4c2ba",
+      "material_id": "material_c43e32f1ade4c2ba",
+      "pair_id": null,
+      "source": "user_replication_declaration"
+    },
+    {
+      "biological_unit_id": "sampled_unit_d7da6289466e3058",
+      "material_id": "material_d7da6289466e3058",
+      "pair_id": null,
+      "source": "user_replication_declaration"
+    },
+    {
+      "biological_unit_id": "sampled_unit_dbedddefaab14cdd",
+      "material_id": "material_dbedddefaab14cdd",
+      "pair_id": null,
+      "source": "user_replication_declaration"
+    },
+    {
+      "biological_unit_id": "sampled_unit_48a27e03a33ae9b6",
+      "material_id": "material_48a27e03a33ae9b6",
+      "pair_id": null,
+      "source": "user_replication_declaration"
+    }
+  ],
+  "conditions": [
+    {
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_f541e2f63f702f17",
+      "label": "1min",
+      "role": "target",
+      "source_labels": [
+        "1min_1",
+        "1min_2",
+        "1min_3"
+      ],
+      "time": {
+        "value": 1.0,
+        "unit": "min",
+        "minutes": 1.0,
+        "original": "1min"
+      }
+    },
+    {
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_bd68c45f543c5a83",
+      "label": "5min",
+      "role": "target",
+      "source_labels": [
+        "5min_1",
+        "5min_2",
+        "5min_3"
+      ],
+      "time": {
+        "value": 5.0,
+        "unit": "min",
+        "minutes": 5.0,
+        "original": "5min"
+      }
+    },
+    {
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_d9c5c91ebf3d5bfc",
+      "label": "15min",
+      "role": "target",
+      "source_labels": [
+        "15min_1",
+        "15min_2",
+        "15min_3"
+      ],
+      "time": {
+        "value": 15.0,
+        "unit": "min",
+        "minutes": 15.0,
+        "original": "15min"
+      }
+    },
+    {
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_c96e6ecd71344ff2",
+      "label": "30min",
+      "role": "target",
+      "source_labels": [
+        "30min_1",
+        "30min_2",
+        "30min_3"
+      ],
+      "time": {
+        "value": 30.0,
+        "unit": "min",
+        "minutes": 30.0,
+        "original": "30min"
+      }
+    },
+    {
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_824bfd9a5e97c3aa",
+      "label": "60min",
+      "role": "target",
+      "source_labels": [
+        "60min_1",
+        "60min_2",
+        "60min_3"
+      ],
+      "time": {
+        "value": 60.0,
+        "unit": "min",
+        "minutes": 60.0,
+        "original": "60min"
+      }
+    },
+    {
+      "arm_id": "arm_8ac02a113972dcb9",
+      "condition_id": "condition_a9adc1cf0158f4a6",
+      "label": "180min",
+      "role": "target",
+      "source_labels": [
+        "180min_1",
+        "180min_2",
+        "180min_3"
+      ],
+      "time": {
+        "value": 180.0,
+        "unit": "min",
+        "minutes": 180.0,
+        "original": "180min"
+      }
+    },
+    {
+      "arm_id": "arm_52367a6622b19f08",
+      "condition_id": "condition_32d7e82082479b8c",
+      "label": "Control",
+      "role": "reference",
+      "source_labels": [
+        "con_1",
+        "con_2",
+        "con_3"
+      ],
+      "time": {
+        "value": 0.0,
+        "unit": "min",
+        "minutes": 0.0,
+        "original": "0"
+      }
+    }
+  ],
+  "same_numeric_mapping": true,
+  "actual_time_matched_input": false,
+  "inputs": {
+    "FASTA": {
+      "sha256": "61b5d367511111d46377c78cfcfc1a09bacb0c1632c9960282520de732823c83",
+      "bytes": 40303302
+    },
+    "PG": {
+      "sha256": "57c874a46f57608a64a779c4ef8ddecd07273cc0603aa228b8fbd662cbfca745",
+      "bytes": 2925895
+    },
+    "PR": {
+      "sha256": "7160e863ddaf5236d22c5dc95fd3b066355341e8b2b130f11ef12e5a46a52ba4",
+      "bytes": 60879325
+    },
+    "SPECIFICITY_RESTRICTED": {
+      "sha256": "1f0f262e684276d95672f33ba79f7e2ff7e1d6b8f7a8d5d6cddce2874380a605",
+      "bytes": 2027
+    }
+  },
+  "replication_display": {
+    "source": "study_design.injections[].legacy_replicate",
+    "conditions": [
+      {
+        "condition_id": "condition_32d7e82082479b8c",
+        "label": "Control",
+        "replicate_ids": [
+          "1",
+          "2",
+          "3"
+        ],
+        "registered_replicate_count": 3,
+        "measurement_file_count": 3,
+        "injection_count": 3,
+        "missing_replicate_id_count": 0,
+        "multiple_injection_replicate_ids": [],
+        "planned_replicate_count": null,
+        "plan_comparison": "not_recorded",
+        "statuses": []
+      },
+      {
+        "condition_id": "condition_f541e2f63f702f17",
+        "label": "1min",
+        "replicate_ids": [
+          "1",
+          "2",
+          "3"
+        ],
+        "registered_replicate_count": 3,
+        "measurement_file_count": 3,
+        "injection_count": 3,
+        "missing_replicate_id_count": 0,
+        "multiple_injection_replicate_ids": [],
+        "planned_replicate_count": null,
+        "plan_comparison": "not_recorded",
+        "statuses": []
+      },
+      {
+        "condition_id": "condition_bd68c45f543c5a83",
+        "label": "5min",
+        "replicate_ids": [
+          "1",
+          "2",
+          "3"
+        ],
+        "registered_replicate_count": 3,
+        "measurement_file_count": 3,
+        "injection_count": 3,
+        "missing_replicate_id_count": 0,
+        "multiple_injection_replicate_ids": [],
+        "planned_replicate_count": null,
+        "plan_comparison": "not_recorded",
+        "statuses": []
+      },
+      {
+        "condition_id": "condition_d9c5c91ebf3d5bfc",
+        "label": "15min",
+        "replicate_ids": [
+          "1",
+          "2",
+          "3"
+        ],
+        "registered_replicate_count": 3,
+        "measurement_file_count": 3,
+        "injection_count": 3,
+        "missing_replicate_id_count": 0,
+        "multiple_injection_replicate_ids": [],
+        "planned_replicate_count": null,
+        "plan_comparison": "not_recorded",
+        "statuses": []
+      },
+      {
+        "condition_id": "condition_c96e6ecd71344ff2",
+        "label": "30min",
+        "replicate_ids": [
+          "1",
+          "2",
+          "3"
+        ],
+        "registered_replicate_count": 3,
+        "measurement_file_count": 3,
+        "injection_count": 3,
+        "missing_replicate_id_count": 0,
+        "multiple_injection_replicate_ids": [],
+        "planned_replicate_count": null,
+        "plan_comparison": "not_recorded",
+        "statuses": []
+      },
+      {
+        "condition_id": "condition_824bfd9a5e97c3aa",
+        "label": "60min",
+        "replicate_ids": [
+          "1",
+          "2",
+          "3"
+        ],
+        "registered_replicate_count": 3,
+        "measurement_file_count": 3,
+        "injection_count": 3,
+        "missing_replicate_id_count": 0,
+        "multiple_injection_replicate_ids": [],
+        "planned_replicate_count": null,
+        "plan_comparison": "not_recorded",
+        "statuses": []
+      },
+      {
+        "condition_id": "condition_a9adc1cf0158f4a6",
+        "label": "180min",
+        "replicate_ids": [
+          "1",
+          "2",
+          "3"
+        ],
+        "registered_replicate_count": 3,
+        "measurement_file_count": 3,
+        "injection_count": 3,
+        "missing_replicate_id_count": 0,
+        "multiple_injection_replicate_ids": [],
+        "planned_replicate_count": null,
+        "plan_comparison": "not_recorded",
+        "statuses": []
+      }
+    ],
+    "summary": "등록 반복: 조건별 3반복 · 총 21개 측정 파일",
+    "planned_summary": null,
+    "plan_source": null,
+    "measurement_file_count": 21,
+    "injection_count": 21,
+    "material_count": 7,
+    "biological_unit_count": 7,
+    "unmapped_injection_count": 0,
+    "replication_type": "technical_per_condition",
+    "pairing": [
+      "unknown"
+    ],
+    "interpretation": "Rep. ID 개수, 측정 파일/주입 수, material/biological unit 수는 서로 다릅니다. 번호만으로 technical/biological/paired를 선언하지 않습니다."
+  }
+}

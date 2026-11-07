@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "page_errors": [],
+  "actual_input": true,
+  "real_http": [
+    "resolve-design",
+    "Order GET",
+    "Order PATCH"
+  ],
+  "ui_scope": "production StudyInputFields/SampleDesignFields/RerunOptionsModal in local validation shell; not production full application",
+  "ancillary_stubs": [
+    "rag collections listing",
+    "sessions listing"
+  ],
+  "injections": 21,
+  "contrasts": 6,
+  "missing_time_matched_references": "all six targets unresolved; no fallback",
+  "biological_mapping_unchanged": true
+}

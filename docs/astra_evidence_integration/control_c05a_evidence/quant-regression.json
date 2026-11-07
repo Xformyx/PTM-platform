@@ -1,0 +1,788 @@
+[
+  {
+    "policy": "already_normalized.v1",
+    "cache": {
+      "status": "reused",
+      "fingerprint": "quant_v6_97e73f3b7653416ffb32",
+      "origin_analysis_run_id": "control-c05a-20261107"
+    },
+    "normalization": {
+      "applications": 1,
+      "batch_correction_status": "not_performed",
+      "batch_variation_corrected": false,
+      "factor_range": [
+        1.0,
+        1.0
+      ],
+      "factors": {
+        "PG": {
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 1.0
+        },
+        "PR": {
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 1.0
+        }
+      },
+      "injection_order_drift_correction_status": "not_performed",
+      "median_QC": {
+        "PG": {
+          "after": {
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 9993780.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 10114650.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 10072500.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 10031750.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 10044200.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 10190100.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 10015500.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 10502200.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 10054800.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 10154150.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 10239000.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 9665110.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 9625630.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 9775790.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 10027300.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 10088700.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 9968190.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 10278500.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 10325900.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 10184500.0
+          },
+          "before": {
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 9993780.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 10114650.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 10072500.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 10031750.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 10044200.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 10190100.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 10015500.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 10502200.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 10054800.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 10154150.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 10239000.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 9665110.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 9625630.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 9775790.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 10027300.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 10088700.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 9968190.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 10278500.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 10325900.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 10184500.0
+          }
+        },
+        "PR": {
+          "after": {
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 1584035.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 1583770.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 1629945.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 1618175.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 1583460.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 1616810.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 1579690.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 1676690.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 1542475.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 1545920.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 1566955.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 1513910.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 1492970.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 1536885.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 1530590.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 1559130.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 1564830.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 1720480.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 1729305.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 1724690.0
+          },
+          "before": {
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 1584035.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 1583770.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 1629945.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 1618175.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 1583460.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 1616810.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 1579690.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 1676690.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 1542475.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 1545920.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 1566955.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 1513910.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 1492970.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 1536885.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 1530590.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 1559130.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 1564830.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 1720480.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 1729305.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 1724690.0
+          }
+        }
+      },
+      "method": "none",
+      "normalization_method": "none",
+      "normalization_policy": "already_normalized.v1",
+      "parent_adjustment_is_separate": true,
+      "ratio_track_interpretation": "protein_abundance_adjusted_relative_ptm_ratio_contrast",
+      "sample_columns": [
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML"
+      ],
+      "sample_scaling_status": "not_performed",
+      "samples_scaled": 0,
+      "schema_version": "normalization_provenance.v1",
+      "scope": "whole_study",
+      "upstream_quantity_scale_status": "unknown_not_recorded"
+    },
+    "tables": [
+      {
+        "table": "quant/annotation_edges.csv",
+        "rows": 0,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "ab555595c3f294dd63e65960e46c90744ac81efe49c5ebc9a08e0d8d93fb0bc4",
+        "new_sha256": "ab555595c3f294dd63e65960e46c90744ac81efe49c5ebc9a08e0d8d93fb0bc4",
+        "byte_equal": true
+      },
+      {
+        "table": "quant/comparisons.csv",
+        "rows": 16944,
+        "common_values_ids_na_exact": false,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {
+          "A": {
+            "cells": 12,
+            "maximum_absolute_error": 1.7763568394002505e-15
+          },
+          "U_joint": {
+            "cells": 1,
+            "maximum_absolute_error": 3.552713678800501e-15
+          },
+          "P_joint": {
+            "cells": 1,
+            "maximum_absolute_error": 7.105427357601002e-15
+          },
+          "U_all": {
+            "cells": 1,
+            "maximum_absolute_error": 3.552713678800501e-15
+          },
+          "P_all": {
+            "cells": 1,
+            "maximum_absolute_error": 7.105427357601002e-15
+          },
+          "decomposition_residual": {
+            "cells": 12,
+            "maximum_absolute_error": 6.217248937900877e-15
+          }
+        },
+        "added_columns": [],
+        "old_sha256": "0936a28fab025b60255290ce4652a1f7274279740a536824b7802dadfa3b3875",
+        "new_sha256": "b3dd210e63d90464cb74095bda0a43bd134799f208adbd5a04459b6e6f76f797",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/detection.csv",
+        "rows": 16944,
+        "common_values_ids_na_exact": false,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {
+          "post_reference_U": {
+            "cells": 1,
+            "maximum_absolute_error": 3.552713678800501e-15
+          },
+          "raw_candidate_A": {
+            "cells": 10,
+            "maximum_absolute_error": 1.7763568394002505e-15
+          },
+          "eligible_A": {
+            "cells": 9,
+            "maximum_absolute_error": 1.7763568394002505e-15
+          }
+        },
+        "added_columns": [],
+        "old_sha256": "352228515a2a169aafd4699cce475fdfefb36a2f03c731b226966bf2ba2cbcb7",
+        "new_sha256": "2dd58ee66f66d2fa01d1ab528051f70eab26e91606c2591a70fe31408078acfe",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/emergent_kinase_evidence.csv",
+        "rows": 0,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "cd8e1ac9670efe6d8ed65373f45780fce6a30fa79f6935f947d092ae84b2034e",
+        "new_sha256": "cd8e1ac9670efe6d8ed65373f45780fce6a30fa79f6935f947d092ae84b2034e",
+        "byte_equal": true
+      },
+      {
+        "table": "quant/form_evidence_status.csv",
+        "rows": 16944,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "0229daf7ca1f0383d7f15dda2e67973cf07c9f7b17e6092fccc111db6f7c3639",
+        "new_sha256": "0229daf7ca1f0383d7f15dda2e67973cf07c9f7b17e6092fccc111db6f7c3639",
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_injection_omissions.csv",
+        "rows": 0,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "c7dd60af7fb3ef655ec58ff9aec19d3d02391f30852bb61e3e1b7c456c28446b",
+        "new_sha256": "c7dd60af7fb3ef655ec58ff9aec19d3d02391f30852bb61e3e1b7c456c28446b",
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_membership.csv",
+        "rows": 0,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "0949fcf78cb754c90b43cb3314385934fca46e58f9e6298ccc8c8aca5e352915",
+        "new_sha256": "0949fcf78cb754c90b43cb3314385934fca46e58f9e6298ccc8c8aca5e352915",
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_profiles.csv",
+        "rows": 0,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "df78178a41f3aa50bc3fd391f6b9750598ed071a0f2a1259b89c467d81e56bee",
+        "new_sha256": "df78178a41f3aa50bc3fd391f6b9750598ed071a0f2a1259b89c467d81e56bee",
+        "byte_equal": true
+      },
+      {
+        "table": "quant/kinase_sensitivity.csv",
+        "rows": 0,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "dd482c1d58e71e4154d9e6f9f9eeea632bff75e4b036724c12a4c9e333d48161",
+        "new_sha256": "dd482c1d58e71e4154d9e6f9f9eeea632bff75e4b036724c12a4c9e333d48161",
+        "byte_equal": true
+      },
+      {
+        "table": "quant/primary_A_input.csv",
+        "rows": 13704,
+        "common_values_ids_na_exact": false,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {
+          "A": {
+            "cells": 11,
+            "maximum_absolute_error": 1.7763568394002505e-15
+          },
+          "U_joint": {
+            "cells": 1,
+            "maximum_absolute_error": 3.552713678800501e-15
+          },
+          "P_joint": {
+            "cells": 1,
+            "maximum_absolute_error": 7.105427357601002e-15
+          },
+          "U_all": {
+            "cells": 1,
+            "maximum_absolute_error": 3.552713678800501e-15
+          },
+          "P_all": {
+            "cells": 1,
+            "maximum_absolute_error": 7.105427357601002e-15
+          },
+          "decomposition_residual": {
+            "cells": 11,
+            "maximum_absolute_error": 6.217248937900877e-15
+          }
+        },
+        "added_columns": [],
+        "old_sha256": "ec2129b23ab4b385fdec8809a2a6a7f075ea04578f4652eee64512dd471143b3",
+        "new_sha256": "8e084701033688dd651963b498376d487786ab53b3f273d1af923516169aa1ab",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/protein_contrasts.csv",
+        "rows": 57150,
+        "common_values_ids_na_exact": false,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {
+          "log2_change": {
+            "cells": 2,
+            "maximum_absolute_error": 7.105427357601002e-15
+          }
+        },
+        "added_columns": [],
+        "old_sha256": "08fe73c422929d0886cb0afd35b12206f8a867d25350b7d6e2205aa57faceb35",
+        "new_sha256": "57c85574b65a1bdeaee0a2562225039dab79b2d6123ff6e7187124f1c4f6d4fb",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/runlevel.csv",
+        "rows": 59304,
+        "common_values_ids_na_exact": false,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {
+          "ptm_log2": {
+            "cells": 7,
+            "maximum_absolute_error": 3.552713678800501e-15
+          },
+          "parent_log2": {
+            "cells": 2,
+            "maximum_absolute_error": 3.552713678800501e-15
+          },
+          "adjusted_log2_ratio": {
+            "cells": 9,
+            "maximum_absolute_error": 3.552713678800501e-15
+          }
+        },
+        "added_columns": [],
+        "old_sha256": "f9e960ed122fd3ba8773145a091110cf1c1539013ed8328bc1c8fcb88d8406a7",
+        "new_sha256": "de06161984a7123bbfb65699c4868337b2a5564c77b182f0e28c660740f790fb",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/site_mapping.csv",
+        "rows": 11614,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "2690b405e44bbf3ef56b521fd9cfc3063adff10d00756333721c52cef0807bea",
+        "new_sha256": "2690b405e44bbf3ef56b521fd9cfc3063adff10d00756333721c52cef0807bea",
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_parent_complete.csv",
+        "rows": 13704,
+        "common_values_ids_na_exact": false,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {
+          "strict_parent_A": {
+            "cells": 12,
+            "maximum_absolute_error": 1.7763568394002505e-15
+          },
+          "PG_parent_A": {
+            "cells": 11,
+            "maximum_absolute_error": 1.7763568394002505e-15
+          }
+        },
+        "added_columns": [],
+        "old_sha256": "8ccd0252df68b63eb67b60a764b8b644451c661afc1a76f453aeb6e25d3cf727",
+        "new_sha256": "077ce2e1d6677e81c3ae1a0207d4d0b683507f630c672ae0e4f921679a270f4c",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/strict_parent_paired.csv",
+        "rows": 13704,
+        "common_values_ids_na_exact": false,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {
+          "strict_parent_A": {
+            "cells": 19,
+            "maximum_absolute_error": 1.3322676295501878e-15
+          },
+          "PG_parent_A": {
+            "cells": 11,
+            "maximum_absolute_error": 1.7763568394002505e-15
+          }
+        },
+        "added_columns": [],
+        "old_sha256": "c1ced00d455ed75212b199aa5c18f7a6ba59e10e6f2b95ab544011a70b981b64",
+        "new_sha256": "b828f16e49e4b92f7a58d3496954eb24952f4cca822b857c57f1c4cefd96dbea",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/strict_parent_peptide_masks.csv",
+        "rows": 445712,
+        "common_values_ids_na_exact": false,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {
+          "paired_log2_ratio_change": {
+            "cells": 345,
+            "maximum_absolute_error": 1.7763568394002505e-15
+          }
+        },
+        "added_columns": [],
+        "old_sha256": "5bffe52d1722f46852f4945f5d3c3dda8e52c5ec4413a721427090ad2f0a241a",
+        "new_sha256": "882ae292ac2ad9df5954eeced5de848f08f81cfe7cd4dac192266096e5fbf405",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/strict_selected_sequences.csv",
+        "rows": 111311,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "9636bee80af780425c3eeea7720d314523cbda2b0155c0c8481e59f509394184",
+        "new_sha256": "9636bee80af780425c3eeea7720d314523cbda2b0155c0c8481e59f509394184",
+        "byte_equal": true
+      },
+      {
+        "table": "quant/strict_unmodified_proteins.csv",
+        "rows": 54456,
+        "common_values_ids_na_exact": false,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {
+          "log2_change": {
+            "cells": 14,
+            "maximum_absolute_error": 7.105427357601002e-15
+          }
+        },
+        "added_columns": [],
+        "old_sha256": "69f8f847fd9e20c411c374f6b13dbbe6568b56dd725e1e13c319a7daf59fa661",
+        "new_sha256": "99b8b4474a9c80201bf024cbd25237ec2f4da1d20c8049cb7d62db4e01e81c30",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/strict_unmodified_sequences.csv",
+        "rows": 667866,
+        "common_values_ids_na_exact": false,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {
+          "log2_change": {
+            "cells": 112,
+            "maximum_absolute_error": 7.105427357601002e-15
+          }
+        },
+        "added_columns": [],
+        "old_sha256": "071cc1d937310233917710b8954305fe1a76055949a2a4567dceee095983846a",
+        "new_sha256": "b2c6d424fc58a17cfcee8168d222b2a49a7e22f010191a02a4dfe6554940cbfa",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/summary.csv",
+        "rows": 2824,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "4d90b48233fb106cf67869f117f9221338846ab3e71a4574faa66e871598d100",
+        "new_sha256": "4d90b48233fb106cf67869f117f9221338846ab3e71a4574faa66e871598d100",
+        "byte_equal": true
+      },
+      {
+        "table": "quant/temporal_protein_summary.csv",
+        "rows": 18601,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [
+          "series_id"
+        ],
+        "old_sha256": "173746aff05917a8599bc83739c4fc10a5c449b0e16b12daf0181527570027ae",
+        "new_sha256": "9870b7630f92f226cc85a6afec0cc306227c1a5802c2d65e3d02b5055a5e02b7",
+        "byte_equal": false
+      },
+      {
+        "table": "quant/validation_panel.csv",
+        "rows": 0,
+        "common_values_ids_na_exact": true,
+        "ids_and_na_exact": true,
+        "floating_absolute_tolerance": 1e-12,
+        "numeric_differences": {},
+        "added_columns": [],
+        "old_sha256": "90888a0d560e242d0a8854adf500f06d46fe0c51a7c7668d767e2e200e7bcdcd",
+        "new_sha256": "90888a0d560e242d0a8854adf500f06d46fe0c51a7c7668d767e2e200e7bcdcd",
+        "byte_equal": true
+      }
+    ],
+    "unique_injections": 21,
+    "runlevel_rows": 59304,
+    "comparisons": 16944,
+    "biological_pq": "not_computed",
+    "missing_counts": {
+      "U_joint": 2234,
+      "P_joint": 2234,
+      "A": 2234
+    }
+  },
+  {
+    "policy": "legacy_median.v1",
+    "cache": {
+      "status": "computed",
+      "fingerprint": "quant_v6_c1c8071f826995eb0800",
+      "origin_analysis_run_id": "control-c05a-20261107"
+    },
+    "normalization": {
+      "schema_version": "normalization_provenance.v1",
+      "normalization_policy": "legacy_median.v1",
+      "method": "separate_samplewise_median_scaling",
+      "normalization_method": "separate_samplewise_median_scaling",
+      "sample_scaling_status": "performed",
+      "batch_variation_corrected": false,
+      "batch_correction_status": "not_performed",
+      "injection_order_drift_correction_status": "not_performed",
+      "upstream_quantity_scale_status": "unknown_not_recorded",
+      "ratio_track_interpretation": "protein_abundance_adjusted_relative_ptm_ratio_contrast",
+      "factors": {
+        "PR": {
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 0.9995707165561367,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 0.9997379670027845,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 0.9714162134305145,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 0.9784819318058925,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 0.9999336895153651,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 0.9793080201136807,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 1.002320075457843,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 0.9443337766671239,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 1.0265028606622473,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 1.0242153539639827,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 1.0104661588877792,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 1.0458712869325124,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 1.0605403993382319,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 1.0302364848378376,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 1.0344736343501526,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 1.0155375113043812,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 1.0118383466574643,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 0.9202984050962522,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 0.9156019325682861,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 0.918051939768886
+        },
+        "PG": {
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 1.0068812801562572,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 0.9948490555778006,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 1.0,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 0.999012161826756,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 1.0030702519500585,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 1.0018269249915375,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 0.9874829491369074,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 1.0046977185362689,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 0.9581373426520158,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 1.000770776146716,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 0.9909790578236485,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 0.9827668717648208,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 1.0411211046744424,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 1.045391314646418,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 1.0293336906787074,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 1.0035154029499467,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 0.9974079911187764,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 1.009466111701322,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 0.978990125018242,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 0.9744961698253906,
+          "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 0.9880259217438264
+        }
+      },
+      "factor_range": [
+        0.9156019325682861,
+        1.0605403993382319
+      ],
+      "samples_scaled": 21,
+      "scope": "whole_study",
+      "sample_columns": [
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML",
+        "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML"
+      ],
+      "applications": 1,
+      "parent_adjustment_is_separate": true,
+      "median_QC": {
+        "PR": {
+          "before": {
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 1584035.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 1583770.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 1629945.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 1618175.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 1583460.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 1616810.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 1579690.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 1676690.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 1542475.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 1545920.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 1566955.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 1513910.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 1492970.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 1536885.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 1530590.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 1559130.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 1564830.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 1720480.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 1729305.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 1724690.0
+          },
+          "after": {
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 1583354.9999999998,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 1583354.9999999998,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 1583354.9999999998,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 1583355.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 1583355.0
+          }
+        },
+        "PG": {
+          "before": {
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 9993780.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 10114650.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 10072500.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 10031750.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 10044200.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 10190100.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 10015500.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 10502200.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 10054800.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 10154150.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 10239000.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 9665110.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 9625630.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 9775790.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 10027300.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 10088700.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 9968190.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 10278500.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 10325900.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 10184500.0
+          },
+          "after": {
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_01.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_02.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_15min_03.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_01.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_02.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_180min_03.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_01.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_02.mzML": 10062550.000000002,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_1min_03.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_01.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_02.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_30min_03.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_01.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_02.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_5min_03.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_01.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_02.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_60min_03.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_01.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_02.mzML": 10062550.0,
+            "D:\\20260814_Rat_Insulin\\20260812_Rat_Insulin_con_03.mzML": 10062550.0
+          }
+        }
+      }
+    },
+    "comparison": "sensitivity archive has no full quant tables"
+  }
+]

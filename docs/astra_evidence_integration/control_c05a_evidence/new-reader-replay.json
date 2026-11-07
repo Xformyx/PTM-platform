@@ -1,0 +1,193 @@
+{
+  "passed": true,
+  "scope": "reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables",
+  "previous_reader_interpretation_rebuilt": true,
+  "literature_review_plan_rebuilt": false,
+  "frozen_typed_literature_rebuilt": false,
+  "new_model_calls": 0,
+  "whole_evidence_projection_rebuilt": false,
+  "projection_inputs": null,
+  "catalog_available": true,
+  "scientific_requantification": false,
+  "network_requests": 0,
+  "repository_code_used": false,
+  "run_id": "g2-b37fbc0ac06f4398a10625bc5e2a7ec5",
+  "files": [
+    {
+      "file": "reader/READ_ME.md",
+      "sha256": "e486a6f25756030291d93181b24f6567d1257d332362cd7c6a37d9c0888c400b",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/authoring_packet.json",
+      "sha256": "23e6f3594baa70defd0803bef970f6471bff065d8456ee013622238a6ef73d1b",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/coverage_summary.json",
+      "sha256": "17ed2c1ba4bd85f4925259de71932212cba71f63dd7f478411eadce1902dd675",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/question_map.json",
+      "sha256": "6ab7d6e759b5b932575dc80387d9ec0f343f9bc5302eab911f60bec86d02dfaa",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/selection_audit.json",
+      "sha256": "1469f665d67bd9db155637555b5db36e0d78a429ae0c83a7984a39c63202746c",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/evidence_catalog.json",
+      "sha256": "de5fa0bed9c639c6abebd0ab63a716f05132ea42f19322a318ae2c7c977ee7ac",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/evidence_index.csv",
+      "sha256": "b96c04d50c9001fc99704389bc4111971f43867f2163bfa66330fd0d66101b5b",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/evidence_links.csv",
+      "sha256": "86060731dfc4533d7e1e0eca4e781c47ea1b725771a9608618590d1401b5ecaa",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/EVIDENCE_ACCESS.md",
+      "sha256": "5fc77b9b059c735c42613b45fed7f767dbb6ea48923a0cf4d2f29bb903dc80ae",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/full_question_links.csv",
+      "sha256": "42d706c7817ff383a37c2164595f8506ba464a7dcb0423b347e9c7956d305b4c",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/full_temporal_links.csv",
+      "sha256": "3cb55a5739b1a8ce8e9f46d214e90aec8e2607929446fd7bbe9cb93a224dab10",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/full_temporal_subjects.csv",
+      "sha256": "e0b063b4011433689be74b3ece661b0fcd3d9c692af9bc08056627b216dfcf36",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/full_module_membership.csv",
+      "sha256": "fad0c4a3fc9c594d2357840eb546dc3ab8aae245f0e6bc77657e78b177982810",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/full_evidence_summary.json",
+      "sha256": "00df74ba7c4b7ba23a59e613c1d15fcf6655cfb069f6605571ae026520425e64",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/FULL_EVIDENCE.md",
+      "sha256": "91aa31eae9f5885be64fd83da2916295070dca763ec4803895b88c4380a0f5a5",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/literature_review_subjects.csv",
+      "sha256": "3446690ca6af9da3414bf107eea94b153a7cc2d2a5cf17ce3d0a3a23ebb78491",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/literature_review_plan.json",
+      "sha256": "01661a067b615478ae46ac4abdb112d9a1979a93ac0296d2c514911c121e7467",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/LITERATURE_REVIEW_PLAN.md",
+      "sha256": "c9ec919caa6edc9136b839eda017a38115f6f07f688b97b1c63cf96994ca340b",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/PHOSX_TIME_COURSE.md",
+      "sha256": "21edd017948dcef0550c29376c45c136348c495c7378e46657ecc9e3f0e9d6b5",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/phosx_time_summary.csv",
+      "sha256": "d4b795e40c15d85d1b0b1500a9ee9af82ba18d03e3a5afddbcb6951cf11fbad1",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/phosx_assay_time_results.csv",
+      "sha256": "1040c4bb7eb24f0de023045a27e10779ec6c1adb76b0ce047a8865c39ce060f7",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/TEMPORAL_EVIDENCE.md",
+      "sha256": "4ca850038374fc09f53476eee068be892e6aec4db972e1cad5eca86bd9615c15",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/temporal_evidence.json",
+      "sha256": "582c018fa6a9fc7e5b6d67983003779242669a5cedcd5167516e5fa817889f20",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/temporal_links.csv",
+      "sha256": "20c6ba4bedf1ca9d13fb4053284286ec75ef612b354f293e3f53e36d418b38ba",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/LITERATURE.md",
+      "sha256": "758aefafa40eeded11bb3c9247d78df742dc6fa12ca06e75d286c5ad2308619b",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/literature_summary.json",
+      "sha256": "e5ddff591bcb74ca6b5d7bb4e49738344713b32acf05c87eddee1d4a2770546a",
+      "byte_equal": true
+    },
+    {
+      "file": "references/finding_literature_pin.json",
+      "sha256": "fbdbe4b25f153c3c7c4eda3771c78cf61de6184d0dac09a0b3f03d01c47d69f3",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/cards.csv",
+      "sha256": "f104f5e591881e1ec6e608349b4d6c88247f0a4a2664c8db0b22a00bcc6820d8",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/findings.csv",
+      "sha256": "fa49cfe8dc760a5ea15f261329d9c961ea0d48f47f572fab99704aaf5d737d25",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/coverage.csv",
+      "sha256": "46eca8b2e4f2c0b166d10efbf51ff73d0015207cdead7de3742e762ca9155922",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/packet.csv",
+      "sha256": "1d3b2bd8c2eaa00deaf37d90664e87f3c95b11ed4624518b8dcb067d90a7c011",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/literature_search.csv",
+      "sha256": "df8185c2d4a00027984a83ae33033fb01c68575fedc9a00c13bc549f984faff2",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/literature_sources.csv",
+      "sha256": "5281700a555da1bc7050ab641e82db9d539bad09fd96cd56e6beadb5b4719763",
+      "byte_equal": true
+    },
+    {
+      "file": "reader/literature_comparisons.csv",
+      "sha256": "dd2bbeac7ef71123f4eb092e3e8de16eb0757324a0d4859c68d827556a5bffbe",
+      "byte_equal": true
+    }
+  ],
+  "validation": {
+    "source_rows_checked": 16944,
+    "cards_checked": 14658,
+    "findings_checked": 15,
+    "values_times_NA_masks_ids": "passed"
+  }
+}

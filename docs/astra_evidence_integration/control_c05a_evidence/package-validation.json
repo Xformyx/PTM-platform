@@ -1,0 +1,409 @@
+{
+  "passed": true,
+  "run_id": "g2-b37fbc0ac06f4398a10625bc5e2a7ec5",
+  "archive_sha256": "e95238690ed041db09a891192d58d9953052a230f29058534965a2c55f698b08",
+  "download_bytes": 384384244,
+  "download_stored_second_copy": false,
+  "trace_equal": [
+    "UI saved",
+    "API dispatch",
+    "worker design",
+    "execution snapshot",
+    "package",
+    "quant contrasts"
+  ],
+  "policy": {
+    "assignments": [
+      {
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_aea4869f398c5584",
+        "control_family": "arm_52367a6622b19f08",
+        "effect_kind": "baseline_change",
+        "issues": [],
+        "pairing": "unknown",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_label": "Control",
+        "reference_strategy": "shared_reference",
+        "reference_time": {
+          "minutes": 0.0,
+          "original": "0",
+          "unit": "min",
+          "value": 0.0
+        },
+        "reference_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit zero candidate for existing Control group",
+          "original_value": "0,1,5,15,30,60,180min ",
+          "source": "legacy_Control_and_time_points"
+        },
+        "source": "user_input",
+        "status": "resolved",
+        "target_condition_id": "condition_f541e2f63f702f17",
+        "target_label": "1min",
+        "target_time": {
+          "minutes": 1.0,
+          "original": "1min",
+          "unit": "min",
+          "value": 1.0
+        },
+        "target_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit unit label → minutes",
+          "original_value": "1min",
+          "source": "sample_config.condition"
+        }
+      },
+      {
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_4147ebd64e7ecf80",
+        "control_family": "arm_52367a6622b19f08",
+        "effect_kind": "baseline_change",
+        "issues": [],
+        "pairing": "unknown",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_label": "Control",
+        "reference_strategy": "shared_reference",
+        "reference_time": {
+          "minutes": 0.0,
+          "original": "0",
+          "unit": "min",
+          "value": 0.0
+        },
+        "reference_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit zero candidate for existing Control group",
+          "original_value": "0,1,5,15,30,60,180min ",
+          "source": "legacy_Control_and_time_points"
+        },
+        "source": "user_input",
+        "status": "resolved",
+        "target_condition_id": "condition_bd68c45f543c5a83",
+        "target_label": "5min",
+        "target_time": {
+          "minutes": 5.0,
+          "original": "5min",
+          "unit": "min",
+          "value": 5.0
+        },
+        "target_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit unit label → minutes",
+          "original_value": "5min",
+          "source": "sample_config.condition"
+        }
+      },
+      {
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_eb2f813f825c4ccb",
+        "control_family": "arm_52367a6622b19f08",
+        "effect_kind": "baseline_change",
+        "issues": [],
+        "pairing": "unknown",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_label": "Control",
+        "reference_strategy": "shared_reference",
+        "reference_time": {
+          "minutes": 0.0,
+          "original": "0",
+          "unit": "min",
+          "value": 0.0
+        },
+        "reference_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit zero candidate for existing Control group",
+          "original_value": "0,1,5,15,30,60,180min ",
+          "source": "legacy_Control_and_time_points"
+        },
+        "source": "user_input",
+        "status": "resolved",
+        "target_condition_id": "condition_d9c5c91ebf3d5bfc",
+        "target_label": "15min",
+        "target_time": {
+          "minutes": 15.0,
+          "original": "15min",
+          "unit": "min",
+          "value": 15.0
+        },
+        "target_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit unit label → minutes",
+          "original_value": "15min",
+          "source": "sample_config.condition"
+        }
+      },
+      {
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_c15817d77868a59a",
+        "control_family": "arm_52367a6622b19f08",
+        "effect_kind": "baseline_change",
+        "issues": [],
+        "pairing": "unknown",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_label": "Control",
+        "reference_strategy": "shared_reference",
+        "reference_time": {
+          "minutes": 0.0,
+          "original": "0",
+          "unit": "min",
+          "value": 0.0
+        },
+        "reference_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit zero candidate for existing Control group",
+          "original_value": "0,1,5,15,30,60,180min ",
+          "source": "legacy_Control_and_time_points"
+        },
+        "source": "user_input",
+        "status": "resolved",
+        "target_condition_id": "condition_c96e6ecd71344ff2",
+        "target_label": "30min",
+        "target_time": {
+          "minutes": 30.0,
+          "original": "30min",
+          "unit": "min",
+          "value": 30.0
+        },
+        "target_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit unit label → minutes",
+          "original_value": "30min",
+          "source": "sample_config.condition"
+        }
+      },
+      {
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_fd5240cdb335e779",
+        "control_family": "arm_52367a6622b19f08",
+        "effect_kind": "baseline_change",
+        "issues": [],
+        "pairing": "unknown",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_label": "Control",
+        "reference_strategy": "shared_reference",
+        "reference_time": {
+          "minutes": 0.0,
+          "original": "0",
+          "unit": "min",
+          "value": 0.0
+        },
+        "reference_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit zero candidate for existing Control group",
+          "original_value": "0,1,5,15,30,60,180min ",
+          "source": "legacy_Control_and_time_points"
+        },
+        "source": "user_input",
+        "status": "resolved",
+        "target_condition_id": "condition_824bfd9a5e97c3aa",
+        "target_label": "60min",
+        "target_time": {
+          "minutes": 60.0,
+          "original": "60min",
+          "unit": "min",
+          "value": 60.0
+        },
+        "target_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit unit label → minutes",
+          "original_value": "60min",
+          "source": "sample_config.condition"
+        }
+      },
+      {
+        "arm_id": "arm_8ac02a113972dcb9",
+        "contrast_id": "contrast_d6757f4b8563521f",
+        "control_family": "arm_52367a6622b19f08",
+        "effect_kind": "baseline_change",
+        "issues": [],
+        "pairing": "unknown",
+        "reference_condition_id": "condition_32d7e82082479b8c",
+        "reference_label": "Control",
+        "reference_strategy": "shared_reference",
+        "reference_time": {
+          "minutes": 0.0,
+          "original": "0",
+          "unit": "min",
+          "value": 0.0
+        },
+        "reference_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit zero candidate for existing Control group",
+          "original_value": "0,1,5,15,30,60,180min ",
+          "source": "legacy_Control_and_time_points"
+        },
+        "source": "user_input",
+        "status": "resolved",
+        "target_condition_id": "condition_a9adc1cf0158f4a6",
+        "target_label": "180min",
+        "target_time": {
+          "minutes": 180.0,
+          "original": "180min",
+          "unit": "min",
+          "value": 180.0
+        },
+        "target_time_source": {
+          "confirmation_status": "derived",
+          "conversion_rule": "explicit unit label → minutes",
+          "original_value": "180min",
+          "source": "sample_config.condition"
+        }
+      }
+    ],
+    "effective_policy": {
+      "reference_condition_id": "condition_32d7e82082479b8c",
+      "schema_version": "control_comparison.v1",
+      "source": "user_input",
+      "strategy": "shared_reference"
+    },
+    "english_label": "Shared control",
+    "label": "공통 Control 기준",
+    "readiness": {
+      "biological_pq": "not_implemented",
+      "contrast_quantification": "existing_estimator",
+      "design_assignment": "supported",
+      "legacy_multiple_controls": "unsupported",
+      "matched_temporal": "descriptive_effect_series_v2"
+    },
+    "requested_policy": {
+      "schema_version": "control_comparison.v1",
+      "source": "user_input",
+      "strategy": "shared_reference"
+    },
+    "schema_version": "control_comparison.v1",
+    "status": "resolved"
+  },
+  "temporal_series": 1,
+  "points_per_series": {
+    "series_8bcf2a244a036b564b4c": 6
+  },
+  "method_order": {
+    "policy": "canonical_minutes_within_method_scope",
+    "metadata_source": "design",
+    "sort_keys": [
+      "method_id",
+      "method_version",
+      "arm_id",
+      "reference_condition_id",
+      "pairing",
+      "time_min",
+      "contrast_id",
+      "candidate_id",
+      "score_name",
+      "method_result_id"
+    ],
+    "unresolved_time_contrasts": [],
+    "time_order_complete": true,
+    "status": "ordered"
+  },
+  "catalog_source_rows": {
+    "evidence/censoring_bounds.csv": 1722,
+    "evidence/coverage_funnel.csv": 9,
+    "evidence/emergence_evidence.csv": 19768,
+    "evidence/feature_evidence_ledger.csv": 16944,
+    "evidence/normalization_offsets.csv": 16944,
+    "evidence/parent_adjustment_impact.csv": 16944,
+    "evidence/technical_dispersion.csv": 59304,
+    "evidence/technical_injection_omissions.csv": 101664,
+    "kinase/candidate_sensitivity.csv": 59702,
+    "kinase/kea3_results.csv": 0,
+    "kinase/kinase_candidate_edges.csv": 170563,
+    "kinase/kinase_candidate_summary.csv": 639,
+    "kinase/kinase_protein_context.csv": 3906,
+    "kinase/kinase_self_site_context.csv": 576,
+    "kinase/kinase_technical_omissions.csv": 11664,
+    "kinase/kinase_temporal_profiles.csv": 53676,
+    "kinase/method_executions.csv": 6,
+    "kinase/method_membership.csv": 642360,
+    "kinase/method_scores.csv": 1859,
+    "kinase/substrate_contributions.csv": 21237,
+    "quant/annotation_edges.csv": 0,
+    "quant/comparisons.csv": 16944,
+    "quant/detection.csv": 16944,
+    "quant/emergent_kinase_evidence.csv": 0,
+    "quant/form_evidence_status.csv": 16944,
+    "quant/kinase_injection_omissions.csv": 0,
+    "quant/kinase_membership.csv": 0,
+    "quant/kinase_profiles.csv": 0,
+    "quant/kinase_sensitivity.csv": 0,
+    "quant/primary_A_input.csv": 13704,
+    "quant/protein_contrasts.csv": 57150,
+    "quant/runlevel.csv": 59304,
+    "quant/site_mapping.csv": 11614,
+    "quant/strict_parent_complete.csv": 13704,
+    "quant/strict_parent_paired.csv": 13704,
+    "quant/strict_parent_peptide_masks.csv": 445712,
+    "quant/strict_selected_sequences.csv": 111311,
+    "quant/strict_unmodified_proteins.csv": 54456,
+    "quant/strict_unmodified_sequences.csv": 667866,
+    "quant/summary.csv": 2824,
+    "quant/temporal_protein_summary.csv": 18601,
+    "quant/validation_panel.csv": 0,
+    "reader/cards.csv": 14658,
+    "reader/coverage.csv": 16944,
+    "reader/findings.csv": 15,
+    "reader/full_module_membership.csv": 2159,
+    "reader/full_question_links.csv": 161342,
+    "reader/full_temporal_links.csv": 354221,
+    "reader/full_temporal_subjects.csv": 61833,
+    "reader/literature_comparisons.csv": 0,
+    "reader/literature_review_subjects.csv": 158593,
+    "reader/literature_search.csv": 15,
+    "reader/literature_sources.csv": 0,
+    "reader/packet.csv": 1,
+    "reader_adapter/form_contrasts.csv": 16944,
+    "reader_adapter/form_identity.csv": 2824,
+    "reader_adapter/precursor_membership.csv": 3035,
+    "reader_adapter/study_metadata.csv": 1,
+    "references/source_query_ledger.csv": 9569,
+    "science/calibrated_calls.csv": 0,
+    "science/calibration_provenance.csv": 1,
+    "science/evidence_dependency_groups.csv": 20785,
+    "science/group_excluded_anchors.csv": 38697,
+    "science/inference_results.csv": 11502,
+    "science/kinase_calls.csv": 11502,
+    "science/localization_by_contrast.csv": 69684,
+    "science/measurement_observations.csv": 0,
+    "science/observation_sites.csv": 0,
+    "science/perturbation_validation.csv": 0,
+    "science/reference_inventory.csv": 54495,
+    "science/replicate_uncertainty.csv": 16944,
+    "science/site_identity_audit.csv": 11614,
+    "science/site_report_observations.csv": 0,
+    "science/specificity_scores.csv": 123018,
+    "study/input_field_manifest.csv": 953,
+    "temporal/cross_layer_links.csv": 3342,
+    "temporal/effect_interval_contrasts.csv": 0,
+    "temporal/effect_series_points.csv": 6,
+    "temporal/group_excluded_cowave.csv": 6504,
+    "temporal/interval_contrasts.csv": 16944,
+    "temporal/kinase_fixed_membership.csv": 53676,
+    "temporal/kinase_temporal_features.csv": 8946,
+    "temporal/protein_temporal_features.csv": 18601,
+    "temporal/ptm_temporal_features.csv": 11296,
+    "temporal/target_excluded_anchors.csv": 3252,
+    "temporal/temporal_series.csv": 1
+  },
+  "unselected_catalog_rows": 14643,
+  "no_call_catalog_rows": 11502,
+  "biological_pq": "not_computed",
+  "actual_time_matched_data": "unavailable",
+  "production": "not_verified",
+  "figures": [
+    {
+      "figure": "kinase_footprints",
+      "label": [
+        "공통 Control 기준"
+      ],
+      "point_rows": 42,
+      "scope_and_numeric_time_order": true
+    },
+    {
+      "figure": "protein_trajectories",
+      "label": [
+        "공통 Control 기준"
+      ],
+      "point_rows": 72,
+      "scope_and_numeric_time_order": true
+    }
+  ]
+}
