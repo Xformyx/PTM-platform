@@ -16,8 +16,9 @@ from .astra_card_inputs import clean, encode, ids
 from .astra_inputs import stable_id
 from .astra_reader_temporal import source_row, SOURCE_TABLES
 from .generic_workflow import json_write, object_hash
+from .effect_series import resolve_series
 
-VERSION = 'astra_evidence_access.v1'
+VERSION = 'astra_evidence_access.v2'
 CATALOG = 'reader/evidence_catalog.json'
 INDEX = 'reader/evidence_index.csv'
 LINKS = 'reader/evidence_links.csv'
@@ -32,7 +33,11 @@ REQUIRED = {
     'evidence/emergence_evidence.csv': 'emergence',
     'kinase/method_scores.csv': 'method_result', 'science/inference_results.csv': 'inference',
 }
-SCOPE = ['arm_id', 'reference_condition_id', 'pairing', 'series_id', 'method_id', 'method_version', 'track', 'call_scope']
+POINT_SCOPE = ['effect_series_id', 'arm_id', 'reference_condition_id', 'pairing',
+               'reference_strategy', 'effect_kind', 'control_family']
+SCOPE = ['arm_id', 'reference_condition_id', 'pairing', 'series_id', 'method_id', 'method_version', 'track', 'call_scope',
+         'effect_series_id', 'reference_strategy', 'effect_kind', 'control_family']
+SORT = ['effect_sort_group', 'time_min', 'contrast_id', 'source_table', 'source_key_json', 'evidence_id']
 IDS = ['form_id', 'card_id', 'candidate_id', 'contrast_id', 'condition_id', 'consumer_state_id',
        'measurement_group_id', 'site_id', 'entity_id', 'proposed_entity_id']
 STATES = ['status', 'included', 'card_status', 'consumer_state_status', 'card_input_eligible',
@@ -43,7 +48,8 @@ RESTRICTIONS = ['restriction_reasons', 'exclusion_reasons', 'no_call_reasons', '
                 'adapter_restrictions', 'interpretation_limits']
 COLUMNS = ['evidence_id', 'evidence_type', 'source_table', 'source_key_json', *IDS,
            'scope_json', 'status_json', 'restrictions_json', 'entity_tokens_json', 'taxa_json',
-           'display_label', 'time_min', 'reference_time_min', 'selected_for_summary', 'review_status']
+           'display_label', 'time_min', 'reference_time_min', 'selected_for_summary', 'review_status',
+           'effect_memberships_json', 'effect_scope_status', 'effect_sort_group']
 LINK_COLUMNS = ['link_id', 'relation_type', 'from_table', 'from_key_json', 'to_table', 'to_key_json', 'status', 'reason']
 
 
@@ -140,6 +146,13 @@ def build_evidence_index(root, dictionary):
     label, summary rank, or numeric measurement contributes to an evidence ID.
     """
     sources = _source_catalog(root, dictionary)
+    design_path = safe_path(root, 'study/study_design.json')
+    design = json.loads(design_path.read_text()) if design_path.exists() else None
+    temporal = design is not None and design.get('study', {}).get('design_axis') != 'cross_sectional'
+    series = resolve_series(design)[0] if temporal else {}
+    # Keep legacy series_id untouched. effect_series_id is a versioned, separate
+    # projection of the execution snapshot; cards retain every bound point.
+    point_map = {p['contrast_id']: {**p, 'effect_series_id': p['series_id']} for s in series.values() for p in s['points']}
     frames = {name: read_source(root, name, sources[name]) for name in REQUIRED}
     identity_name = 'reader_adapter/form_identity.csv'
     if identity_name not in sources: raise ValueError('Missing form identity source')
@@ -191,6 +204,24 @@ def build_evidence_index(root, dictionary):
                 for k in SCOPE:
                     values = {encode(b.get(k)) for b in bindings}
                     if len(values) == 1 and scope[k] is None: scope[k] = bindings[0].get(k)
+            bound_ids = sorted({b.get('contrast_id') for b in details.get('source_bindings', []) if b.get('contrast_id')}) if name == 'reader/cards.csv' else ([cid] if cid else [])
+            memberships = [point_map[c] for c in bound_ids if c in point_map]
+            scope_status = ('legacy_design_unavailable' if design is None else
+                            'not_temporal' if not temporal else
+                            'unresolved_contrast_binding' if not memberships or len(memberships) != len(bound_ids) else
+                            'multiple_canonical_scopes' if len({p['effect_series_id'] for p in memberships}) > 1 else 'resolved')
+            if memberships:
+                for k in POINT_SCOPE:
+                    values = {encode(p.get(k)) for p in memberships}
+                    scope[k] = memberships[0].get(k) if len(values) == 1 and len(memberships) == len(bound_ids) else None
+            else:
+                scope['effect_series_id'] = None
+            point = memberships[0] if len(memberships) == 1 else {}
+            # Entity and method identity are grouping keys; per-point reference,
+            # pairing and source IDs must never precede target numeric time.
+            group = [REQUIRED[name], fid or r.get('candidate_id') or r.get('proposed_entity_id') or r.get('protein_group'),
+                     *[scope.get(k) for k in ['method_id', 'method_version', 'track', 'call_scope']], r.get('score_name'),
+                     sorted({p['effect_series_id'] for p in memberships}) if memberships else scope]
             candidate = candidates.get(r.get('candidate_id') or r.get('proposed_entity_id'), {})
             tokens = _tokens(identity.get('gene'), identity.get('protein_group'), r.get('gene'), r.get('Genes'),
                 r.get('protein_group'), r.get('Protein.Group'), candidate.get('tokens', []))
@@ -205,8 +236,10 @@ def build_evidence_index(root, dictionary):
                 'status_json': encode(state), 'restrictions_json': encode({k: r[k] for k in RESTRICTIONS if k in r}),
                 'entity_tokens_json': encode(tokens), 'taxa_json': encode(taxa),
                 'display_label': identity.get('display_label') or r.get('feature_label') or ';'.join(tokens) or eid,
-                'time_min': r.get('time_min', metadata.get('time_min')),
-                'reference_time_min': r.get('reference_time_min', metadata.get('reference_time_min')),
+                'time_min': point.get('time_min') if memberships else r.get('time_min', metadata.get('time_min')),
+                'reference_time_min': point.get('reference_time_min') if memberships else r.get('reference_time_min', metadata.get('reference_time_min')),
+                'effect_memberships_json': encode(memberships), 'effect_scope_status': scope_status,
+                'effect_sort_group': encode(group),
                 'selected_for_summary': selected, 'review_status': 'not_recorded'})
             if fid and name != 'quant/summary.csv':
                 link(name, key, 'quant/summary.csv', {'form_id': fid}, 'form_representation')
@@ -240,7 +273,7 @@ def build_evidence_index(root, dictionary):
     index = pd.DataFrame(index, columns=COLUMNS)
     if index.evidence_id.duplicated().any(): raise ValueError('Duplicate typed evidence ID')
     # Scope first, then numeric time, then stable identity. NA sorts last, never at zero.
-    index = index.sort_values(['scope_json', 'reference_time_min', 'time_min', 'evidence_id'], na_position='last', kind='stable').reset_index(drop=True)
+    index = index.sort_values(SORT, na_position='last', kind='stable').reset_index(drop=True)
     links = pd.DataFrame([links[k] for k in sorted(links)], columns=LINK_COLUMNS)
     # Check actual endpoint key sets, including catalog-only sources and normal N:M links.
     for side in ['from', 'to']:
@@ -250,11 +283,14 @@ def build_evidence_index(root, dictionary):
                      for values in chunk[keys].itertuples(index=False, name=None)}
             if not set(group[side + '_key_json']) <= known: raise ValueError('Broken evidence link FK: ' + name)
     catalog = {'schema_version': VERSION, 'catalog_available': True, 'sources': sources,
+        'effect_scope': {'source': 'study/study_design.json', 'sha256': digest(design_path) if design is not None else None,
+                         'series_id_contract': 'source series_id preserved; effect_series_id from canonical resolve_series',
+                         'membership_contract': 'all actual contrast bindings; scalar null when non-unique'},
         'optional_sources': {name+'.csv': {'availability': 'not_available', 'reason': 'not_generated_in_source_package'}
                              for name in SOURCE_TABLES if name+'.csv' not in sources},
         'indexed_rows': len(index), 'links': len(links), 'review_status': 'not_recorded',
         'counts_are_representations_not_independent_observations': True,
-        'query': {'default_exclusions': [], 'sort': ['scope_json', 'reference_time_min', 'time_min', 'evidence_id'],
+        'query': {'default_exclusions': [], 'sort': SORT,
                   'filters': ['entity', 'evidence_type', 'source_table', 'status', *IDS, *SCOPE, 'taxon', 'selected_for_summary']}}
     return index, catalog, links
 
@@ -279,6 +315,13 @@ def write_evidence_access(directory, *, source_root=None):
 
 
 GUIDANCE = '''# 전체 근거 접근 (M1)
+
+v2: effect_series_id는 실행 study_design의 canonical series입니다. 기존 series_id는 원본 의미를 유지합니다.
+effect_memberships_json은 카드의 모든 실제 contrast 연결을 보존합니다. 서로 다른 연결의 필터를 섞어 맞추지 않습니다.
+동일 entity/method/version/track/effect series 안에서는 숫자 target time, contrast ID, source key 순입니다.
+시점별 reference/pairing은 그룹을 쪼개지 않습니다. 시간 미기록은 null이며 알려진 시간 뒤에 옵니다.
+구 snapshot이 없으면 legacy_design_unavailable로 표시하며 label에서 시간을 추정하지 않습니다.
+새 index는 새 catalog/cursor 계약입니다. 과거 catalog와 citation을 소급 변경하지 않습니다.
 
 선정 findings와 authoring packet의 reader_cards는 요약 preview입니다. 전체 분석 범위가 아닙니다.
 [catalog](evidence_catalog.json) · [전체 인덱스](evidence_index.csv) · [기존 관계](evidence_links.csv).
@@ -315,6 +358,8 @@ class EvidenceCatalog:
             raise ValueError('Catalog hash mismatch')
         for name, meta in self.catalog['artifacts'].items(): self._verify(name, meta)
         for name, meta in self.catalog['sources'].items(): self._verify(name, meta)
+        snapshot = self.catalog.get('effect_scope', {})
+        if snapshot.get('sha256'): self._verify(snapshot['source'], snapshot)
         self.index = read_source(self.root, INDEX, self.catalog['artifacts'][INDEX])
         self.links = read_source(self.root, LINKS, self.catalog['artifacts'][LINKS])
         if self.index.evidence_id.duplicated().any(): raise ValueError('Duplicate evidence ID')
@@ -350,7 +395,15 @@ class EvidenceCatalog:
                 if not isinstance(offset, int) or offset < 0: raise ValueError('Invalid cursor offset')
             except (KeyError, TypeError, json.JSONDecodeError) as exc: raise ValueError('Invalid cursor') from exc
         f = self.index
+        point_filters = {k: v if isinstance(v, list) else [v] for k, v in filters.items() if k in POINT_SCOPE}
+        if point_filters and 'effect_memberships_json' in f:
+            def matches(row):
+                members = json.loads(row.effect_memberships_json)
+                scopes = members or [json.loads(row.scope_json)]
+                return any(all(p.get(k) in v for k, v in point_filters.items()) for p in scopes)
+            f = f.loc[f.apply(matches, axis=1)]
         for key, value in filters.items():
+            if key in point_filters and 'effect_memberships_json' in f: continue
             values = value if isinstance(value, list) else [value]
             if key == 'entity':
                 wanted = {str(v).casefold() for v in values}
