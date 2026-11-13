@@ -12,9 +12,11 @@ import pandas as pd
 
 from .study_design import stable_id, require_resolved
 from .report_compatible_quantification import map_form, tokens, positive_matrix, mean_or_nan, assigned_positions
+from .effect_series import resolve_series
 
 VERSION='material_then_unit_balanced_mean_log.v3'
 STRICT_VERSION='unit_balanced_same_injection_peptide_ratios.v3'
+DETECTION_VERSION='target_arm_post_reference.v2'
 PTM_CODES={'phosphorylation':21,'phospho':21,'ubiquitylation':121,'ubiquitination':121,'ubi':121,'acetylation':1,'proteomics':-1}
 IDENTITY_COLUMNS=['form_id','Protein.Group','Protein.Ids','Genes','Stripped.Sequence','Modified.Sequence',
     'n_modifications','mapping_status','mapping_json','mapped_genes','annotation_gene_discordant',
@@ -30,7 +32,10 @@ COMPARISON_COLUMNS=KEY_COLUMNS+['form_id','A','U_joint','P_joint','U_all','P_all
 DETECTION_COLUMNS=KEY_COLUMNS+['form_id','baseline_status','reference_detected_n','detected_n','scheduled_n',
     'parent_observed_n','joint_observed_n','first_repeated_condition_id','first_repeated_time_min',
     'post_reference_condition_id','post_reference_time_min','post_reference_U','raw_candidate_A','eligible_A',
-    'primary_mapping_eligible','primary_adjustment_eligible','inference_use_allowed','use_restriction','baseline_FC_created']
+    'primary_mapping_eligible','primary_adjustment_eligible','inference_use_allowed','use_restriction','baseline_FC_created',
+    'detection_version','effect_series_id','reference_strategy','primary_effect_kind','post_reference_quantity',
+    'post_reference_status','post_reference_reason','post_reference_pairing','detection_count_unit',
+    'post_reference_source_quantity','post_reference_mask','reference_detection_scope']
 RUN_COLUMNS=['form_id','injection_id','input_column','condition_id','arm_id','time_min','material_id','biological_unit_id','pair_id',
              'ptm_intensity','parent_intensity','ptm_log2','parent_log2','adjusted_log2_ratio','U_observed','P_observed','joint_observed']
 PROTEIN_COLUMNS=KEY_COLUMNS+['protein_group','gene','log2_change','reference_observed_n','target_observed_n',
@@ -201,21 +206,39 @@ def detection_by_arm(analysis,design):
     if design.get('study',{}).get('design_axis')=='cross_sectional':
         return pd.DataFrame(columns=DETECTION_COLUMNS)
     est=analysis['estimator'];u=analysis['arrays']['U'];p=analysis['arrays']['P'];a=analysis['arrays']['A'];records=[]
+    series,lookup=resolve_series(design)
     for c in design['contrasts']:
         meta=est.metadata(c);arm=meta['arm_id'];ref=c['reference_condition_id'];target=c['target_condition_id']
-        # A trajectory is defined by arm AND reference; shared references are not copied into runlevel.
-        trajectory={x['target_condition_id'] for x in design['contrasts'] if x['reference_condition_id']==ref and est.conditions[x['target_condition_id']]['arm_id']==arm}
-        ordered=sorted(trajectory,key=lambda cid:(est.conditions[cid]['time']['minutes'],cid))
+        matched=c.get('reference_strategy')=='time_matched';scope=series[lookup[c['contrast_id']]]
+        trajectory=({x['target_condition_id'] for x in scope['points']} if matched else
+                    {x['target_condition_id'] for x in design['contrasts'] if x['reference_condition_id']==ref and est.conditions[x['target_condition_id']]['arm_id']==arm})
+        ordered=sorted((cid for cid in trajectory if est.conditions[cid].get('time',{}).get('minutes') is not None),key=lambda cid:(est.conditions[cid]['time']['minutes'],cid))
+        supported=True
+        if matched:
+            # Control-target pairs are not longitudinal target-target pairs.
+            # Only the existing explicit independent-unit declaration plus fully
+            # mapped, disjoint target units supports this bounded descriptive path.
+            supported=design.get('replication_declaration')=='independent_biological_units' and scope['pairing']=='unpaired'
+            seen=set()
+            for cid in ordered:
+                units={est.materials.get(est.samples[i].get('material_id'),{}).get('biological_unit_id') for i in est.indices[cid]}
+                supported=supported and bool(units) and None not in units and not bool(seen & units)
+                seen.update(units)
         for fi,form in enumerate(analysis['summary'].to_dict('records')):
             first=next((cid for cid in ordered if np.isfinite(u[fi,est.indices[cid]]).sum()>=2),None)
             first_joint=next((cid for cid in ordered if np.isfinite(a[fi,est.indices[cid]]).sum()>=2),None)
             target_time=est.conditions[target]['time']['minutes']
             def post(values,reference):
-                if reference is None or target_time<est.conditions[reference]['time']['minutes']:return np.nan
-                return float(est.contrast(values[fi],{**c,'reference_condition_id':reference})['value'][0])
+                if not supported or reference is None or target_time is None or target_time<est.conditions[reference]['time']['minutes']:return np.nan
+                comparison={**c,'reference_condition_id':reference}
+                if matched:comparison['pairing']='unpaired'
+                return float(est.contrast(values[fi],comparison)['value'][0])
             post_u=post(u,first);post_a=post(a,first_joint)
             rn=int(np.isfinite(u[fi,est.indices[ref]]).sum());tn=int(np.isfinite(u[fi,est.indices[target]]).sum())
             eligible=form['primary_adjustment_eligible'] and np.isfinite(post_a)
+            status='ambiguous_unit_relationship' if not supported else 'available' if eligible else 'insufficient_observation'
+            reason=('cross_time_independent_units_not_declared_or_mapping_ambiguous' if not supported else
+                    None if eligible else 'parent_or_post_reference_unavailable')
             records.append({**meta,'form_id':form['form_id'],'baseline_status':'undetected' if rn==0 else 'observed',
                 'reference_detected_n':rn,'detected_n':tn,'scheduled_n':len(est.indices[target]),
                 'parent_observed_n':int(np.isfinite(p[fi,est.indices[target]]).sum()),'joint_observed_n':int(np.isfinite(a[fi,est.indices[target]]).sum()),
@@ -223,8 +246,15 @@ def detection_by_arm(analysis,design):
                 'post_reference_condition_id':first_joint,'post_reference_time_min':est.conditions[first_joint]['time']['minutes'] if first_joint else None,
                 'post_reference_U':post_u,'raw_candidate_A':post_a,'eligible_A':post_a if eligible else np.nan,
                 'primary_mapping_eligible':form['primary_mapping_eligible'],'primary_adjustment_eligible':form['primary_adjustment_eligible'],
-                'inference_use_allowed':bool(eligible),'use_restriction':'post_reference_only_never_pool_different_references' if eligible else 'parent_or_post_reference_unavailable',
-                'baseline_FC_created':False})
+                'inference_use_allowed':bool(eligible),'use_restriction':'post_reference_only_never_pool_different_references' if eligible else reason,
+                'baseline_FC_created':False,'detection_version':DETECTION_VERSION,'effect_series_id':scope['series_id'],
+                'reference_strategy':c.get('reference_strategy','explicit_custom'),'primary_effect_kind':scope['effect_kind'],
+                'post_reference_quantity':'target_arm_post_reference_change','post_reference_status':status,
+                'post_reference_reason':reason,'post_reference_pairing':('unpaired' if supported else None) if matched else c.get('pairing'),
+                'detection_count_unit':'finite_injection_observation',
+                'post_reference_source_quantity':'U=ptm_log2; A=adjusted_log2_ratio; material_then_unit_balanced_mean',
+                'post_reference_mask':'U: own PTM mask; A: same-injection PTM/parent joint mask',
+                'reference_detection_scope':'actual_declared_reference; baseline_status_is_legacy_name_not_time_zero'})
     return pd.DataFrame(records,columns=DETECTION_COLUMNS)
 
 

@@ -44,7 +44,7 @@ TABLE_MEANINGS={
     'comparisons':'All form contrasts. A is usable for adjusted evidence only when included=true; raw values of ineligible forms are calculation traces.',
     'primary_A_input':'Only eligible adjusted form contrasts; the primary quantitative input for interpretation.',
     'runlevel':'Each raw injection once, including shared controls. Positive intensity/log values and original/joint masks; join contrast injection sets through study_design.json.',
-    'detection':'Reference detection and arm-specific emergence. eligible_A uses the recorded post-reference, never an invented baseline fold change.',
+    'detection':'Actual-reference detection counts finite injection observations (not biological n). eligible_A is target-arm post-reference change, distinct from matched treatment effect. Unsupported cross-time unit relations remain null with a reason; baseline_status is a legacy name, not evidence of time zero.',
     'protein_contrasts':'All PG rows with unit-balanced relative protein abundance changes; this is not a kinase substrate footprint.',
     'strict_unmodified_proteins':'Median of at least two eligible unmodified sequence contrasts for each protein group.',
     'strict_unmodified_sequences':'Individual strict sequence changes after technical/material/unit aggregation.',
