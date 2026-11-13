@@ -395,6 +395,8 @@ def apply(tables, pin, snapshot, literature):
         q['missing_evidence']=[x for x in q.get('missing_evidence',[]) if not x.startswith(('No literature comparison','Literature source/condition comparability'))] + ['Literature source/condition comparability and semantic interpretation require review; independent perturbation validation not performed.']
         q['literature_evidence']={'finding_ids':q['finding_ids'],'search_statuses':{r['finding_id']:r['status'] for r in matching},
             'answer_scope':'Only source-bound external context; agreement/disagreement proposals require semantic review. No independent validation.'}
+    from .astra_execution_status import attach_current_status
+    attach_current_status(packet)
     tables['reader/packet'].loc[:,'packet_json']=json.dumps(packet,ensure_ascii=False,sort_keys=True)
     validate(tables)
     return summary
@@ -516,4 +518,6 @@ def write(directory,tables, *, pins=True):
     lines.append('아래는 pin documents다. 검색 구간의 DOI·PMID·위치는 앞의 출처 절과 literature_sources.csv를 본다. 이 목록의 빈 DOI는 검색 구간에 출처가 없다는 뜻이 아니다.')
     lines.append(json.dumps(data['pin']['documents'],ensure_ascii=False,indent=2))
     (p/'reader/LITERATURE.md').write_text('\n\n'.join(lines)+'\n',encoding='utf-8')
+    from .astra_execution_status import write_status_views
+    write_status_views(p,packet)
     return ARTIFACTS

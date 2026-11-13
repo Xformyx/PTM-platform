@@ -154,6 +154,11 @@ def test_v6_package_calls_existing_transport_and_revision_replays_without_scienc
         run=engine.run('round08-synthetic',config,tmp_path/'out')
     assert spy.call_count==1 and rag.calls
     root=tmp_path/'out/enrichment_free_runs'/run['run_id'];validate_package(root)
+    display=json.loads((root/'reader/EXECUTION_STATUS.json').read_text())
+    assert display==json.loads((root/'reader/authoring_packet.json').read_text())['current_execution']
+    assert display==json.loads((root/'evidence/readiness.json').read_text())['current_execution']
+    for guide in ['READ_ME.md','FULL_EVIDENCE.md','LITERATURE.md']:
+        assert 'current-execution-start' in (root/'reader'/guide).read_text()
     initial=pd.read_csv(root/'reader/findings.csv')
     assert run['analysis_readiness']['literature']['anchored_proposals']>0
     # Resource-only v6 execution may explicitly reuse an integrity-checked pin;
@@ -186,7 +191,8 @@ def test_v6_package_calls_existing_transport_and_revision_replays_without_scienc
     process=subprocess.run([sys.executable,'-I','-c',PROGRAM,str(target),str(tmp_path/'offline')],cwd='/tmp',env=env,capture_output=True,text=True)
     assert process.returncode==0,process.stdout+process.stderr
     result=json.loads((tmp_path/'offline/READER_REPLAY_VALIDATION.json').read_text())
-    assert result['passed'] and result['network_requests']==0 and len(result['files'])==31
+    assert result['passed'] and result['network_requests']==0 and len(result['files'])==33
+    assert {'reader/FIELD_SEMANTICS.md','reader/EXECUTION_STATUS.json'} <= {r['file'] for r in result['files']}
     from ptm_shared.astra_literature_review import ARTIFACTS
     assert set(ARTIFACTS) <= {r['file'] for r in result['files']}
     # Failed validation cannot publish a new current pointer.

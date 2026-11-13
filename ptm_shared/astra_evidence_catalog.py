@@ -82,11 +82,13 @@ def attach_access(tables):
     packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
     packet['evidence_access'] = access_contract()
     if packet.get('whole_evidence'):
-        packet['evidence_access']['limits'] = 'Whole question/module/temporal access is available. Literature review execution remains the frozen original scope (M3/M4 deferred).'
+        packet['evidence_access']['limits'] = 'Whole question/module/temporal access is separate from recorded literature execution.'
     packet['authoring_rules']['whole_evidence_access'] = (
         'reader_cards and selected_findings are a summary preview. Query the evidence catalog for '
         'unselected, withheld and no-call evidence; resolve exact source keys before citing values. '
         'Index availability is not evidence of reading, literature comparison or biological review.')
+    from .astra_execution_status import attach_current_status
+    attach_current_status(packet)
     tables['reader/packet'].loc[tables['reader/packet'].index[0], 'packet_json'] = json.dumps(packet, ensure_ascii=False, sort_keys=True)
 
 

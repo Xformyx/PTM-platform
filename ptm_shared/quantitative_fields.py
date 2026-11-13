@@ -183,7 +183,13 @@ def field_semantics(table, column, *, row=None, dtype=None):
     elif column=='activity_magnitude' and table=='kinase/kinase_temporal_profiles':
         known('Descriptive gene-balanced substrate footprint on the recorded track; not native activity or a confirmed kinase call.',
               'log2_ratio','log2','substrate_gene','descriptive_footprint')
-    elif column.endswith('_min'):
+    elif column=='rate_log2_per_min' and table.startswith('temporal/'):
+        known('Recorded adjacent observed effect change divided by elapsed canonical minutes; gaps remain unavailable.',
+              'log2_ratio_per_minute','log2_per_time','recorded_material_unit_or_pair','relative_effect_rate')
+    elif column in {'time_min','reference_time_min','first_repeated_time_min','post_reference_time_min','from_min','to_min','dt_min',
+                    'observed_peak_time_min','onset_lower_min','onset_upper_min','recovery_lower_min','recovery_upper_min',
+                    'observed_duration_min','auc_supported_duration_min','possible_lag_lower_min','possible_lag_upper_min',
+                    'source_peak_min','target_peak_min','source_onset_lower_min','source_onset_upper_min','target_onset_lower_min','target_onset_upper_min'}:
         known('Recorded canonical numeric time in minutes; unknown is null, never time zero.', 'minute','linear',restriction_class='time')
     elif column.endswith('_biological_n'):
         known('Recorded biological units with usable values; never the injection count.', 'count','integer','biological_unit','biological_count',range={'min':0})

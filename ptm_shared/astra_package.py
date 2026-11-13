@@ -31,7 +31,7 @@ from .annotation_registry import digest
 from .generic_kinase import fasta_taxonomy
 
 VERSION='astra_analysis_package.v4'
-READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py','astra_literature_review.py','quantitative_fields.py']
+READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py','astra_literature_review.py','quantitative_fields.py','astra_execution_status.py']
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
     'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','study_input_metadata.py','study_display.py','study_display.json','control_comparison.py','effect_series.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py','quantitative_fields.py']))
@@ -551,6 +551,7 @@ def start_here(snapshot,counts,readiness):
         f"Use the complete {DISPLAY['biological_question']['label']} (compatibility key: biological_question), separate report_options.research_questions, special conditions and selected literature. Do not ask again for information already supplied. Expectations are not measurements.",
         'Primary quantitative evidence: quant/primary_A_input.csv. Check actual masks and rows when a summary conflicts; record the conflict.',
         ('Whole evidence access: [catalog and query guide](reader/EVIDENCE_ACCESS.md). Selected findings are a summary preview. Unselected, withheld and no-call rows remain accessible; availability is not evidence of review. [Typed literature review plan](reader/LITERATURE_REVIEW_PLAN.md) is separate from actual search and comparison.' if readiness.get('reader') else ''),
+        ('Current literature execution: [scope and independent stages](reader/EXECUTION_STATUS.json). '+json.dumps(readiness['current_execution'],ensure_ascii=False,sort_keys=True) if readiness.get('current_execution') else ''),
         json.dumps(counts,ensure_ascii=False),'Profile rows are candidate × contrast × track, not discovered or activated kinase counts.',
         'Kinase protein abundance, observed kinase regulatory sites and substrate footprints are separate evidence. Curated native, orthology, motif, KEA/network and literature hypotheses must remain distinct.',
         'Reference-undetected evidence describes detection in each actual reference; it is baseline-undetected only for a recorded zero-time reference. Never invent a baseline FC. Time-matched effects form declared effect series with real point references, not a common-baseline curve.',
@@ -803,6 +804,10 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                 write_reader(directory,scientific,review_execution=subject_pin)
                 for name,value in [('study/analysis_plan',plan),('provenance',provenance),('evidence/readiness',readiness)]:
                     json_write(directory/(name+'.json'),value)
+        if 'reader/packet' in scientific:
+            from .astra_execution_status import project_current_status
+            readiness['current_execution']=project_current_status(json.loads(scientific['reader/packet'].iloc[0].packet_json))
+            json_write(directory/'evidence/readiness.json',readiness)
         report=start_here(snapshot,counts,readiness);
         if readiness.get('literature_subject_review'):
             report+='\n\n[Explicit whole-evidence literature execution](reader/LITERATURE_SUBJECT_REVIEW.md): requested scope '+readiness['literature_subject_review']['requested_scope_status']+'; whole scope '+readiness['literature_subject_review']['whole_scope_status']+'. Frozen original model provenance; source anchors are not semantic approval.\n'

@@ -46,7 +46,7 @@ def attach_full(tables):
         q['whole_evidence'] = {'links':PREFIX+'question_links.csv','filter':{'question_id':q['question_id']},
             'observation_evidence_ids':sorted(matches), 'unmatched_observation_count':len(known-matches),
             'scope':'existing all-observation matching plus exact saved context links; not automatic review',
-            'temporal_links':PREFIX+'temporal_links.csv', 'literature_scope':'frozen existing comparisons only; new review subjects deferred'}
+            'temporal_links':PREFIX+'temporal_links.csv', 'literature_scope':'see current_execution; selected and typed scopes are separate'}
     changed = tables['reader/cards'].copy()
     by_card = {}
     for i,c in enumerate(cards):
@@ -59,7 +59,7 @@ def attach_full(tables):
         'question_links':PREFIX+'question_links.csv','temporal_links':PREFIX+'temporal_links.csv',
         'temporal_subjects':PREFIX+'temporal_subjects.csv','module_membership':PREFIX+'module_membership.csv',
         'summary':PREFIX+'evidence_summary.json','preview_scope':'reader_cards and findings only',
-        'review_status':'not_recorded','literature_execution_scope':'unchanged; M3/M4 not performed'}
+        'review_status':'not_recorded','literature_execution_scope':'M2 source-link projection does not itself execute literature review'}
     rules=packet['authoring_rules']
     rules['required_evidence_anchor']=('Use a typed citation with run_id, catalog_id, evidence_id, source_table and exact source_key. '
         'Validate using ptm_shared.astra_reader_full. Unselected and withheld evidence is citable within its recorded restrictions. '
@@ -70,7 +70,9 @@ def attach_full(tables):
         'resolve necessary original rows including unselected/withheld','summary findings','saved temporal/method/literature evidence']
     rules['reading_order']=reading_order()
     if 'evidence_access' in packet:
-        packet['evidence_access']['limits']='Whole question/module/temporal access is available. Literature review execution remains the frozen original scope (M3/M4 deferred).'
+        packet['evidence_access']['limits']='Whole access is separate from recorded literature execution.'
+    from .astra_execution_status import attach_current_status
+    attach_current_status(packet)
     tables['reader/packet'].loc[tables['reader/packet'].index[0],'packet_json']=json.dumps(packet,ensure_ascii=False,sort_keys=True)
 
 
@@ -266,6 +268,8 @@ def write_full(directory,tables,*,source_root=None):
     directory=Path(directory);root=Path(source_root or directory)
     catalog=json.loads((directory/CATALOG).read_text())
     outputs,summary=project_full(tables,catalog)
+    from .astra_execution_status import project_current_status
+    summary['current_execution']=project_current_status(json.loads(tables['reader/packet'].iloc[0].packet_json))
     # Check all exact endpoints against registered source keys in one pass per source.
     needed=defaultdict(set)
     for f in outputs.values():
@@ -289,7 +293,7 @@ def write_full(directory,tables,*,source_root=None):
     json_write(directory/(PREFIX+'evidence_summary.json'),summary)
     (directory/'reader/FULL_EVIDENCE.md').write_text(GUIDE,encoding='utf-8')
     guide=directory/'reader/EVIDENCE_ACCESS.md'
-    guide.write_text(guide.read_text()+'\nM2 full question/module/temporal access: [instructions and typed citations](FULL_EVIDENCE.md). Only new literature review remains deferred to M3/M4.\n',encoding='utf-8')
+    guide.write_text(guide.read_text()+'\nM2 full question/module/temporal access: [instructions and typed citations](FULL_EVIDENCE.md). Actual literature scope: [current execution](EXECUTION_STATUS.json).\n',encoding='utf-8')
     return ARTIFACTS
 
 

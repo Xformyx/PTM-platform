@@ -45,3 +45,5 @@ def test_non_native_scores_and_unknowns_are_not_invented_log_effects():
     assert old['status']=='unknown' and old['unit']=='unknown'
     footprint=field_semantics('kinase/kinase_temporal_profiles','activity_magnitude')
     assert footprint['restriction_class']=='descriptive_footprint'
+    assert field_semantics('temporal/intervals','rate_log2_per_min')['unit']=='log2_ratio_per_minute'
+    assert field_semantics('unknown','score_min')['status']=='unknown'

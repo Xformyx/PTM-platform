@@ -226,6 +226,9 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     from .astra_package import start_here
     snapshot=json.loads((source/'study/user_input_snapshot.json').read_text())
     readiness=json.loads((source/'evidence/readiness.json').read_text())
+    from .astra_execution_status import project_current_status
+    readiness['current_execution']=project_current_status(json.loads(tables['reader/packet'].iloc[0].packet_json))
+    json_write(directory/'evidence/readiness.json',readiness)
     if binding:
         readiness['literature_subject_review']=binding
         json_write(directory/'evidence/readiness.json',readiness)
@@ -361,8 +364,12 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
         write_reader(directory,tables)
         readiness=json.loads((directory/'evidence/readiness.json').read_text());readiness['literature']=summary
         readiness['reader']['literature_comparison']=summary['status']
+        from .astra_execution_status import project_current_status
+        readiness['current_execution']=project_current_status(json.loads(tables['reader/packet'].iloc[0].packet_json))
         json_write(directory/'evidence/readiness.json',readiness)
-        report=(source/'START_HERE_ASTRA.md').read_text()+'\n\nLiterature reader revision: [reader/LITERATURE.md](reader/LITERATURE.md). Read access, retrieval and semantic-review status separately; frozen replay does not verify biological judgments.\n'
+        from .astra_package import start_here
+        counts=dict(zip(tables['evidence/coverage_funnel'].metric,tables['evidence/coverage_funnel']['count']))
+        report=start_here(config['snapshot'],counts,readiness)+'\n\nLiterature reader revision: frozen source results remain distinct from semantic review.\n'
         (directory/'START_HERE_ASTRA.md').write_text(report,encoding='utf-8')
         html=(source/'evidence_report.html').read_text()+'\n<p><a href="reader/LITERATURE.md">Finding literature retrieval and comparison status</a></p>\n'
         (directory/'evidence_report.html').write_text(html,encoding='utf-8')

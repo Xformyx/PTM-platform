@@ -683,6 +683,8 @@ def attach_review_execution(tables, pin, catalog):
     packet['literature_review_plan']['limits'] = 'Eligibility plan only; actual typed execution is in literature_subject_execution. Legacy results preserved.'
     packet['literature_review_plan']['execution'] = 'see_literature_subject_execution'
     packet['evidence_access']['limits'] = 'Whole evidence access and M2 links; actual typed literature execution is explicitly bounded and recorded separately.'
+    from .astra_execution_status import attach_current_status
+    attach_current_status(packet)
     tables['reader/packet'].loc[:, 'packet_json'] = encode(packet)
     tables.update(frames)
     return summary
