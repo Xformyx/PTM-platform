@@ -548,7 +548,12 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         if not path.is_file():raise ValueError('Reader execution packet requires frozen pin')
         review_execution=json.loads(path.read_text())
     access_artifacts = write_evidence_access(directory, source_root=source_root)
+    from .quantitative_fields import FIELD_GUIDE
+    (directory/'reader/FIELD_SEMANTICS.md').write_text(FIELD_GUIDE,encoding='utf-8')
+    access_artifacts.append('reader/FIELD_SEMANTICS.md')
     packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
+    packet['field_semantics']={'dictionary':'reproducibility/data_dictionary.json','guide':'reader/FIELD_SEMANTICS.md',
+                               'method_discriminator':['method_id','method_version','score_name']}
     if packet.get('whole_evidence') and not (access_only or review_plan_only):
         from .astra_reader_full import write_full
         access_artifacts += write_full(directory,tables,source_root=source_root)

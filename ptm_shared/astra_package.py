@@ -31,10 +31,10 @@ from .annotation_registry import digest
 from .generic_kinase import fasta_taxonomy
 
 VERSION='astra_analysis_package.v4'
-READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py','astra_literature_review.py']
+READER_CODE_FILES=['astra_evidence_catalog.py','astra_reader_full.py','astra_literature_review.py','quantitative_fields.py']
 CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
     'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','study_input_metadata.py','study_display.py','study_display.json','control_comparison.py','effect_series.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
-    'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py']))
+    'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py','quantitative_fields.py']))
 EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['candidate_id','contrast_id','track'],
     'substrate_contributions':['contribution_id'],'candidate_sensitivity':['candidate_id','contrast_id','track','omission_kind','omitted_id'],
     'temporal_series':['series_id'],'effect_series_points':['series_id','contrast_id'],'effect_interval_contrasts':['interval_id'],'ptm_temporal_features':['feature_id'],'protein_temporal_features':['feature_id'],
@@ -488,6 +488,7 @@ def order_method_scores(frame, *, design=None, comparisons=None):
 
 
 def write_tables(tables, directory, *, design=None):
+    from .quantitative_fields import table_field_semantics
     if 'kinase/method_scores' in tables:
         ordered, score_audit = order_method_scores(
             tables['kinase/method_scores'], design=design, comparisons=tables.get('quant/comparisons'))
@@ -521,6 +522,9 @@ def write_tables(tables, directory, *, design=None):
             'missing':'unobserved/unavailable; never zero; status/reasons accompany quantities',
             'units':'minutes; log2 relative contrast; original positive intensity; counts as named',
             'row_grain':keys,'inference':'descriptive; p/q only explicitly labeled external gene-set statistics'}
+        entry.update(table_field_semantics(name, frame))
+        entry['units']='See column field_semantics and discriminator-specific method_semantics; no table-wide common unit.'
+        entry['inference']='See per-field statistical_unit/status; method statistics never imply biological tests or semantic approval.'
         if name=='kinase/method_scores' and score_audit is not None:
             entry.update(row_order_policy=score_audit['policy'], row_order_metadata_source=score_audit['metadata_source'],
                 row_order_keys=score_audit['sort_keys'], unresolved_time_contrasts=score_audit['unresolved_time_contrasts'],

@@ -109,3 +109,126 @@ def axis_support(row: Mapping[str, Any]) -> dict[str, Any]:
             axis_number(row, axis, field)
             for axis in ("unadjusted", "adjusted", "protein")
             for field in ("p", "q", "control_n", "treatment_n")}
+
+
+# The package writer, saved-row bundle and structured claim checker share these
+# descriptors. They describe recorded quantities; they never infer missing facts.
+FIELD_SEMANTICS_VERSION = 'astra_field_semantics.v1'
+METHOD_DISCRIMINATORS = ('method_id', 'method_version', 'score_name')
+METHOD_METADATA = ('direction_semantics', 'null_model', 'multiple_testing_family', 'statistical_unit')
+LOG_EFFECTS = {
+    'A': 'Target minus actual reference of same-injection PTM/parent log ratios; U_joint minus P_joint, not absolute occupancy.',
+    'U_joint': 'PTM contrast on the exact joint PTM/parent mask used for A.',
+    'P_joint': 'Parent protein contrast on the exact joint PTM/parent mask used for A.',
+    'U_all': 'PTM contrast on its own observed mask, which may differ from the A mask.',
+    'P_all': 'Parent protein contrast on its own observed mask, which may differ from the A mask.',
+    'log2_change': 'Recorded target minus actual reference log abundance contrast.',
+    'strict_parent_A': 'PTM adjustment using the recorded strict peptide parent estimator and mask.',
+    'PG_parent_A': 'PTM adjustment using the recorded protein-group parent estimator and mask.',
+    'decomposition_residual': 'Numerical residual of A minus (U_joint minus P_joint).',
+    'post_reference_U': 'Target-arm PTM change from the recorded first valid target observation, not matched treatment effect.',
+    'raw_candidate_A': 'Target-arm joint PTM/parent change from the recorded post-reference; inspect eligibility.',
+    'eligible_A': 'Eligible target-arm post-reference change; null when the cross-time relationship or parent is unavailable.',
+}
+FK_FIELDS = {'contrast_id': 'study/study_design.json#contrasts.contrast_id',
+    'target_condition_id': 'study/study_design.json#conditions.condition_id',
+    'reference_condition_id': 'study/study_design.json#conditions.condition_id',
+    'condition_id': 'study/study_design.json#conditions.condition_id',
+    'form_id': 'quant/summary.csv#form_id', 'injection_id': 'study/study_design.json#injections.injection_id',
+    'material_id': 'study/study_design.json#materials.material_id'}
+
+
+def field_semantics(table, column, *, row=None, dtype=None):
+    """A row discriminator refines a contract; missing metadata stays unknown."""
+    row = row or {}; table = table.removesuffix('.csv')
+    out = {'schema_version': FIELD_SEMANTICS_VERSION, 'field_path': table+'.csv.'+column,
+        'meaning': 'Unknown: no registered semantic contract for this field.', 'status': 'unknown',
+        'unknown_reason': 'unregistered_or_legacy_field', 'unit': 'unknown', 'scale': 'unknown',
+        'allowed_values': None, 'range': None, 'nullable': True,
+        'null_contract': 'Missing is unavailable/unknown, never zero; inspect recorded status/reason.',
+        'null_status_binding': [], 'statistical_unit': 'unknown', 'foreign_key': FK_FIELDS.get(column),
+        'restriction_class': 'unclassified'}
+    def known(meaning, unit, scale='identity', statistical_unit='not_applicable', restriction_class='recorded_metadata', **extra):
+        out.update(meaning=meaning, unit=unit, scale=scale, statistical_unit=statistical_unit,
+                   restriction_class=restriction_class, status='known', unknown_reason=None, **extra)
+    if column in LOG_EFFECTS and table.startswith(('quant/', 'temporal/', 'evidence/')):
+        known(LOG_EFFECTS[column], 'log2_ratio', 'log2', 'recorded_material_unit_or_pair', 'relative_effect')
+    elif column in {'ptm_intensity', 'parent_intensity'}:
+        known('Positive supplied matrix intensity; upstream normalization is not inferred.', 'supplied_intensity_unit',
+              statistical_unit='injection', restriction_class='raw_abundance', range={'min_exclusive':0})
+    elif column in {'ptm_log2','parent_log2','adjusted_log2_ratio'}:
+        known('Recorded per-injection log abundance or PTM/parent log ratio.', 'log2_intensity' if column!='adjusted_log2_ratio' else 'log2_ratio',
+              'log2','injection','relative_abundance')
+    elif column in {'biological_p_value','biological_q_value'}:
+        known('Biological-unit test probability/FDR only when actually computed; Astra primary tests remain unavailable.',
+              'probability','probability','biological_unit_or_declared_pair','biological_statistic',range={'min':0,'max':1})
+    elif column in {'method_p','method_q'}:
+        known('Recorded method-native p/FDR; not biological replicate inference or calibration.',
+              'probability','probability',row.get('statistical_unit') or 'unknown','method_statistic',range={'min':0,'max':1})
+        out.update(null_model=row.get('null_model') or 'unknown',multiple_testing_family=row.get('multiple_testing_family') or 'unknown')
+    elif column in {'score','native_score'} and table=='kinase/method_scores':
+        if tuple(row.get(k) for k in METHOD_DISCRIMINATORS)==('PhosX_native_functions','0.23.1','Activity Score'):
+            known('Native PhosX Activity Score: signed site-rank enrichment, not causal activation.',
+                  'native_activity_score','native',row.get('statistical_unit') or 'unknown','native_activity')
+        elif tuple(row.get(k) for k in METHOD_DISCRIMINATORS)==('repository_measured_gene_zscore','1','z_score'):
+            known('Repository measured-gene universe standardized enrichment; not official KSEA or direct kinase activity.',
+                  'standardized_score','z_score',row.get('statistical_unit') or 'unknown','descriptive_footprint')
+        else:
+            out.update(unknown_reason='method_discriminator_requires_recorded_contract',restriction_class='method_score')
+        out.update(direction_semantics=row.get('direction_semantics') or 'unknown',
+                   null_model=row.get('null_model') or 'unknown',multiple_testing_family=row.get('multiple_testing_family') or 'unknown')
+    elif column=='localization_probability':
+        known('Supplied localization confidence only; null means not measured/unknown and is not high confidence.',
+              'probability','probability','localization_evidence','localization',range={'min':0,'max':1})
+    elif column=='activity_magnitude' and table=='kinase/kinase_temporal_profiles':
+        known('Descriptive gene-balanced substrate footprint on the recorded track; not native activity or a confirmed kinase call.',
+              'log2_ratio','log2','substrate_gene','descriptive_footprint')
+    elif column.endswith('_min'):
+        known('Recorded canonical numeric time in minutes; unknown is null, never time zero.', 'minute','linear',restriction_class='time')
+    elif column.endswith('_biological_n'):
+        known('Recorded biological units with usable values; never the injection count.', 'count','integer','biological_unit','biological_count',range={'min':0})
+    elif column in {'reference_joint_n','target_joint_n','reference_observed_n','target_observed_n','detected_n','reference_detected_n','scheduled_n','parent_observed_n','joint_observed_n'}:
+        known('Recorded finite injection observations (scheduled_n counts registered injections); not independent biological n.',
+              'count','integer','injection','injection_count',range={'min':0})
+    elif column in {'eligible_site_count','universe_count'}:
+        known('Recorded method input membership count; unit follows the method row.', 'count','integer',row.get('statistical_unit') or 'unknown','method_coverage',range={'min':0})
+    elif column.endswith('_id') or column in {'input_column','source_key_json'}:
+        known('Recorded identity or canonical source locator, not a quantity.', 'identifier',restriction_class='identity')
+    elif str(dtype)=='bool' or column in {'joint_observed','U_observed','P_observed','included','inference_use_allowed','primary_adjustment_eligible','primary_mapping_eligible'}:
+        known('Recorded boolean observation/eligibility mask; false is distinct from unknown.', 'boolean',allowed_values=[False,True],restriction_class='mask')
+    elif column.endswith(('_status','_reason','_reasons')) or column in {'status','resolution','pairing','reference_strategy','effect_kind'}:
+        known('Recorded status/declaration; no additional scientific approval is implied.', 'category',restriction_class='status')
+    return out
+
+
+def table_field_semantics(table, frame):
+    """Complete descriptors, including explicit unknowns, without changing CSVs."""
+    statuses = [c for c in frame if c.endswith(('_status','_reason','_reasons')) or c in {'status','included','inference_use_allowed'}]
+    fields = {}
+    for column in frame:
+        fields[column] = {**field_semantics(table,column,dtype=frame[column].dtype),
+                          'observed_null_count':int(frame[column].isna().sum()),
+                          'dtype':str(frame[column].dtype),'null_status_binding':statuses}
+    variants = []
+    if table.removesuffix('.csv')=='kinase/method_scores':
+        cols = [k for k in (*METHOD_DISCRIMINATORS,*METHOD_METADATA) if k in frame]
+        if cols:
+            for row in frame[cols].drop_duplicates().to_dict('records'):
+                row = {k:None if isinstance(v,float) and not math.isfinite(v) else v for k,v in row.items()}
+                variants.append({'discriminator':{k:row.get(k) for k in METHOD_DISCRIMINATORS},
+                    'recorded_metadata':{k:row.get(k) for k in METHOD_METADATA},
+                    'fields':{k:field_semantics(table,k,row=row) for k in ('score','native_score','method_p','method_q') if k in frame}})
+    return {'field_semantics_version':FIELD_SEMANTICS_VERSION,'field_semantics':fields,'method_semantics':variants}
+
+
+FIELD_GUIDE = '''# 필드별 의미와 통계 단위
+
+`reproducibility/data_dictionary.json`의 field_semantics가 column 계약입니다.
+method_scores는 method_id/method_version/score_name과 recorded_metadata를 함께 읽으세요.
+실제 null 개수는 observed_null_count이며 nullable 허용 여부와 다릅니다.
+unknown descriptor는 0이나 승인된 값이 아닙니다. source row의 status/reason을 유지하세요.
+U_joint/P_joint/A와 U_all/P_all은 mask가 다릅니다. A는 절대 occupancy가 아닙니다.
+Native Activity Score, footprint, method p/q, biological p/q와 calibration은 서로 바꾸지 마세요.
+미측정 localization이나 no-call을 높은 confidence/비활성으로 해석하지 마세요.
+정의 추가는 계산·검색·의미 검토를 수행하지 않습니다.
+'''
