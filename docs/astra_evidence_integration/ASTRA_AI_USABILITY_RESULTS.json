@@ -1,0 +1,212 @@
+{
+  "branch": "codex/astra-ai-usability",
+  "baseline": "fe11ff8472642fd896620b0027acf9a8e0bcae92",
+  "implementation_commit": "e02b8650626d503bea3296fdc9131d8a1472a298",
+  "tests": {
+    "unique": 117,
+    "latest_status_counts": {
+      "passed": 117
+    },
+    "detail": "codex-inputs/astra-ai-20261113/TEST_RESULTS.json"
+  },
+  "actual_saved_data": {
+    "revision": "/Users/josephk/Projects/PTM-platform/codex-inputs/astra-ai-20261113/actual reader revision/enrichment_free_runs/g0-68d1310ef31a4f32bd164725daac1a1d",
+    "zip": "/Users/josephk/Projects/PTM-platform/codex-inputs/astra-ai-20261113/actual reader revision/astra_analysis_package_g0-68d1310ef31a4f32bd164725daac1a1d.zip",
+    "zip_sha256": "f834248142d9dfe2933dea117d9414d7e2f35926e0ca6153bbf571f4ec2e6827",
+    "zip_bytes": 381082051,
+    "zip_manifest_files_verified": 273,
+    "catalog_id": "fbc6543bc6fe8fcc7229f6833fb16c6b6a21c184d1d1a80a510782427db82a29",
+    "source_catalog_id": "f0e81360579948b76934dd645bf9008992788805bc77933e41f67c0cb45c11ef",
+    "all_evidence_ids_preserved": true,
+    "evidence_count": 175537,
+    "representative_form": "form_c856a65cb819ac45",
+    "effect_series_id": "series_8bcf2a244a036b564b4c",
+    "numeric_time_order": [
+      1.0,
+      5.0,
+      15.0,
+      30.0,
+      60.0,
+      180.0
+    ],
+    "same_source_values_NA_keys": true,
+    "claims_passed": 6,
+    "wrong_control_rejected": true,
+    "past_catalog_anchor_rejected": true,
+    "unselected_access": true,
+    "no_call_access": true,
+    "question_id": "BQ-001",
+    "question_bundle_total_count": 57,
+    "question_bundle_returned_count": 5,
+    "current_execution": {
+      "historical_origin": {
+        "whole_evidence.literature_execution_scope": "unchanged; M3/M4 not performed"
+      },
+      "projection_cost": {
+        "model_calls": 0,
+        "queries": 0,
+        "scientific_calculations": 0
+      },
+      "schema_version": "astra_current_execution.v1",
+      "selected_finding_review": {
+        "anchor_validation": "not_applicable_no_exported_proposals",
+        "approved_count": 0,
+        "comparison_executed_count": 15,
+        "consumer_cost": null,
+        "count_unit": "selected findings",
+        "documents_with_chunks": 6,
+        "execution_cost": {
+          "cache_entries": 46,
+          "model_calls": 15,
+          "queries": 46
+        },
+        "export": "see per-source export_status; access is not redistribution permission",
+        "exported_anchored_proposals": 0,
+        "external_review": "not_recorded",
+        "independent_external_publications_with_chunks": null,
+        "model_comparison": "completed",
+        "pin_sha256": "da2df0842e16a222717fd2416909de5ff1e594d5a3dbddfb297808017d076f39",
+        "plan": "available",
+        "read_scope": "retrieved chunks only; no claim of whole-paper review",
+        "request": "requested",
+        "requested_count": 15,
+        "requested_scope": "completed",
+        "retrieval": "completed",
+        "retrieval_status_counts": {
+          "retrieved_comparison_pending": 15
+        },
+        "reuse_mode": "see frozen finding execution pin",
+        "semantic_recorded_status": "source_anchors_only_semantic_review_required",
+        "semantic_review": "not_performed",
+        "unique_chunks": 28,
+        "whole_scope": "selected_scope_only"
+      },
+      "source": "immutable execution pins and their validated table projections",
+      "typed_subject_review": {
+        "anchor_validation": "not_applicable_no_exported_proposals",
+        "approved_count": 0,
+        "comparison_executed_count": 3,
+        "consumer_cost": {
+          "model_calls": 0,
+          "queries": 0
+        },
+        "count_unit": "typed representations",
+        "documents_with_chunks": 5,
+        "execution_cost": {
+          "model_calls": 0,
+          "queries": 0
+        },
+        "export": "see per-source export_status; access is not redistribution permission",
+        "exported_anchored_proposals": 0,
+        "external_review": "not_recorded",
+        "independent_external_publications_with_chunks": 4,
+        "model_comparison": "completed",
+        "pin_sha256": "759c8b9fd8dec5a48db2c42ae8939044cdec55a7d03b7e38b0203def4c63c58b",
+        "plan": "available",
+        "read_scope": "retrieved chunks only; no claim of whole-paper review",
+        "request": "requested",
+        "requested_count": 3,
+        "requested_scope": "completed",
+        "retrieval": "completed",
+        "retrieval_status_counts": {
+          "retrieved": 3
+        },
+        "reuse_mode": "frozen_results_reused",
+        "semantic_recorded_status": "review_required; source anchors are not scientific approval",
+        "semantic_review": "not_performed",
+        "unique_chunks": 17,
+        "whole_scope": "partial"
+      }
+    },
+    "legacy_detection_not_recomputed": true,
+    "new_science_queries_model_calls": 0
+  },
+  "preservation": {
+    "source": "/Users/josephk/Projects/PTM-platform/codex-inputs/g11-followup-04/delivery/G11_R04_LOCAL/enrichment_free_runs/g3-173714b8042a41afa0248b88dc49d4c3",
+    "revision": "/Users/josephk/Projects/PTM-platform/codex-inputs/astra-ai-20261113/actual reader revision/enrichment_free_runs/g0-68d1310ef31a4f32bd164725daac1a1d",
+    "elapsed_seconds": 306.2047675829963,
+    "preserved_scientific_pin_figure_files": 101,
+    "changed_files": [
+      "START_HERE_ASTRA.md",
+      "evidence/readiness.json",
+      "evidence_report.html",
+      "provenance.json",
+      "reader/EVIDENCE_ACCESS.md",
+      "reader/FULL_EVIDENCE.md",
+      "reader/LITERATURE.md",
+      "reader/LITERATURE_SUBJECT_REVIEW.md",
+      "reader/READ_ME.md",
+      "reader/authoring_packet.json",
+      "reader/evidence_catalog.json",
+      "reader/evidence_index.csv",
+      "reader/full_evidence_summary.json",
+      "reader/full_temporal_links.csv",
+      "reader/full_temporal_subjects.csv",
+      "reader/literature_review_plan.json",
+      "reader/literature_review_subjects.csv",
+      "reader/packet.csv",
+      "reader/question_map.json",
+      "references/literature_subject_binding.json",
+      "reproducibility/code/ptm_shared/astra_evidence_catalog.py",
+      "reproducibility/code/ptm_shared/astra_literature_review.py",
+      "reproducibility/code/ptm_shared/astra_package.py",
+      "reproducibility/code/ptm_shared/astra_reader.py",
+      "reproducibility/code/ptm_shared/astra_reader_full.py",
+      "reproducibility/code/ptm_shared/astra_reader_revision.py",
+      "reproducibility/code/ptm_shared/astra_reader_temporal.py",
+      "reproducibility/code/ptm_shared/quantitative_fields.py",
+      "reproducibility/data_dictionary.json",
+      "study/analysis_plan.json"
+    ],
+    "added_files": [
+      "reader/EXECUTION_STATUS.json",
+      "reader/FIELD_SEMANTICS.md",
+      "reader_replay.py",
+      "reproducibility/code/ptm_shared/astra_claim_check.py",
+      "reproducibility/code/ptm_shared/astra_evidence_bundle.py",
+      "reproducibility/code/ptm_shared/astra_execution_status.py",
+      "reproducibility/code/ptm_shared/astra_reader_replay.py",
+      "reproducibility/code/ptm_shared/control_comparison.py",
+      "reproducibility/code/ptm_shared/effect_series.py",
+      "reproducibility/code/ptm_shared/study_display.json",
+      "reproducibility/code/ptm_shared/study_display.py",
+      "reproducibility/code/ptm_shared/study_input_metadata.py",
+      "reproducibility/parent_reader_provenance.json",
+      "reproducibility/replay_capabilities.json",
+      "reproducibility/temporal_reader_revision.json",
+      "reproducibility/temporal_reader_stage.json"
+    ],
+    "all_original_hashes_preserved": true,
+    "new_science_queries_model_calls": 0,
+    "original_zip": "/Users/josephk/Projects/PTM-platform/codex-inputs/g11-followup-04/delivery/G11_R04_LOCAL/astra_analysis_package_g3-173714b8042a41afa0248b88dc49d4c3.zip",
+    "original_zip_sha256": "862be7cbefcd42c24769ea0a6530bc6ba2b1f0fb2f4fa22931d1886e727f19af",
+    "free_bytes_after": 25228406784
+  },
+  "reader_replay": {
+    "passed": true,
+    "scope": "reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables",
+    "validated_manifest_files": 273,
+    "reader_module_file": "/Users/josephk/Projects/PTM-platform/codex-inputs/astra-ai-20261113/actual reader revision/enrichment_free_runs/g0-68d1310ef31a4f32bd164725daac1a1d/reproducibility/code/ptm_shared/astra_reader.py",
+    "scientific_calls": 0,
+    "network_requests": 0,
+    "new_model_calls": 0,
+    "repository_code_used": false,
+    "frozen_typed_literature_rebuilt": true
+  },
+  "unique_reader_files": 27,
+  "all_reader_files_byte_equal": true,
+  "free_bytes_final": 24300998656,
+  "task_logical_bytes_final": 5448584261,
+  "not_verified": [
+    "actual time-matched dataset",
+    "operational UI/API/DB/queue",
+    "actual native PhosX scientific parity"
+  ],
+  "push_deploy_flag_changes": false,
+  "background_processes_started": false,
+  "existing_caffeinate_pids_preserved": [
+    2450,
+    5292
+  ],
+  "reader_code_matches_implementation": true
+}
