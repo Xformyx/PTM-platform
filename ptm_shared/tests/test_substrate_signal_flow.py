@@ -5,6 +5,50 @@ import pytest
 from test_ai_catalog import saved_points
 from ptm_shared.substrate_signal_flow import trajectory_projection, TRAJECTORIES, MEMBERS, legacy_crosswalk
 from ptm_shared.astra_evidence_catalog import EvidenceCatalog
+from ptm_shared.substrate_signal_flow import kinase_projection, KINASES, KINASE_MEMBERS
+from ptm_shared.effect_series import resolve_series
+
+
+def kinase_fixture(tables,design,registry):
+    sid=next(iter(resolve_series(design)[0]))
+    edges=[];contributions=[];profiles=[];fixed=[];anchors=[]
+    for k in ['K1','K2']:
+        edges.append({'edge_id':'edge_'+k,'candidate_id':k,'form_id':'f','edge_type':'curated','site_id':'s','measurement_group_id':'g','substrate_gene':'G'})
+        for i,c in enumerate(design['contrasts']):
+            cid=c['contrast_id']
+            contributions.append({'contribution_id':k+cid,'candidate_id':k,'contrast_id':cid,'track':'curated_A',
+                'form_ids':'f','site_ids':'s','measurement_group_id':'g','substrate_gene':'G','edge_ids':'edge_'+k,'value':i,'gene_weight':1})
+            profiles.append({'candidate_id':k,'contrast_id':cid,'track':'curated_A','activity_magnitude':i,'coverage_adequate':False})
+            fixed.append({'candidate_id':k,'series_id':sid,'contrast_id':cid,'track':'curated_A','fixed_common_score':None,'fixed_common_sites':0,'entered_sites':1 if i==0 else 0})
+        anchors.append({'candidate_id':k,'series_id':sid,'track':'curated_A','site_key':'s','support_status':'no_remaining_anchor','independent_validation':False})
+    for name,rows,keys in [
+        ('kinase/kinase_candidate_edges',edges,['edge_id']),
+        ('kinase/substrate_contributions',contributions,['contribution_id']),
+        ('kinase/kinase_temporal_profiles',profiles,['candidate_id','contrast_id','track']),
+        ('temporal/kinase_fixed_membership',fixed,['candidate_id','series_id','contrast_id','track']),
+        ('temporal/target_excluded_anchors',anchors,['candidate_id','series_id','track','site_key'])]:
+        tables[name]=pd.DataFrame(rows);registry[name+'.csv']={'unique_key':keys,'sha256':'synthetic-hash'}
+    return tables,design,registry
+
+
+def test_exact_kinase_counts_scores_exclusion_and_identical_support(tmp_path):
+    _,tables,design,registry=fixture(tmp_path)
+    kinase_fixture(tables,design,registry)
+    trajectories=trajectory_projection(tables,design,registry)[TRAJECTORIES]
+    result=kinase_projection(tables,design,registry,trajectories)
+    bundles=result[KINASES].query('track == "curated_A"')
+    assert len(bundles)==2 and bundles.family_label.isna().all()
+    assert bundles.gene_count.eq(1).all() and bundles.measurement_group_count.eq(1).all()
+    for b in bundles.to_dict('records'):
+        assert json.loads(b['indistinguishable_candidates_json'])==['K1','K2']
+        points=json.loads(b['points_json'])
+        assert points[0]['membership_event_meaning']=='initial_membership_not_emergence'
+        assert [p['saved_results']['kinase/kinase_temporal_profiles'][0]['values']['activity_magnitude'] for p in points]==[0,1,2]
+        assert all(p['saved_results']['temporal/kinase_fixed_membership'][0]['values']['fixed_common_score'] is None for p in points)
+        assert json.loads(b['diagnostics_json'])['temporal/target_excluded_anchors'][0]['values']['support_status']=='no_remaining_anchor'
+    assert len(result[KINASE_MEMBERS])==6
+    tables['kinase/substrate_contributions'].loc[0,'edge_ids']='missing'
+    with pytest.raises(ValueError,match='edge FK'):kinase_projection(tables,design,registry,trajectories)
 
 
 def fixture(tmp_path, times=(7.5,45,240), mixed=True):
