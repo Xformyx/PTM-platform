@@ -25,3 +25,12 @@ def test_context_join_preserves_evidence_types_without_causal_upgrade():
     assert contexts["STAT3_Y705"]["nuclear_context"]["nucleus_annotated"] is True
     assert contexts["STAT3_Y705"]["non_ptm_follow_through"][0]["evidence_type"] == "persisted_non_ptm_temporal_context"
     assert "do not establish" in contexts["STAT3_Y705"]["interpretation_boundary"]
+
+
+def test_exact_feature_key_does_not_collapse_same_site_or_taxon():
+    sites=[{'site_key':'G_S1|F1','feature_id':'F1','gene':'G','position':'S1'},
+           {'site_key':'G_S1|F2','feature_id':'F2','gene':'G','position':'S1'}]
+    heatmap={'kinase_scores':[{'kinase':'K','substrates':[{'gene':'G','position':'S1','feature_id':'F2'},{'gene':'G','position':'S1'}]}]}
+    result=build_atlas_context_evidence(sites,kinase_activity_heatmap=heatmap)
+    assert result['G_S1|F1']['kinase_context']==[]
+    assert len(result['G_S1|F2']['kinase_context'])==1

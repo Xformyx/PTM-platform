@@ -134,3 +134,29 @@ def test_exact_prior_preserves_opposite_observed_order(tmp_path):
     result=evidence_map(outputs)
     checks=[c for j in result[HYPOTHESES].prior_observation_checks_json for c in json.loads(j)]
     assert checks and all(c['consistency']=='inconsistent' and not c['prior_falsified'] for c in checks)
+
+
+def test_projection_pages_bind_catalog_and_filters(tmp_path):
+    from ptm_shared.substrate_signal_flow import project_signal_flow, TABLE_KEYS
+    from ptm_shared.substrate_signal_view import signal_page
+    from ptm_shared.astra_package import write_tables
+    from ptm_shared.annotation_registry import digest
+    from ptm_shared.generic_workflow import json_write,object_hash
+    root,tables,design,registry=fixture(tmp_path)
+    outputs=project_signal_flow(tables,design,registry)
+    entries=write_tables(outputs,root)
+    path=root/'reader/evidence_catalog.json';catalog=json.loads(path.read_text())
+    for name,meta in entries.items():
+        meta.update(unique_key=TABLE_KEYS[name[:-4]],sha256=digest(root/name),indexed=False)
+        catalog['sources'][name]=meta
+    catalog['catalog_id']=object_hash({k:v for k,v in catalog.items() if k!='catalog_id'});json_write(path,catalog)
+    c=EvidenceCatalog(root)
+    ids=[];cursor=None
+    while True:
+        page=signal_page(c,'substrate_trajectories',{},cursor,1)
+        ids.extend(r['trajectory_id'] for r in page['items']);cursor=page['next_cursor']
+        if cursor is None:break
+    assert ids==[r['trajectory_id'] for r in signal_page(c,'substrate_trajectories',limit=50)['items']]
+    cursor=signal_page(c,'substrate_trajectories',limit=1)['next_cursor']
+    with pytest.raises(ValueError,match='Cursor'):signal_page(c,'substrate_trajectories',{'track':'A'},cursor)
+    assert signal_page(c,'substrate_trajectories',{'track':'A'})['total_count']==1

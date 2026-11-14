@@ -48,6 +48,15 @@ def build_atlas_context_evidence(
     localizations = _mapping_or_empty(localization.get("gene_localizations"))
 
     site_context: Dict[str, Dict[str, Any]] = {}
+    sites = list(sites)
+    site_records = {str(s.get('site_key') or _site_key(s)): s for s in sites}
+    def context_keys(record):
+        # Modern rows keep their exact feature identity, including taxon and
+        # precursor. Bare gene/site context cannot choose among distinct forms.
+        feature_id = record.get('feature_id')
+        if feature_id:
+            return [k for k,s in site_records.items() if s.get('feature_id') == feature_id]
+        return [k for k,s in site_records.items() if not s.get('feature_id') and k == _site_key(record)]
     for site in sites:
         key = str(site.get("site_key") or _site_key(site))
         gene = str(site.get("gene") or "")
@@ -76,9 +85,10 @@ def build_atlas_context_evidence(
         for substrate in score.get("substrates") or []:
             if not isinstance(substrate, Mapping):
                 continue
-            key = _site_key(substrate)
-            if key not in site_context:
+            keys = context_keys(substrate)
+            if len(keys) != 1:
                 continue
+            key = keys[0]
             entry = {
                 "kinase": kinase,
                 "evidence_type": "kinase_module_substrate_membership",
@@ -114,7 +124,7 @@ def build_atlas_context_evidence(
         if gene:
             effectors_by_gene[gene.upper()].append(effector)
     for key, context in site_context.items():
-        gene = key.rsplit("_", 1)[0].upper()
+        gene = str(site_records[key].get('gene') or '').upper()
         for effector in effectors_by_gene.get(gene, []):
             context["non_ptm_follow_through"].append({
                 "gene": effector.get("gene") or effector.get("name"),

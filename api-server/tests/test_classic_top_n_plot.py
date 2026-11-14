@@ -37,7 +37,7 @@ def test_classic_default_n_is_historical_twenty():
     assert CLASSIC_TOP_N_DEFAULT == 20
 
 
-def test_small_enriched_file_is_the_historical_top_n_set(tmp_path):
+def test_small_annotation_file_does_not_limit_population(tmp_path):
     write_vector(tmp_path, [
         row("Rps6", "p1", "1min", 6), row("Rps6", "p1", "5min", 0.2),
         row("Akt1", "p2", "1min", 5), row("Akt1", "p2", "5min", 4),
@@ -46,11 +46,11 @@ def test_small_enriched_file_is_the_historical_top_n_set(tmp_path):
         json.dumps([{"gene": "Rps6", "position": "S185", "taxon": "10090", "accession": "P0"}])
     )
     view = load_classic_top_n_plot(tmp_path, "_phospho", {"top_n_ptms": 2})
-    assert view["classic_selection_source"] == "enriched_top_n"
-    assert view["source"] == "enriched"
+    assert view["classic_selection_source"] == "canonical_eligible_feature_selection"
+    assert view["source"] == "preprocessing"
     assert view["top_n_setting"] == 2
-    assert {p["gene"] for p in view["top_n_ptms"]} == {"RPS6"}
-    assert {r["gene"] for r in view["vector_data"]} == {"RPS6"}
+    assert {p["gene"] for p in view["top_n_ptms"]} == {"RPS6", "AKT1"}
+    assert {r["gene"] for r in view["vector_data"]} == {"RPS6", "AKT1"}
 
 
 def test_full_inventory_enriched_falls_back_to_tsv_ranking(tmp_path):
@@ -64,19 +64,21 @@ def test_full_inventory_enriched_falls_back_to_tsv_ranking(tmp_path):
         json.dumps([{"gene": g, "position": "S185"} for g in ("Rps6", "Akt1", "Insr", "Mapk1")])
     )
     view = load_classic_top_n_plot(tmp_path, "_phospho", {"top_n_ptms": 1})
-    assert view["classic_selection_source"] == "tsv_per_condition_ranking"
+    assert view["classic_selection_source"] == "canonical_eligible_feature_selection"
     assert view["source"] == "preprocessing"
     assert {p["gene"] for p in view["top_n_ptms"]} == {"RPS6"}
 
 
-def test_denovo_without_conventional_contrast_can_enter_tsv_ranking(tmp_path):
+def test_denovo_requires_separate_lod_representation(tmp_path):
     write_vector(tmp_path, [
         row("Rps6", "p1", "1min", 0.1),
         row("Irs1", "p2", "1min", "", Ranking_Score=9, Conventional_Log2FC_NA="true", LOD_Relative_Log2=4.5),
     ])
     view = load_classic_top_n_plot(tmp_path, "_phospho", {"top_n_ptms": 1})
-    assert view["classic_selection_source"] == "tsv_per_condition_ranking"
-    assert any(p["gene"] == "IRS1" for p in view["top_n_ptms"])
+    assert view["classic_selection_source"] == "canonical_eligible_feature_selection"
+    assert all(p["gene"] != "IRS1" for p in view["top_n_ptms"])
+    lod=load_classic_top_n_plot(tmp_path,"_phospho",{"top_n_ptms":1},representation="lod_relative_log2")
+    assert any(p["gene"] == "IRS1" for p in lod["top_n_ptms"])
 
 
 def test_classic_payload_is_starlette_jsonable(tmp_path):
@@ -92,3 +94,12 @@ def test_classic_payload_is_starlette_jsonable(tmp_path):
     assert clean["vector_data"][0]["ptm_relative_log2fc"] is None
     assert clean["vector_data"][0]["ok"] == 1.5
     assert clean["top_n_ptms"][0]["annotation_match"]["source"]["n"] is None
+
+
+def test_all_and_explicit_modes_keep_distinct_features(tmp_path):
+    write_vector(tmp_path,[row("G","p"+str(i),"1min",i+1) for i in range(26)])
+    all_view=load_classic_top_n_plot(tmp_path,"_phospho",{"top_n_ptms":9999})
+    assert len(all_view["top_n_ptms"])==26 and all_view["top_n_setting"] is None
+    one=load_classic_top_n_plot(tmp_path,"_phospho",{"top_n_ptms":9999},mode="global_top_n",n=1)
+    assert len(one["top_n_ptms"])==1
+    assert one["selection"]["mode"]=="global_top_n"

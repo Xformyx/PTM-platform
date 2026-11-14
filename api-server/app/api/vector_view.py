@@ -13,6 +13,23 @@ from ptm_shared.vector_columnar import VectorColumnar
 router = APIRouter(prefix="/orders", tags=["vector-view"])
 
 
+@router.post("/{order_id}/substrate-signal/{kind}")
+async def substrate_signal(order_id:int, kind:str, body:dict, db=Depends(get_db), user=Depends(get_current_user)):
+    order=await access(db,user,order_id)
+    from ptm_shared.substrate_signal_view import published_root, signal_page
+    from ptm_shared.astra_evidence_catalog import EvidenceCatalog
+    def read():
+        root=published_root(Path(get_settings().OUTPUT_DIR)/order.order_code)
+        catalog=EvidenceCatalog(root)
+        return signal_page(catalog,kind,body.get('filters'),body.get('cursor'),body.get('limit',25))
+    try:
+        return await asyncio.to_thread(read)
+    except FileNotFoundError:
+        return {'status':'unavailable','reason':'published_astra_snapshot_unavailable','items':[],'total_count':0,'next_cursor':None}
+    except (ValueError,KeyError) as exc:
+        raise HTTPException(409,str(exc)) from exc
+
+
 @router.get("/{order_id}/vector-scatter-data")
 async def vector_scatter_data(order_id: int, axis: Literal["adjusted", "unadjusted", "occupancy"] = "adjusted",
                               db=Depends(get_db), user=Depends(get_current_user)):

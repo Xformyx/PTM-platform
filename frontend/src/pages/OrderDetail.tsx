@@ -1,3 +1,5 @@
+import {SubstrateSignalFlow} from '../components/SubstrateSignalFlow';
+import {FullTrajectoryBrowser} from '../components/FullTrajectoryBrowser';
 import { studyFieldLabel } from "@/lib/analysisContext";
 import {SignalingEvidenceExplorer} from "../components/SignalingEvidenceExplorer";
 import PrimaryAEvidence from "../components/PrimaryAEvidence";
@@ -2063,7 +2065,10 @@ function MultiSiteDivergencePanel({
 
 // ── TopNTimeSeriesPlot ───────────────────────────────────────────────────────
 // Historical LineChart path (0ac2338 / b150a01). Not vector-view.v2 selection.
-export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { orderId: number; ptmType?: string }) {
+export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initialN }: { orderId: number; ptmType?: string; initialN?: unknown }) {
+  const [displayMode,setDisplayMode]=useState(initialN===9999?"all_observed":"per_condition_top_n");
+  const [displayN,setDisplayN]=useState(typeof initialN==="number"&&initialN>0&&initialN!==9999?initialN:20);
+  const [displayRepresentation,setDisplayRepresentation]=useState("conventional_log2_contrast");
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   type TopNPtmMeta = {
     feature_id?: string;
@@ -2108,7 +2113,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { o
   }, [orderId]);
 
   const fetchVectorPlotData = () => {
-    return api.get<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: any[] }>(`/orders/${orderId}/vector-plot-data?classic=true`);
+    return api.get<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: any[] }>(`/orders/${orderId}/vector-plot-data?classic=true&representation=${displayRepresentation}&axis=${metric==="relative"?"adjusted":metric}&mode=${displayMode}${displayMode==="all_observed"?"":`&n=${displayN}`}`);
   };
 
   const refreshReceptorInference = async () => {
@@ -2120,8 +2125,10 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { o
   };
 
   useEffect(() => {
+    let active=true; setLoading(true);
     fetchVectorPlotData()
       .then((d) => {
+        if(!active)return;
         setData({
           vector_data: (d.vector_data || []) as TopNVectorPlotRow[],
           top_n_ptms: d.top_n_ptms || [],
@@ -2141,9 +2148,10 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { o
         });
         setChecked(init);
       })
-      .catch((error) => setData({ vector_data: [], top_n_ptms: [], source: "error", error: String(error?.message || error) }))
-      .finally(() => setLoading(false));
-  }, [orderId]);
+      .catch((error) => active && setData({ vector_data: [], top_n_ptms: [], source: "error", error: String(error?.message || error) }))
+      .finally(() => {if(active)setLoading(false);});
+    return()=>{active=false;};
+  }, [orderId,displayMode,displayN,displayRepresentation,metric]);
 
   if (loading) {
     return (
@@ -2158,13 +2166,14 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { o
     const failed = data && "error" in data && data.error;
     return (
       <div className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
+        <label>값 표현 <select value={displayRepresentation} onChange={e=>setDisplayRepresentation(e.target.value)}><option value="conventional_log2_contrast">Conventional log2 contrast</option><option value="lod_relative_log2">LOD-relative log2</option><option value="normalized_log2_intensity">Normalized log2 intensity</option></select></label>
         <TrendingUp className="h-12 w-12 text-muted-foreground/40 mb-3" />
         <p className="text-sm text-muted-foreground text-center">
           {failed
             ? `Time-series 조회 실패: ${String((data as { error?: string }).error)}`
             : isUbi
-            ? "Top N Ubiquitylation site time-series data will appear here after preprocessing completes."
-            : "Top N PTM time-series data will appear here after preprocessing completes."}
+            ? "현재 표현에 적격한 관측이 없습니다."
+            : "현재 표현에 적격한 관측이 없습니다."}
         </p>
       </div>
     );
@@ -2202,17 +2211,9 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { o
     const isDenovo = metric !== "protein" && Boolean(row.conventional_log2fc_na || row.control_pseudocount_used);
     let value = axisValue(row, metric);
     let axis: "log2fc" | "lod_relative" | "log2_intensity" = "log2fc";
-    if (isDenovo) {
-      if (activityFilter === "de_novo" && row.normalized_log2_intensity != null) {
-        value = row.normalized_log2_intensity;
-        axis = "log2_intensity";
-      } else if (row.lod_relative_log2 != null) {
-        value = row.lod_relative_log2;
-        axis = "lod_relative";
-      } else {
-        value = null;
-        axis = "lod_relative";
-      }
+    if (displayRepresentation!=="conventional_log2_contrast") {
+      value=displayRepresentation==="lod_relative_log2"?row.lod_relative_log2??null:row.normalized_log2_intensity??null;
+      axis=displayRepresentation==="lod_relative_log2"?"lod_relative":"log2_intensity";
     }
     if (!finite(value)) return;
     vectorByPtm.get(key)!.push({
@@ -2393,7 +2394,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { o
           {data.source === "enriched" ? "Source: Enriched (RAG)" : "Source: Preprocessing (TSV)"}
         </span>
         <span data-testid="top-n-setting" className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
-          Top N setting: {data.top_n_setting ?? "?"} / condition
+          <label>선정 방식 <select value={displayMode} onChange={e=>setDisplayMode(e.target.value)}><option value="per_condition_top_n">조건별 Top-N 합집합</option><option value="global_top_n">전체 Top-N</option><option value="all_observed">전체 관측</option></select></label> {displayMode!=="all_observed"&&<label>N <input type="number" min={1} value={displayN} onChange={e=>setDisplayN(Math.max(1,Number(e.target.value)||1))}/></label>} · {data.top_n_setting??"All"} <label>값 표현 <select value={displayRepresentation} onChange={e=>setDisplayRepresentation(e.target.value)}><option value="conventional_log2_contrast">Conventional log2 contrast</option><option value="lod_relative_log2">LOD-relative log2 (별도 축)</option><option value="normalized_log2_intensity">Normalized log2 intensity (별도 축)</option></select></label>
         </span>
         <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
           {isUbi ? "Unique Sites" : "Unique PTMs"}: {uniquePtms.length}
@@ -2564,9 +2565,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation" }: { o
                 domain={[yDomainMin, yDomainMax]}
                 tickCount={Math.max(8, Math.round((yDomainMax - yDomainMin) / 2))}
                 label={{
-                  value: activityFilter === "de_novo"
-                    ? "Normalized log2 intensity (de novo)"
-                    : `${axisLabel[metric]} log2 contrast / LOD-relative ≥`,
+                  value: displayRepresentation === "normalized_log2_intensity" ? "Normalized log2 intensity" : displayRepresentation === "lod_relative_log2" ? "LOD-relative log2" : `${axisLabel[metric]} log2 contrast`,
                   angle: -90,
                   position: "insideLeft",
                   style: { fontSize: 10, fill: "hsl(var(--muted-foreground))" },
@@ -3218,7 +3217,9 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
               </p>
             </CardHeader>
             <CardContent>
-              <TopNTimeSeriesPlot key={orderId} orderId={orderId} ptmType={ptmType} />
+              <SubstrateSignalFlow orderId={orderId}/>
+              <TopNTimeSeriesPlot key={orderId} orderId={orderId} ptmType={ptmType} initialN={initialN}/>
+              <details><summary>전체 Legacy precursor 궤적 (별도 identity)</summary><FullTrajectoryBrowser orderId={orderId} axis="relative"/></details>
             </CardContent>
           </Card>
         </TabsContent>

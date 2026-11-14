@@ -2906,7 +2906,7 @@ async def get_vector_plot_data(
         suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
         payload = await asyncio.to_thread(
             load_classic_top_n_plot, Path(get_settings().OUTPUT_DIR) / order.order_code, suffix,
-            order.report_options,
+            order.report_options, mode=mode, n=n, axis=axis, representation=representation, ranking_metric=ranking_metric,
             design=(getattr(order, "analysis_context", None) or {}).get("sample_manifest"),
         )
         cached = getattr(order, "receptor_inference_data", None) or {}
@@ -10623,13 +10623,18 @@ async def substrate_temporal_atlas(
     transition_profiles: dict[str, object] = {}
     transition_trajectories: dict[tuple[str, ...], dict[str, list]] = {}
     grouped_sites: dict[str, list[dict]] = {}
+    from ptm_shared.feature_identity import canonical_feature_identity
+    from ptm_shared.astra_inputs import stable_id
     for ptm in enriched:
         gene = ptm.get("gene") or ptm.get("Gene.Name", "")
         pos = ptm.get("position") or ptm.get("PTM_Position", "")
-        site_key = f"{gene}_{pos}"
-        if not (gene or pos):
-            continue
-        grouped_sites.setdefault(site_key, []).append(ptm)
+        identity=canonical_feature_identity(ptm)
+        fid=identity.get('feature_id') or ptm.get('feature_id')
+        # Never strip feature/precursor/taxon identity to force a gene/site join.
+        record_id=fid or stable_id('atlas_identity_unresolved',[ptm])
+        site_key=f"{gene}_{pos}|{record_id}"
+        if not (gene or pos): continue
+        grouped_sites.setdefault(site_key, []).append({**ptm,'feature_id':fid})
 
     for site_key, source_records in grouped_sites.items():
         representative = source_records[0]
@@ -10642,6 +10647,7 @@ async def substrate_temporal_atlas(
                 compatibility_warnings.append({
                     "code": "form_trajectory_unavailable",
                     "site_key": site_key,
+            "feature_id": representative.get("feature_id"),
                     "message": "A legacy PTM record had no compatible form trajectory and was excluded from Atlas kinetics.",
                 })
                 continue
@@ -10712,6 +10718,7 @@ async def substrate_temporal_atlas(
             compatibility_warnings.append({
                 "code": "site_form_aggregation_failed",
                 "site_key": site_key,
+            "feature_id": representative.get("feature_id"),
                 "message": "Form aggregation failed for a legacy trajectory and this site was excluded.",
                 "error_type": type(aggregation_error).__name__,
             })
@@ -10733,6 +10740,7 @@ async def substrate_temporal_atlas(
 
         sites.append({
             "site_key": site_key,
+            "feature_id": representative.get("feature_id"),
             "gene": gene,
             "position": pos,
             "site_aggregation": site_aggregation,
