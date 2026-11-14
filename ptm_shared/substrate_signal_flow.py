@@ -22,6 +22,9 @@ TABLE_KEYS = {TRAJECTORIES: ['trajectory_id'], MEMBERS: ['membership_id']}
 KINASES = 'signal_flow/kinase_substrate_bundles'
 KINASE_MEMBERS = 'signal_flow/kinase_substrate_membership'
 TABLE_KEYS.update({KINASES: ['bundle_id'], KINASE_MEMBERS: ['membership_id']})
+LINKS = 'signal_flow/temporal_evidence_links'
+HYPOTHESES = 'signal_flow/downstream_hypotheses'
+TABLE_KEYS.update({LINKS: ['link_id'], HYPOTHESES: ['hypothesis_id']})
 
 
 def finite(value):
@@ -110,7 +113,13 @@ def trajectory_projection(tables, design, registry):
             feature = features.get((fid, sid, track))
             # Features are saved diagnostics. Never recompute them or attach a
             # shape based on finite-but-excluded calculation traces.
-            feature_valid = feature is not None and all(p['included'] for p in points if p['source_ref'])
+            feature_valid = False
+            if feature is not None:
+                saved_values = json.loads(feature.get('values') or '[]')
+                saved_times = json.loads(feature.get('times_minutes') or '[]')
+                feature_valid = saved_times == [p['time_min'] for p in points] and len(saved_values) == len(points) and all(
+                    (v is None and p['value'] is None) or (finite(v) and finite(p['value']) and math.isclose(v,p['value'],abs_tol=1e-12))
+                    for v,p in zip(saved_values,points))
             feature_refs = [source.ref('temporal/ptm_temporal_features', feature)] if feature_valid else []
             pattern = feature.get('pattern') if feature_valid else None
             status = 'saved_feature' if feature_valid else 'unavailable_or_excluded_feature_scope'
@@ -250,3 +259,115 @@ def kinase_projection(tables, design, registry, trajectories):
         'indistinguishable_candidates_json','identifiability_status']),
         KINASE_MEMBERS: pd.DataFrame(members, columns=['membership_id','bundle_id','candidate_id','effect_series_id',
             'contrast_id','track','form_ids_json','trajectory_ids_json','edge_refs_json','source_ref_json','saved_values_json','meaning'])}
+
+
+def observed_order(left, right):
+    """A bracket comparison, not an onset estimator or a causal test."""
+    if not left or not right:
+        return 'not_evaluable', 'saved_feature_unavailable'
+    if left.get('onset_left_censored') or right.get('onset_left_censored'):
+        return 'unresolved', 'left_censored_onset'
+    bounds = [left.get('onset_lower_min'),left.get('onset_upper_min'),right.get('onset_lower_min'),right.get('onset_upper_min')]
+    if not all(finite(v) for v in bounds):
+        return 'not_evaluable', 'onset_bracket_missing'
+    if bounds[1] < bounds[2]: return 'observed_before', 'separated_saved_onset_brackets'
+    if bounds[3] < bounds[0]: return 'observed_after', 'separated_saved_onset_brackets'
+    return 'unresolved', 'overlapping_or_same_sampled_bin'
+
+
+def evidence_map(projections):
+    """Typed existing dependencies/priors plus bounded, reviewable hypotheses.
+
+    No benchmark registry, inferred kinase direction, lag model, or new score.
+    Adjacent observed brackets within an existing candidate support set provide
+    timeline navigation; absence of a link is not absence of a biological relation.
+    """
+    trajectories = projections[TRAJECTORIES].to_dict('records')
+    by_id = {r['trajectory_id']: r for r in trajectories}
+    by_form = {(r['form_id'],r['effect_series_id']): r for r in trajectories if r['track']=='A'}
+    links, hypotheses = {}, []
+    def link(kind, start, end, sid, refs, *, status='linked', reason=None, biological=False):
+        lid = stable_id('signal_evidence_link',[VERSION,kind,start,end,sid,refs])
+        links[lid] = {'link_id':lid,'edge_type':kind,'from_id':start,'to_id':end,'effect_series_id':sid,
+            'source_refs_json':encode(refs),'status':status,'reason':reason,
+            'direction_meaning':'recorded_prior_not_current_experiment_causality' if biological else 'membership_or_observed_dependency_not_regulation',
+            'causality_status':'not_established'}
+        return lid
+    for m in projections[MEMBERS].to_dict('records'):
+        r=by_id[m['trajectory_id']]
+        link('bundle_member',m['bundle_id'],m['trajectory_id'],m['effect_series_id'],
+             [p['source_ref'] for p in json.loads(r['points_json']) if p['source_ref']])
+    members=defaultdict(list)
+    for m in projections[KINASE_MEMBERS].to_dict('records'):
+        members[m['bundle_id']].append(m)
+        for tid in json.loads(m['trajectory_ids_json']):
+            link('method_contribution',tid,m['bundle_id'],m['effect_series_id'],[json.loads(m['source_ref_json'])])
+    for b in projections[KINASES].to_dict('records'):
+        sid=b['effect_series_id']; refs=json.loads(b['edge_refs_json']); edges=json.loads(b['edges_json'])
+        related={}
+        prior_ids=[]; prior_checks=[]
+        for edge,ref in zip(edges,refs):
+            t=by_form.get((edge['form_id'],sid))
+            if not t: continue
+            related[t['trajectory_id']]=t
+            link('candidate_association',t['trajectory_id'],b['bundle_id'],sid,[ref])
+            exact=(edge.get('edge_type')=='curated_exact_site_native'
+                and edge.get('site_mapping_status') in ('unique','single_gene_consistent_coordinates','single_gene_isoform_coordinates')
+                and edge.get('directness')=='site_relation_recorded'
+                and edge.get('candidate_accession') and edge.get('input_accession')
+                and edge.get('substrate_taxon') is not None and edge.get('kinase_taxon') is not None
+                and edge.get('evidence_record_ids'))
+            if exact:
+                prior_ids.append(link('curated_enzyme_substrate_prior',b['bundle_id'],t['trajectory_id'],sid,[ref],
+                    reason='exact_recorded_site_prior; localization_and_experimental_context_limits_remain', biological=True))
+                for upstream in by_form.values():
+                    identity=json.loads(upstream['identity_json'])
+                    taxa=identity.get('taxa',[])
+                    taxon=str(int(edge['kinase_taxon'])) if finite(edge['kinase_taxon']) else str(edge['kinase_taxon'])
+                    if (upstream['effect_series_id']!=sid or upstream['trajectory_id']==t['trajectory_id']
+                            or identity.get('protein_group')!=edge['candidate_accession'] or taxa!=[taxon]):
+                        continue
+                    order,reason=observed_order(json.loads(upstream['feature_json']),json.loads(t['feature_json']))
+                    prior_checks.append({'upstream_observation_id':upstream['trajectory_id'],
+                        'target_observation_id':t['trajectory_id'],'prior_source_ref':ref,
+                        'observation_source_refs':json.loads(upstream['feature_refs_json'])+json.loads(t['feature_refs_json']),
+                        'consistency':'consistent' if order=='observed_before' else 'inconsistent' if order=='observed_after' else 'not_evaluable',
+                        'reason':reason,'meaning':'measured_form_response_order_not_kinase_activation_order',
+                        'prior_falsified':False})
+        ordered=sorted(related.values(),key=lambda r:(
+            (json.loads(r['feature_json']) or {}).get('onset_upper_min') is None,
+            (json.loads(r['feature_json']) or {}).get('onset_upper_min') or 0,r['trajectory_id']))
+        order_links=[]
+        for left,right in zip(ordered,ordered[1:]):
+            status,reason=observed_order(json.loads(left['feature_json']),json.loads(right['feature_json']))
+            order_links.append(link('observed_before',left['trajectory_id'],right['trajectory_id'],sid,
+                json.loads(left['feature_refs_json'])+json.loads(right['feature_refs_json']),status=status,reason=reason))
+            li=json.loads(left['identity_json']);ri=json.loads(right['identity_json'])
+            if li.get('protein_group') and li.get('protein_group')==ri.get('protein_group'):
+                link('same_parent_mathematical_dependence',left['trajectory_id'],right['trajectory_id'],sid,
+                    [json.loads(left['identity_ref_json']),json.loads(right['identity_ref_json'])],reason='shared_parent_adjustment_not_independent_validation')
+        hid=stable_id('signal_hypothesis',[VERSION,b['bundle_id']])
+        hypotheses.append({'hypothesis_id':hid,'bundle_id':b['bundle_id'],'effect_series_id':sid,
+            'kind':'substrate_temporal_association_hypothesis','status':'review_required',
+            'trajectory_ids_json':encode(sorted(related)), 'prior_link_ids_json':encode(prior_ids),
+            'order_link_ids_json':encode(order_links),'prior_status':'recorded_exact_site_prior' if prior_ids else 'missing_exact_prior',
+            'prior_observation_checks_json':encode(prior_checks),
+            'temporal_consistency':'not_evaluable_kinase_activity_onset_not_observed',
+            'counterevidence_json':encode({'indistinguishable_candidates':json.loads(b['indistinguishable_candidates_json']),
+                'saved_diagnostics':json.loads(b['diagnostics_json']), 'points':json.loads(b['points_json'])}),
+            'alternatives_json':encode(['phosphatase/accessibility/localization/turnover','shared_control_and_normalization',
+                'parent_protein_adjustment','changing_membership','shared_substrate_not_independent_cascade']),
+            'required_validation_json':encode(['candidate_specific_perturbation','direct_assay','denser_time_sampling_where_brackets_overlap']),
+            'causality_status':'not_established','semantic_review_status':'not_performed'})
+    return {LINKS:pd.DataFrame(list(links.values()),columns=['link_id','edge_type','from_id','to_id','effect_series_id',
+            'source_refs_json','status','reason','direction_meaning','causality_status']),
+        HYPOTHESES:pd.DataFrame(hypotheses,columns=['hypothesis_id','bundle_id','effect_series_id','kind','status',
+            'trajectory_ids_json','prior_link_ids_json','order_link_ids_json','prior_status','temporal_consistency',
+            'prior_observation_checks_json','counterevidence_json','alternatives_json','required_validation_json','causality_status','semantic_review_status'])}
+
+
+def project_signal_flow(tables, design, registry):
+    result=trajectory_projection(tables,design,registry)
+    result.update(kinase_projection(tables,design,registry,result[TRAJECTORIES]))
+    result.update(evidence_map(result))
+    return result

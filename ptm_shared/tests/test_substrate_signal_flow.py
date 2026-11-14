@@ -7,6 +7,7 @@ from ptm_shared.substrate_signal_flow import trajectory_projection, TRAJECTORIES
 from ptm_shared.astra_evidence_catalog import EvidenceCatalog
 from ptm_shared.substrate_signal_flow import kinase_projection, KINASES, KINASE_MEMBERS
 from ptm_shared.effect_series import resolve_series
+from ptm_shared.substrate_signal_flow import observed_order, evidence_map, LINKS, HYPOTHESES
 
 
 def kinase_fixture(tables,design,registry):
@@ -94,3 +95,42 @@ def test_legacy_identity_never_symbol_only():
     m={**f,'form_id':'f'}
     assert legacy_crosswalk(f,[m],{'f':{'taxa':['9606']}})['form_ids']==['f']
     assert legacy_crosswalk(f,[m],{'f':{'taxa':['10116']}})['status']=='unavailable'
+
+
+def test_brackets_and_no_invented_biological_edge(tmp_path):
+    a={'onset_lower_min':1,'onset_upper_min':5,'onset_left_censored':False}
+    b={'onset_lower_min':15,'onset_upper_min':30,'onset_left_censored':False}
+    assert observed_order(a,b)[0]=='observed_before'
+    assert observed_order(b,a)[0]=='observed_after'
+    assert observed_order(a,{**b,'onset_lower_min':5})[0]=='unresolved'
+    assert observed_order({**a,'onset_left_censored':True},b)[0]=='unresolved'
+    assert observed_order(a,None)[0]=='not_evaluable'
+    _,tables,design,registry=fixture(tmp_path)
+    kinase_fixture(tables,design,registry)
+    outputs=trajectory_projection(tables,design,registry)
+    outputs.update(kinase_projection(tables,design,registry,outputs[TRAJECTORIES]))
+    result=evidence_map(outputs)
+    assert not result[LINKS].edge_type.str.contains('prior').any()
+    assert result[HYPOTHESES].prior_status.eq('missing_exact_prior').all()
+    assert result[LINKS].causality_status.eq('not_established').all()
+    assert result[HYPOTHESES].semantic_review_status.eq('not_performed').all()
+
+
+def test_exact_prior_preserves_opposite_observed_order(tmp_path):
+    _,tables,design,registry=fixture(tmp_path)
+    kinase_fixture(tables,design,registry)
+    outputs=trajectory_projection(tables,design,registry)
+    outputs.update(kinase_projection(tables,design,registry,outputs[TRAJECTORIES]))
+    t=outputs[TRAJECTORIES].query('track == "A"').iloc[0].to_dict()
+    target={**t,'feature_json':json.dumps({'onset_lower_min':1,'onset_upper_min':5}),'feature_refs_json':json.dumps([{'evidence_id':'target_feature'}])}
+    upstream={**t,'trajectory_id':'upstream','form_id':'kinase_form','identity_json':json.dumps({'protein_group':'P123','taxa':['9606']}),
+              'feature_json':json.dumps({'onset_lower_min':15,'onset_upper_min':30}),'feature_refs_json':json.dumps([{'evidence_id':'upstream_feature'}])}
+    outputs[TRAJECTORIES]=pd.DataFrame([target,upstream])
+    for i,b in outputs[KINASES].iterrows():
+        edges=json.loads(b.edges_json)
+        for e in edges:e.update(edge_type='curated_exact_site_native',site_mapping_status='unique',directness='site_relation_recorded',candidate_accession='P123',input_accession='P456',substrate_taxon=9606,kinase_taxon=9606,evidence_record_ids='prior1')
+        outputs[KINASES].loc[i,'edges_json']=json.dumps(edges)
+    outputs[MEMBERS]=outputs[MEMBERS].query('track == "A"')
+    result=evidence_map(outputs)
+    checks=[c for j in result[HYPOTHESES].prior_observation_checks_json for c in json.loads(j)]
+    assert checks and all(c['consistency']=='inconsistent' and not c['prior_falsified'] for c in checks)
