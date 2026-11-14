@@ -2,12 +2,12 @@
   "baseline": "92a3776fcc3747b981a77a4ff0838811b5a9b150",
   "branch": "codex/substrate-signal-flow",
   "commits": {
-    "SF01": "cbf3f44",
-    "SF02": "300172d",
-    "SF03": "aba72b2",
-    "SF04": "5eeb0aa",
-    "SF05": "87fe6a1",
-    "SF06": "local commit recorded after validation"
+    "SF01": "cbf3f445fab2c49867a5a276a795fcae67197d54",
+    "SF02": "300172d2e09bb0a1d9f3aa61a6f3ff2dbea81f30",
+    "SF03": "aba72b259592e42b2b4a5a9cd44a81b7f8e5543a",
+    "SF04": "5eeb0aa3521d83320a56b3b9ad7e4644c69ad960",
+    "SF05": "87fe6a1e49e31877e6bee8e7ea1d9c62f4e5473b",
+    "SF06": "c01d6021a18780cc27c170279d17d4cb0ead19d7"
   },
   "tests": {
     "unique_tests": 70,
@@ -116,5 +116,17 @@
     "workers/tests/test_atlas_context.py",
     "docs/astra_evidence_integration/SUBSTRATE_SIGNAL_FLOW_UPGRADE_KO.md",
     "docs/astra_evidence_integration/SUBSTRATE_SIGNAL_RESULTS.json"
+  ],
+  "implementation_commit": "c01d6021a18780cc27c170279d17d4cb0ead19d7",
+  "code_snapshot_matches_committed_reader_modules": [
+    "substrate_signal_flow.py",
+    "substrate_signal_reader.py",
+    "substrate_signal_view.py",
+    "astra_reader.py",
+    "astra_reader_replay.py",
+    "astra_reader_revision.py",
+    "astra_package.py",
+    "astra_figures.py",
+    "quantitative_fields.py"
   ]
 }

@@ -11,7 +11,9 @@
 | SF03 | 관측 bracket·exact prior·계산 의존성·가설 분리 | aba72b2 |
 | SF04 | Classic All/N/mode 수정, 전체 탐색 API/React/Atlas identity | 5eeb0aa |
 | SF05 | 일반 발행·revision·replay·그림·writer 공통 소비 | 87fe6a1 |
-| SF06 | 실제 저장 표/ZIP/replay 검증, 연결 오류 수정·최종 보고 | 검증 후 commit, 아래 checkpoint 참조 |
+| SF06 | 실제 저장 표/ZIP/replay 검증, 연결 오류 수정·최종 보고 | c01d602 |
+
+구현·검증 최종 commit: `c01d6021a18780cc27c170279d17d4cb0ead19d7`. 이 보고서의 SHA 기록은 별도 docs commit으로 확정한다. 패키지의 변경된 reader 모듈9개 hash가 이 commit의 코드와 일치함을 확인했다.
 
 단계 문서: [SF01](SUBSTRATE_SIGNAL_SF01_KO.md), [SF02](SUBSTRATE_SIGNAL_SF02_KO.md), [SF03](SUBSTRATE_SIGNAL_SF03_KO.md), [SF04](SUBSTRATE_SIGNAL_SF04_KO.md), [SF05](SUBSTRATE_SIGNAL_SF05_KO.md), [SF06](SUBSTRATE_SIGNAL_SF06_KO.md). 기계 판독 결과: [RESULTS](SUBSTRATE_SIGNAL_RESULTS.json).
 

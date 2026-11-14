@@ -25,3 +25,5 @@
 실제 time-matched 주문, 운영 UI/worker/다운로드, 신규 모델 보고서 품질 비교는 미검증이다. exact Legacy feature→Astra form crosswalk가 없는 입력은 unavailable이며 gene/site로 강제 연결하지 않는다. relation bundle이 없으면 missing prior를 표시하고 관측 궤적·기질 association은 제공한다. 모든 temporal hypothesis는 review_required / causality not_established이며 no-call이나 미계산 biological p/q를 승격하지 않는다.
 
 최종 실제 확인: 전체84,720 track points 및13,704 joint 분해, 기존175,537 evidence/source keys 보존. v3 immutable ZIP의 archive 자체 코드 replay에서56 reader 파일 byte 동일, manifest288개 검증, science/network/model0회. 원본273개 files와 기존 입력·ZIP·pointer 유지. 작업 프로세스 잔여0개, 디스크 여유 약3.48GiB. 최종 artifact 경로/hash는 통합 보고를 따른다.
+
+SF06 구현·검증 로컬 commit: `c01d6021a18780cc27c170279d17d4cb0ead19d7`.
