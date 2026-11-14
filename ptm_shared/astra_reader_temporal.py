@@ -48,6 +48,7 @@ LIMITS = [
     'Descriptive footprint values are log2 relative changes; PhosX native scores and method p/q are separate. Do not apply footprint onset/peak rules to PhosX native scores.',
     'Technical injections are not biological replicates. Stored statistical_unit names describe aggregation, not evidence for population inference. No-call, unmeasured localization and literature review restrictions remain in force.',
 ]
+LEGACY_SHARED_INTERVAL_LIMIT = 'Adjacent U_joint/P_joint/A and run IDs are saved interval contrasts, never differences between two baseline contrasts.'
 
 
 def _parts(value):
@@ -295,6 +296,14 @@ def validate_temporal(tables):
     packet = json.loads(tables['reader/packet'].iloc[0].packet_json)
     if 'temporal_evidence' not in packet: return
     expected = project_temporal(tables, packet)
+    # Pre-C03 shared-reference archives recorded this exact explanatory sentence
+    # under the same reader version. Accept that historical text only; all rows,
+    # masks, links, scopes and numeric checks below remain authoritative.
+    from .effect_series import has_matched
+    legacy_limits = [LEGACY_SHARED_INTERVAL_LIMIT if i==4 else v for i,v in enumerate(LIMITS)]
+    if (not has_matched(packet['canonical_study_design']) and EFFECT_INTERVAL not in tables and POINTS not in tables
+            and packet['temporal_evidence'].get('interpretation_limits')==legacy_limits):
+        expected['interpretation_limits'] = legacy_limits
     def same(a, b):
         if isinstance(a, dict): return isinstance(b, dict) and a.keys() == b.keys() and all(same(v, b[k]) for k, v in a.items())
         if isinstance(a, list): return isinstance(b, list) and len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))

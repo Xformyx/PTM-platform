@@ -53,3 +53,24 @@ def test_bundled_reader_entry_isolated_and_source_read_only(config,tmp_path):
     (root/'quant/comparisons.csv').write_text('tampered')
     r=subprocess.run([sys.executable,'-I','-B',str(root/'reader_replay.py'),'--output',str(tmp_path/'bad source')],cwd='/tmp',env=env,capture_output=True,text=True)
     assert r.returncode!=0 and 'hash' in r.stderr.lower()
+
+
+def test_revision_captures_dependencies_absent_from_old_code_snapshot(config,tmp_path):
+    from ptm_shared import astra_evidence_v6 as engine
+    from ptm_shared.astra_reader_revision import revise_temporal
+    config['experimental_context']['quantitation_export_mode']='astra_analysis.v6'
+    result=engine.run('older-layout-fixture',config,tmp_path/'old')
+    root=tmp_path/'old/enrichment_free_runs'/result['run_id']
+    manifest=json.loads((root/'manifest.json').read_text())
+    absent=['effect_series.py','control_comparison.py','study_display.py','study_display.json','study_input_metadata.py']
+    for name in absent:
+        rel='reproducibility/code/ptm_shared/'+name
+        (root/rel).unlink();manifest['files'].pop(rel)
+    (root/'manifest.json').write_text(json.dumps(manifest))
+    revised=revise_temporal(root,tmp_path/'revision',whole_only=True)
+    destination=tmp_path/'revision/enrichment_free_runs'/revised['run_id']
+    metadata=json.loads((destination/'reproducibility/temporal_reader_revision.json').read_text())
+    assert set(absent)<=set(metadata['refreshed_code_files'])
+    r=subprocess.run([sys.executable,'-I','-B',str(destination/'reader_replay.py'),'--output',str(tmp_path/'replay')],
+        cwd='/tmp',env={k:v for k,v in os.environ.items() if k!='PYTHONPATH'},capture_output=True,text=True)
+    assert r.returncode==0,r.stderr+r.stdout

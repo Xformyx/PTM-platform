@@ -150,6 +150,10 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     # Source values and selection stay fixed; ordinary temporal revisions may
     # permute cards by recorded time. M1/M3/M4 retain the original card bytes.
     allowed={'reader/packet.csv',INDEX,LINKS}
+    # The typed review plan is a reader projection of the current catalog scope,
+    # not an executed review. v1 -> v2 updates scope/order while retaining keys.
+    from .astra_literature_review import PLAN
+    if PLAN in artifacts:allowed.add(PLAN)
     if not (access_only or whole_only or review_plan_only):allowed.add('reader/cards.csv')
     if whole_only:
         from .astra_reader_full import TABLE_KEYS as FULL_KEYS
@@ -175,6 +179,9 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     if whole_only:refreshed_code|={'astra_reader_full.py','astra_reader_temporal.py'}
     if review_plan_only:refreshed_code|={'astra_literature_review.py','astra_literature.py','finding_literature.py'}
     refreshed_code.update(READER_CODE_FILES)
+    # Older archives predate canonical effect/display helper modules. Bundle
+    # missing dependencies without replacing their recorded scientific modules.
+    refreshed_code.update(name for name in code_files if not (directory/'reproducibility/code/ptm_shared'/name).is_file())
     captured={name:digest(Path(__file__).with_name(name)) for name in refreshed_code}
     (directory/'reproducibility/code/ptm_shared').mkdir(parents=True,exist_ok=True)
     for name in refreshed_code:shutil.copyfile(Path(__file__).with_name(name),directory/'reproducibility/code/ptm_shared'/name)
@@ -244,17 +251,18 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
         readiness['reader']['literature_comparison']=readiness['literature']['status']
         json_write(directory/'evidence/readiness.json',readiness)
     counts=dict(zip(tables['evidence/coverage_funnel'].metric,tables['evidence/coverage_funnel']['count']))
-    (directory/'START_HERE_ASTRA.md').write_text(((source/'START_HERE_ASTRA.md').read_text()+
+    current_start=start_here(snapshot,counts,readiness)
+    (directory/'START_HERE_ASTRA.md').write_text((current_start+
         '\n\nWhole evidence access: [catalog and query guide](reader/EVIDENCE_ACCESS.md). Summary findings are a preview, not the full evidence scope.\n' if access_only else start_here(snapshot,counts,readiness))+
         '\n\nSaved reader revision: original scientific tables and literature decisions retained; no new analysis.\n',encoding='utf-8')
     if whole_only:
-        (directory/'START_HERE_ASTRA.md').write_text('Read [whole evidence denominators, question links and citation instructions](reader/FULL_EVIDENCE.md) before summary findings.\n\n'+(source/'START_HERE_ASTRA.md').read_text(),encoding='utf-8')
+        (directory/'START_HERE_ASTRA.md').write_text('Read [whole evidence denominators, question links and citation instructions](reader/FULL_EVIDENCE.md) before summary findings.\n\n'+current_start,encoding='utf-8')
     if review_plan_only:
-        (directory/'START_HERE_ASTRA.md').write_text((source/'START_HERE_ASTRA.md').read_text()+'\n\n[Whole-evidence literature review subjects](reader/LITERATURE_REVIEW_PLAN.md): new plan only, no new search or model comparison. Existing literature results remain authoritative.\n',encoding='utf-8')
+        (directory/'START_HERE_ASTRA.md').write_text(current_start+'\n\n[Whole-evidence literature review subjects](reader/LITERATURE_REVIEW_PLAN.md): new plan only, no new search or model comparison. Existing literature results remain authoritative.\n',encoding='utf-8')
     if review_execution is not None:
         (directory/'START_HERE_ASTRA.md').write_text('[Actual typed literature retrieval/comparison and partial coverage](reader/LITERATURE_SUBJECT_REVIEW.md). '
             'M3 plan availability is separate from actual execution. Legacy literature and scientific results are unchanged.\n\n'+
-            (source/'START_HERE_ASTRA.md').read_text(),encoding='utf-8')
+            current_start,encoding='utf-8')
     elif inherited_execution is not None:
         with (directory/'START_HERE_ASTRA.md').open('a',encoding='utf-8') as handle:
             handle.write('\n[Frozen whole-evidence subject execution](reader/LITERATURE_SUBJECT_REVIEW.md) is retained; no new search or model call.\n')

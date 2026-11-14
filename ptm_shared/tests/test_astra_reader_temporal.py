@@ -148,6 +148,22 @@ def test_missing_ambiguous_duplicate_scope_and_tampering(saved):
     with pytest.raises(ValueError, match='differs from saved'): temporal.validate_temporal(saved)
 
 
+def test_legacy_shared_explanation_preserves_strict_source_validation(saved):
+    tables=saved
+    temporal.attach_temporal(tables)
+    packet=json.loads(tables['reader/packet'].iloc[0].packet_json)
+    packet['temporal_evidence']['interpretation_limits'][4]=temporal.LEGACY_SHARED_INTERVAL_LIMIT
+    tables['reader/packet'].loc[:,'packet_json']=encode(packet)
+    temporal.validate_temporal(tables)
+    packet['temporal_evidence']['interpretation_limits'][4]='unverified replacement'
+    tables['reader/packet'].loc[:,'packet_json']=encode(packet)
+    with pytest.raises(ValueError,match='projection differs'):temporal.validate_temporal(tables)
+    packet['temporal_evidence']['interpretation_limits'][4]=temporal.LEGACY_SHARED_INTERVAL_LIMIT
+    packet['temporal_evidence']['source_inventory'][0]['total_rows']+=1
+    tables['reader/packet'].loc[:,'packet_json']=encode(packet)
+    with pytest.raises(ValueError,match='projection differs'):temporal.validate_temporal(tables)
+
+
 def test_existing_v6_reader_builder_consumes_saved_tables_without_analysis(saved):
     p = packet(saved)
     result = build_reader_tables(saved, p['canonical_study_design'])

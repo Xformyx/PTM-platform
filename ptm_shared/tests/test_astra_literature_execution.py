@@ -69,6 +69,11 @@ def test_published_execution_replays_and_failed_scope_preserves_success(config,t
     with patch.object(review,'execute_review',side_effect=AssertionError('frozen publication only')):
         result=revise_temporal(source,tmp_path/'revision',review_execution=pin)
     root=tmp_path/'revision/enrichment_free_runs'/result['run_id']
+    current=json.loads((root/'reader/EXECUTION_STATUS.json').read_text())
+    assert current==json.loads((root/'evidence/readiness.json').read_text())['current_execution']
+    assert json.dumps(current,ensure_ascii=False,sort_keys=True) in (root/'START_HERE_ASTRA.md').read_text()
+    revision=json.loads((root/'reproducibility/temporal_reader_revision.json').read_text())
+    assert 'reader/LITERATURE.md' in revision['reader_artifacts']
     assert review.validate_execution(EvidenceCatalog(root))['comparison_executed_subjects']==1
     validate_package(root)
     manifest=json.loads((source/'manifest.json').read_text())

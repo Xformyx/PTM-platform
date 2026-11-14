@@ -102,16 +102,20 @@ def status_markdown(packet):
     return '\n\n'.join(lines[:2])+'\n\n'+'\n'.join(lines[2:])+'\n'
 
 
-def write_status_views(directory, packet):
+def write_status_views(directory, packet, *, source_root=None):
     """Only display files in a new output directory; pin/table bytes untouched."""
     import re
     from pathlib import Path
-    root=Path(directory);state=attach_current_status(packet)
+    root=Path(directory);state=attach_current_status(packet);artifacts=[PATH]
     (root/PATH).write_text(json.dumps(state,ensure_ascii=False,indent=2,sort_keys=True)+'\n',encoding='utf-8')
     note='<!-- current-execution-start -->\n'+status_markdown(packet)+'<!-- current-execution-end -->'
     for name in ['READ_ME.md','FULL_EVIDENCE.md','LITERATURE.md','LITERATURE_SUBJECT_REVIEW.md']:
         p=root/'reader'/name
+        if not p.exists() and source_root is not None:
+            source=Path(source_root)/'reader'/name
+            if source.is_file():p.write_bytes(source.read_bytes())
         if p.is_file():
             content=re.sub(r'\n*<!-- current-execution-start -->.*?<!-- current-execution-end -->','',p.read_text(),flags=re.S)
             p.write_text(content.rstrip()+'\n\n'+note+'\n',encoding='utf-8')
-    return [PATH]
+            artifacts.append('reader/'+name)
+    return artifacts

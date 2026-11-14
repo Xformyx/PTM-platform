@@ -581,7 +581,8 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
             note='\n\n## 전체 근거의 실제 문헌 실행 (M4)\n\n[명시적 대상의 검색·비교와 미실행 범위](LITERATURE_SUBJECT_REVIEW.md)를 확인하세요. M3는 대상 계획이며 실제 상태는 M4 실행표가 기준입니다. 원래 15개 findings와 문헌 결과는 보존됩니다.\n'
         path=directory/'reader/READ_ME.md';original=path.read_text() if path.exists() else ''
         if note not in original:path.write_text(original+note,encoding='utf-8')
-        write_status_views(directory,packet)
+        access_artifacts += [p for p in write_status_views(directory,packet,source_root=source_root)
+                             if p not in access_artifacts and p!='reader/READ_ME.md']
         return access_artifacts+['reader/authoring_packet.json','reader/READ_ME.md']
     if whole_only:
         json_write(directory/'reader/authoring_packet.json',packet)
@@ -589,7 +590,8 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         note='## 전체 근거 읽기 (M2)\n\n전체 분모 → 질문별 근거·미연결 → 필요한 원본 → 요약 → 시간·방법·기존 문헌. [전체 연결 및 typed 인용](FULL_EVIDENCE.md). 기존 findings는 preview입니다.\n\n'
         path=directory/'reader/READ_ME.md';original=path.read_text() if path.exists() else ''
         if not original.startswith(note):path.write_text(note+original,encoding='utf-8')
-        write_status_views(directory,packet)
+        access_artifacts += [p for p in write_status_views(directory,packet,source_root=source_root)
+                             if p not in access_artifacts and p!='reader/READ_ME.md']
         return access_artifacts+['reader/authoring_packet.json','reader/question_map.json','reader/READ_ME.md']
     if access_only:
         # A reader revision must not reinterpret newer archived literature/cards
@@ -599,7 +601,8 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         path = directory/'reader/READ_ME.md'
         original = path.read_text() if path.exists() else ''
         if note not in original: path.write_text(original + note, encoding='utf-8')
-        write_status_views(directory,packet)
+        access_artifacts += [p for p in write_status_views(directory,packet,source_root=source_root)
+                             if p not in access_artifacts and p!='reader/READ_ME.md']
         return access_artifacts + ['reader/authoring_packet.json', 'reader/READ_ME.md']
     for name,value in [('authoring_packet',packet),('coverage_summary',packet['coverage_inventory']),
             ('question_map',packet['research_question_evidence_map']),('selection_audit',packet['observation_selection_audit'])]:
