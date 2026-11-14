@@ -151,7 +151,10 @@ def field_semantics(table, column, *, row=None, dtype=None):
     def known(meaning, unit, scale='identity', statistical_unit='not_applicable', restriction_class='recorded_metadata', **extra):
         out.update(meaning=meaning, unit=unit, scale=scale, statistical_unit=statistical_unit,
                    restriction_class=restriction_class, status='known', unknown_reason=None, **extra)
-    if column in LOG_EFFECTS and table.startswith(('quant/', 'temporal/', 'evidence/')):
+    if table=='quant/detection' and column in {'post_reference_U','raw_candidate_A','eligible_A'} and row.get('detection_version')!='target_arm_post_reference.v2':
+        out.update(unknown_reason='legacy_detection_semantics_not_versioned',restriction_class='relative_effect',
+                   meaning='Stored legacy detection track; preserved without recalculation. Cross-time eligibility has not been upgraded.')
+    elif column in LOG_EFFECTS and table.startswith(('quant/', 'temporal/', 'evidence/')):
         known(LOG_EFFECTS[column], 'log2_ratio', 'log2', 'recorded_material_unit_or_pair', 'relative_effect')
     elif column in {'ptm_intensity', 'parent_intensity'}:
         known('Positive supplied matrix intensity; upstream normalization is not inferred.', 'supplied_intensity_unit',
@@ -204,6 +207,9 @@ def field_semantics(table, column, *, row=None, dtype=None):
         known('Recorded boolean observation/eligibility mask; false is distinct from unknown.', 'boolean',allowed_values=[False,True],restriction_class='mask')
     elif column.endswith(('_status','_reason','_reasons')) or column in {'status','resolution','pairing','reference_strategy','effect_kind'}:
         known('Recorded status/declaration; no additional scientific approval is implied.', 'category',restriction_class='status')
+    elif table.startswith('reader/literature') and column=='source_json.document':
+        known('Stored retrieved text fragment; not whole-paper review, independent validation or semantic approval.',
+              'text',restriction_class='literature_fragment')
     return out
 
 
@@ -211,8 +217,10 @@ def table_field_semantics(table, frame):
     """Complete descriptors, including explicit unknowns, without changing CSVs."""
     statuses = [c for c in frame if c.endswith(('_status','_reason','_reasons')) or c in {'status','included','inference_use_allowed'}]
     fields = {}
+    row_contract = ({'detection_version':'target_arm_post_reference.v2'} if 'detection_version' in frame and
+                    frame.detection_version.eq('target_arm_post_reference.v2').all() else {})
     for column in frame:
-        fields[column] = {**field_semantics(table,column,dtype=frame[column].dtype),
+        fields[column] = {**field_semantics(table,column,dtype=frame[column].dtype,row=row_contract),
                           'observed_null_count':int(frame[column].isna().sum()),
                           'dtype':str(frame[column].dtype),'null_status_binding':statuses}
     variants = []

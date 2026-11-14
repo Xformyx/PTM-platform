@@ -329,6 +329,9 @@ effect_memberships_json은 카드의 모든 실제 contrast 연결을 보존합�
 저장된 reader 재현: `python reader_replay.py --output <new-directory>` (패키지 루트에서).
 이 명령은 archive 자체 코드/저장 표를 사용합니다. 새 코드 revision과 전체 과학 replay는 별도입니다.
 일괄 전달: 같은 CLI의 `bundle --request '{"scope":{"effect_series_id":"..."},"row_budget":100,"byte_budget":262144}'`.
+구조화된 주장 검증: `check-claims --claims claims.json` (JSON ledger 배열). field_path, asserted_value, unit,
+claim_level과 실제 target/reference/time을 기록하세요. 반올림은 rounding_precision, 작은 오차는 tolerance로
+명시합니다. 출처·수치·범위·제한을 별도로 검사하며 semantic_review_status는 not_performed입니다.
 next_cursor를 다음 요청의 continuation으로 전달하세요. budget은 응답 크기이며 전체 분석 범위가 아닙니다.
 source_roles는 기존 연결의 역할입니다. 문헌 원문/미검토 상태는 additional_context_access의 저장 source 요청으로 이어집니다.
 
@@ -492,6 +495,10 @@ class EvidenceCatalog:
         from .astra_evidence_bundle import bundle
         return bundle(self, request or {})
 
+    def check_claims(self, claims):
+        from .astra_claim_check import check_claims
+        return check_claims(self, claims)
+
     def resolve(self, evidence_ids):
         self._require(); by_id = self.index.set_index('evidence_id')
         if set(evidence_ids) - set(by_id.index): raise ValueError('Unknown evidence ID')
@@ -528,12 +535,14 @@ def main():
         p = commands.add_parser(name); p.add_argument('ids', nargs='+')
     p = commands.add_parser('source'); p.add_argument('table'); p.add_argument('--key', required=True)
     p = commands.add_parser('bundle'); p.add_argument('--request', default='{}')
+    p = commands.add_parser('check-claims'); p.add_argument('--claims', type=Path, required=True)
     args = parser.parse_args(); catalog = EvidenceCatalog(args.package)
     if not catalog.catalog_available: result = catalog.catalog
     elif args.command == 'query': result = catalog.query(json.loads(args.filters), args.cursor, args.page_size)
     elif args.command == 'resolve': result = catalog.resolve(args.ids)
     elif args.command == 'links': result = catalog.resolve_links(args.ids)
     elif args.command == 'bundle': result = catalog.bundle(json.loads(args.request))
+    elif args.command == 'check-claims': result = catalog.check_claims(json.loads(args.claims.read_text()))
     else: result = catalog.source_rows(args.table, [json.loads(args.key)])
     print(encode(result))
 
