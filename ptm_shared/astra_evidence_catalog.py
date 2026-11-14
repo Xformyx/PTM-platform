@@ -5,7 +5,7 @@ module stores only locators and searchable metadata, not cards or value arrays.
 """
 import argparse
 import base64
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import json
 from pathlib import Path
 
@@ -292,6 +292,8 @@ def build_evidence_index(root, dictionary):
                              for name in SOURCE_TABLES if name+'.csv' not in sources},
         'indexed_rows': len(index), 'links': len(links), 'review_status': 'not_recorded',
         'counts_are_representations_not_independent_observations': True,
+        'bundle_contract':{'schema_version':'astra_evidence_bundle.v1','entrypoint':'bundle --request JSON',
+                           'question_scope':'stored full_question_links only','budget':'one response, never population truncation'},
         'query': {'default_exclusions': [], 'sort': SORT,
                   'filters': ['entity', 'evidence_type', 'source_table', 'status', *IDS, *SCOPE, 'taxon', 'selected_for_summary']}}
     return index, catalog, links
@@ -326,6 +328,9 @@ effect_memberships_json은 카드의 모든 실제 contrast 연결을 보존합�
 새 index는 새 catalog/cursor 계약입니다. 과거 catalog와 citation을 소급 변경하지 않습니다.
 저장된 reader 재현: `python reader_replay.py --output <new-directory>` (패키지 루트에서).
 이 명령은 archive 자체 코드/저장 표를 사용합니다. 새 코드 revision과 전체 과학 replay는 별도입니다.
+일괄 전달: 같은 CLI의 `bundle --request '{"scope":{"effect_series_id":"..."},"row_budget":100,"byte_budget":262144}'`.
+next_cursor를 다음 요청의 continuation으로 전달하세요. budget은 응답 크기이며 전체 분석 범위가 아닙니다.
+source_roles는 기존 연결의 역할입니다. 문헌 원문/미검토 상태는 additional_context_access의 저장 source 요청으로 이어집니다.
 
 선정 findings와 authoring packet의 reader_cards는 요약 preview입니다. 전체 분석 범위가 아닙니다.
 [catalog](evidence_catalog.json) · [전체 인덱스](evidence_index.csv) · [기존 관계](evidence_links.csv).
@@ -398,6 +403,17 @@ class EvidenceCatalog:
                 offset = parsed['offset']
                 if not isinstance(offset, int) or offset < 0: raise ValueError('Invalid cursor offset')
             except (KeyError, TypeError, json.JSONDecodeError) as exc: raise ValueError('Invalid cursor') from exc
+        f = self._filtered_index(filters)
+        total = len(f)
+        if offset > total: raise ValueError('Cursor outside result set')
+        page = f.iloc[offset:offset+page_size]; following = offset + len(page)
+        cursor = base64.urlsafe_b64encode(encode({'binding': fingerprint, 'offset': following}).encode()).decode() if following < total else None
+        return {'items': [source_row(r) for r in page.to_dict('records')], 'total_count': total,
+                'returned_count': len(page), 'next_cursor': cursor, 'applied_filters': filters, 'review_status': 'not_recorded'}
+
+    def _filtered_index(self, filters):
+        self._require()
+        if not set(filters) <= set(self.catalog['query']['filters']): raise ValueError('Unknown filter')
         f = self.index
         point_filters = {k: v if isinstance(v, list) else [v] for k, v in filters.items() if k in POINT_SCOPE}
         if point_filters and 'effect_memberships_json' in f:
@@ -417,18 +433,19 @@ class EvidenceCatalog:
             elif key in SCOPE: mask = f.scope_json.map(lambda v: json.loads(v).get(key) in values)
             else: mask = f[key].isin(values)
             f = f.loc[mask]
-        total = len(f)
-        if offset > total: raise ValueError('Cursor outside result set')
-        page = f.iloc[offset:offset+page_size]; following = offset + len(page)
-        cursor = base64.urlsafe_b64encode(encode({'binding': fingerprint, 'offset': following}).encode()).decode() if following < total else None
-        return {'items': [source_row(r) for r in page.to_dict('records')], 'total_count': total,
-                'returned_count': len(page), 'next_cursor': cursor, 'applied_filters': filters, 'review_status': 'not_recorded'}
+        return f
 
     def source_rows(self, name, keys):
         self._require()
         if name not in self.catalog['sources']: raise ValueError('Unregistered source: ' + name)
-        meta = self.catalog['sources'][name]; self._verify(name, meta)
+        meta = self.catalog['sources'][name]
         if any(set(k) != set(meta['unique_key']) for k in keys): raise ValueError('Invalid canonical source key')
+        self._validate_source_keys(name)
+        cached = self._cached_source(name)
+        if cached is not None:
+            wanted=[encode(k) for k in keys]
+            if not set(wanted) <= set(cached.index): raise ValueError('Unknown source key: ' + name)
+            return [source_row(r) for r in cached.loc[wanted].to_dict('records')]
         wanted = {encode(k) for k in keys}; found = {}
         for chunk in read_source(self.root, name, meta, chunksize=20000):
             # Match only key columns before materializing potentially large card JSON.
@@ -437,8 +454,43 @@ class EvidenceCatalog:
                 if key in wanted:
                     if key in found: raise ValueError('Duplicate resolved source key')
                     found[key] = source_row(chunk.loc[ix].to_dict())
+            # Every canonical key was validated over the complete source above.
+            if set(found)==wanted: break
         if set(found) != wanted: raise ValueError('Unknown source key: ' + name)
         return [found[encode(k)] for k in keys]
+
+    def _validate_source_keys(self, name):
+        self._require()
+        if not hasattr(self,'_unique_sources'): self._unique_sources=set()
+        if name in self._unique_sources: return
+        meta=self.catalog['sources'][name];seen=set();count=0
+        for chunk in read_source(self.root,name,meta,columns=meta['unique_key'],chunksize=50000):
+            for values in chunk[meta['unique_key']].itertuples(index=False,name=None):
+                key=encode(dict(zip(meta['unique_key'],values)))
+                if key in seen: raise ValueError('Duplicate canonical source key: '+name)
+                seen.add(key);count+=1
+        if count!=meta['rows']: raise ValueError('Source row count mismatch: '+name)
+        self._unique_sources.add(name)
+
+    def _cached_source(self, name):
+        if not hasattr(self,'_source_frames'):
+            self._source_frames=OrderedDict();self._source_frame_bytes=0
+        if name in self._source_frames:
+            self._source_frames.move_to_end(name);return self._source_frames[name][0]
+        # Session-local, bounded memory; large tables use verified streaming.
+        if safe_path(self.root,name).stat().st_size>8*1024*1024: return None
+        meta=self.catalog['sources'][name];frame=read_source(self.root,name,meta)
+        frame.index=[encode(dict(zip(meta['unique_key'],v))) for v in frame[meta['unique_key']].itertuples(index=False,name=None)]
+        size=int(frame.memory_usage(index=True,deep=True).sum())
+        if size>32*1024*1024: return None
+        while self._source_frames and self._source_frame_bytes+size>32*1024*1024:
+            _,(_,old_size)=self._source_frames.popitem(last=False);self._source_frame_bytes-=old_size
+        self._source_frames[name]=(frame,size);self._source_frame_bytes+=size
+        return frame
+
+    def bundle(self, request=None):
+        from .astra_evidence_bundle import bundle
+        return bundle(self, request or {})
 
     def resolve(self, evidence_ids):
         self._require(); by_id = self.index.set_index('evidence_id')
@@ -475,11 +527,13 @@ def main():
     for name in ['resolve', 'links']:
         p = commands.add_parser(name); p.add_argument('ids', nargs='+')
     p = commands.add_parser('source'); p.add_argument('table'); p.add_argument('--key', required=True)
+    p = commands.add_parser('bundle'); p.add_argument('--request', default='{}')
     args = parser.parse_args(); catalog = EvidenceCatalog(args.package)
     if not catalog.catalog_available: result = catalog.catalog
     elif args.command == 'query': result = catalog.query(json.loads(args.filters), args.cursor, args.page_size)
     elif args.command == 'resolve': result = catalog.resolve(args.ids)
     elif args.command == 'links': result = catalog.resolve_links(args.ids)
+    elif args.command == 'bundle': result = catalog.bundle(json.loads(args.request))
     else: result = catalog.source_rows(args.table, [json.loads(args.key)])
     print(encode(result))
 
