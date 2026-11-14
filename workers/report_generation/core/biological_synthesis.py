@@ -637,7 +637,8 @@ def format_biological_synthesis_packet_for_llm(packet: Mapping[str, Any] | None,
         "Do not turn a literature relationship, motif score, Wave co-membership, lag, or pathway diagram into an Order-specific direct kinase–site or causal edge.",
         "=== END DATA-GROUNDED BIOLOGICAL SYNTHESIS PACKET ===",
     ])
-    return format_signal_report(packet.get("substrate_signal_flow")) + "\n".join(lines)
+    from ptm_shared.study_context_delivery import format_report_context
+    return format_report_context(packet.get("study_context_delivery")) + format_signal_report(packet.get("substrate_signal_flow")) + "\n".join(lines)
 
 
 def _report_cell(value: Any) -> str:

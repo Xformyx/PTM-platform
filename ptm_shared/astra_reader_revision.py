@@ -223,6 +223,7 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
         code_sha256=codes,origin_analysis_code_sha256=origin.get('origin_analysis_code_sha256',origin['code_sha256']),
         stage_reuse={'scientific_tables':{'status':'reused_from_validated_package','run_id':origin['run_id']},
                     'literature':{'status':'frozen_results_reused','run_id':origin['run_id']}})
+    provenance['execution_snapshot_run_id'] = origin.get('execution_snapshot_run_id', origin['run_id'])
     binding=json.loads(tables['reader/packet'].iloc[0].packet_json).get('literature_subject_execution',{}).get('binding')
     if binding:provenance['literature_subject_review']=binding
     provenance['reader_revision_sha256']=object_hash(revision)

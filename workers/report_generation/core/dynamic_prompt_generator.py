@@ -1450,7 +1450,8 @@ def format_temporal_evidence_packet_for_llm(
 ) -> str:
     """Format the packet as a mandatory, compact writer supplement."""
     from ptm_shared.substrate_signal_reader import format_signal_report
-    signal_text=format_signal_report((packet or {}).get("substrate_signal_flow"))
+    from ptm_shared.study_context_delivery import format_report_context
+    signal_text=format_report_context((packet or {}).get("study_context_delivery"))+format_signal_report((packet or {}).get("substrate_signal_flow"))
     if not packet or packet.get("status") != "available":
         return signal_text + (
             "=== TEMPORAL NUMERICAL EVIDENCE PACKET ===\n"

@@ -173,7 +173,8 @@ def transfer_contract(snapshot, design, context, literature):
     questions = (original.get('report_options') or {}).get('research_questions')
     brief = ['# Study brief', f"Project: {original.get('project_name')}", f"Order: {original.get('order_code')}",
              f"{len(design['injections'])} injections / {len(design['materials'])} materials / {len(design['conditions'])} conditions / {len(design['contrasts'])} contrasts",
-             f"Replication declaration: {design['replication_declaration']}. No biological p/q method is implemented.",
+             f"Replication declaration: {design['replication_declaration']}. Actual computed/not-computed status: evidence/readiness.json and science/inference_results.csv.",
+             '[Common context, roles and source locators](../reader/STUDY_CONTEXT.md). Design prose is context; report_options.research_questions is a separate input.',
              '## Conditions and references', '| Condition ID | Arm | Label | Original time | Minutes |', '|---|---|---|---|---|']
     for c in design['conditions']:
         brief.append(f"| {c['condition_id']} | {c['arm_id']} | {c['label']} | {c.get('time')} | {(c.get('time') or {}).get('minutes')} |")
@@ -216,6 +217,11 @@ def validate_delivery(directory, archive=None):
     def read(name):
         if Path(name).is_absolute() or '..' in Path(name).parts: raise ValueError('Unsafe input locator')
         return archive.read(name) if archive is not None else (root/name).read_bytes()
+    try: packet = json.loads(read('reader/authoring_packet.json'))
+    except (FileNotFoundError, KeyError): packet = None
+    if packet and packet.get('study_context_delivery', {}).get('file'):
+        from .study_context_delivery import verify_context_binding
+        verify_context_binding(root, packet['study_context_delivery'], read=read)
     try: receipt = json.loads(read('study/input_delivery_receipt.json'))
     except (FileNotFoundError, KeyError):
         try: version = json.loads(read('study/user_input_snapshot.json')).get('schema_version')
@@ -225,12 +231,15 @@ def validate_delivery(directory, archive=None):
     errors = []
     snapshot = json.loads(read('study/user_input_snapshot.json'))
     verify_snapshot(snapshot, receipt['source'], stage=stage)
+    if packet and not packet.get('study_context_delivery', {}).get('file'):
+        errors.append({'stage': stage, 'field_path': 'reader/authoring_packet.json#/study_context_delivery', 'reason': 'consumer_binding_missing'})
     for name, expected in receipt['document_sha256'].items():
         try: actual = hashlib.sha256(read(name)).hexdigest()
         except (FileNotFoundError, KeyError): actual = None
         if actual != expected: errors.append({'stage': stage, 'field_path': name, 'reason': 'missing' if actual is None else 'stale_source'})
     if receipt.get('run_id'):
-        if json.loads(read('provenance.json')).get('run_id') != receipt['run_id']:
+        provenance = json.loads(read('provenance.json'))
+        if receipt['run_id'] not in {provenance.get('run_id'), provenance.get('execution_snapshot_run_id')}:
             errors.append({'stage': stage, 'field_path': 'provenance.json#/run_id', 'reason': 'stale_source'})
     fields = list(csv.DictReader(io.StringIO(read('study/input_field_manifest.csv').decode('utf-8'))))
     design = json.loads(read('study/study_design.json')); context = json.loads(read('study/study_context.json'))

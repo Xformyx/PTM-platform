@@ -574,11 +574,15 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         if full.is_file() and not (access_only or review_plan_only):
             note='\n\n실제 typed 문헌 실행과 요청/전체 범위는 [M4 실행 기록](LITERATURE_SUBJECT_REVIEW.md)을 따릅니다. 대상 계획의 not_requested는 실행 결과를 덮어쓰지 않습니다.\n'
             if note not in full.read_text():full.write_text(full.read_text()+note,encoding='utf-8')
+    from .study_context_delivery import write_context
+    context_artifacts, context_binding = write_context(directory, source_root=source_root)
+    access_artifacts += context_artifacts
+    packet['study_context_delivery'] = context_binding
     from .substrate_signal_reader import write_signal_flow
     signal_artifacts,signal_contract=write_signal_flow(directory,tables,source_root=source_root)
     access_artifacts += signal_artifacts
     packet['substrate_signal_flow']=signal_contract
-    signal_note='[전체 기질 시간 반응 → kinase 기질 묶음 → 관측 순서·관계·가설](SUBSTRATE_SIGNAL_FLOW.md). Top-N은 표시 선택이며 전체 근거 범위를 제한하지 않습니다. 관계 prior와 관측·계산 의존성은 인과 검증과 구분합니다.'
+    signal_note='[연구 맥락·원문·실행 설계](STUDY_CONTEXT.md). 설계/명시적 질문/기대와 관측을 구분합니다.\n\n[전체 기질 시간 반응 → kinase 기질 묶음 → 관측 순서·관계·가설](SUBSTRATE_SIGNAL_FLOW.md). Top-N은 표시 선택이며 전체 근거 범위를 제한하지 않습니다. 관계 prior와 관측·계산 의존성은 인과 검증과 구분합니다.'
     if access_only or whole_only or review_plan_only:
         signal_readme=directory/'reader/READ_ME.md'
         original=signal_readme.read_text() if signal_readme.exists() else ''
@@ -628,6 +632,7 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         '[전체 문헌 검토 대상 계획](LITERATURE_REVIEW_PLAN.md): 신규 검색/비교와 독립된 계획이며 기존 문헌 상태를 보존합니다.',
         '[전체 근거 catalog와 미선정·보류·no-call 조회](EVIDENCE_ACCESS.md). 선정 findings는 요약입니다. 전체 접근 가능성과 실제 검토 범위는 다릅니다.',
         '[실험 원문과 설계](../study/STUDY_BRIEF.md) · [원문 snapshot](../study/user_input_snapshot.json) · '
+        '[저장된 연구 맥락·설계 원문·실행 비교](STUDY_CONTEXT.md)',
         '[전체 카드](cards.csv) · [전체 행의 보류/선정 사유](coverage.csv) · [구조화 packet](authoring_packet.json)',
         'cards.csv는 전체 카드 저장소이며 authoring_packet.json의 reader_cards는 요약 preview입니다. [전체 catalog](EVIDENCE_ACCESS.md)와 [질문 연결](FULL_EVIDENCE.md)에서 필요한 원본·card_id를 조회하세요. 큰 파일 전체를 먼저 읽을 필요는 없습니다.',
         '읽기 순서: **[전체 분모·질문별 연결과 미연결](FULL_EVIDENCE.md) → 필요한 원본 → 요약 → 시간·방법·문헌 근거**. '

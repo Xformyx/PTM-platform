@@ -460,6 +460,11 @@ def run_section_writing(state: dict) -> dict:
     temporal_evidence_packet['substrate_signal_flow']=signal_packet
     biological_synthesis_packet['substrate_signal_flow']=signal_packet
     state['substrate_signal_flow']=signal_packet
+    from ptm_shared.study_context_delivery import load_report_context
+    saved_context=load_report_context(state['output_dir']) if state.get('output_dir') else {'status':'unavailable'}
+    temporal_evidence_packet['study_context_delivery']=saved_context
+    biological_synthesis_packet['study_context_delivery']=saved_context
+    state['study_context_delivery']=saved_context
     if reader_authoring_shadow:
         # Prepare actual insertable figures before planning or section writing.
         # The scientific author and final renderer must consume the same frozen

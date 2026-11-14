@@ -16,3 +16,13 @@
 API fixture의 DB는 대역이며 seal fixture의 과학 검증만 대역이다. 실제 production metadata writer, ZIP writer/hash/CRC, 전달 검증 함수를 사용했다. 운영 DB/queue/download 검증은 아니다. 정량·PhosX·검색·모델 호출 0회.
 
 MC01 checkpoint: 소스 검증 완료, 다음 MC02 공통 context projection/consumer 연결. 디스크 약 3.4GiB로 대형 기존 archive는 복제하지 않는다. 실제 자료는 기존 SF 최종 archive를 읽기 전용으로 점검할 예정이다.
+
+## MC02 — 공통 맥락/consumer 연결
+
+MC01 commit: `99752c7`. 새 `study_context_delivery`는 resolver가 아닌 실행 snapshot의 읽기 전용 projection이다. `reader/STUDY_CONTEXT.json/.md`가 원문·실행 설계·명시적 질문·기대/가설 네 역할과 원문 JSON pointer/hash를 제공한다. 기존 `study_display`/`comparison_summary`를 사용하며 원문 dose를 특정 arm에 추정 배정하지 않는다. 구조화된 arms/conditions/contrasts는 그대로 노출한다. host 정보는 transgene/feature taxon을 대신하지 않는다.
+
+`write_reader` → authoring packet, START_HERE/STUDY_BRIEF → context guide, 발행 pointer → `load_report_context` → writer의 temporal/biological synthesis formatter로 연결했다. 새 모듈과 기존 입력 계약은 READER_CODE_FILES에 포함했다. 과거 실행에도 새 reader revision으로 읽기 자료를 추가할 수 있으며 기존 snapshot/BQ 내용은 바꾸지 않는다. 실행 기록은 실제 artifact/manifest를 참조하며 고정 biological p/q 미구현 문장을 brief에서 제거했다.
+
+검증: 긴 원문/preview/consumer hash와 published report-input 2개 추가, 기존 isolated bundled reader replay 1개 통과. 해당 suite 14 passed (이전 MC01 회귀 포함), 현재 고유 검증 17개. 새 interpreter/다른 cwd/공백 경로에서 reader 재생성 byte 비교 및 source read-only guard 통과. 첫 replay에서 method registry 작성 순서로 availability가 달라지는 문제를 발견해, 생성 시점의 파일 유무를 실행 사실로 단정하지 않고 최종 실행 manifest를 참조하도록 수정했다. 모델 호출은 없다. 기존 tiny fixture의 production 과학 함수는 package/replay 경계 검증에만 사용했으며 실제 자료의 재계산은 없다.
+
+MC02 checkpoint: 공통 projection·reader·report 연결 검증 완료. 다음 MC03 신규/legacy 질문 계약과 실제 identity 기반 entity routing.

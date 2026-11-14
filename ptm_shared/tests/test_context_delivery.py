@@ -106,3 +106,52 @@ def test_seal_failure_preserves_previous_archive_and_pointer(delivered, monkeypa
         astra_package.seal_archive(root, publication, 'failed', 'fixture')
     assert not (publication/'astra_analysis_package_failed.zip').exists()
     assert old.read_bytes() == b'previous success' and archive.read_bytes() == b'previous ZIP'
+
+
+def test_common_context_long_preview_original_and_report_binding(delivered):
+    from ptm_shared.study_context_delivery import write_context, verify_context_binding, format_report_context
+    root, order, snapshot = delivered
+    (root/'reader').mkdir()
+    artifacts, binding = write_context(root)
+    projection = verify_context_binding(root, binding)
+    design_text = projection['roles']['study_design_context']['fields']['biological_question']
+    assert design_text['preview_truncated'] and len(design_text['preview']) == 1200
+    ref = design_text['source_ref']
+    original = resolve_pointer(json.loads((root/ref['file']).read_text()), ref['pointer'])
+    assert original == order['analysis_context']['biological_question']
+    assert projection['roles']['research_question']['values'] == []
+    assert projection['roles']['execution_design']['display']['replication']
+    packet = {'study_context_delivery': binding}
+    (root/'reader/authoring_packet.json').write_text(json.dumps(packet))
+    assert validate_delivery(root)['status'] == 'verified'
+    report = format_report_context({'status': 'connected_to_report_input', 'context': projection, 'binding': binding})
+    assert 'not measured results' in report and ref['sha256'] in report
+    # A reader's stale or missing binding must prevent publication too.
+    packet['study_context_delivery']['sha256'] = 'bad'
+    (root/'reader/authoring_packet.json').write_text(json.dumps(packet))
+    with pytest.raises(ValueError, match='consumer stale'):
+        validate_delivery(root)
+    (root/'reader/authoring_packet.json').write_text('{"reader":true}')
+    with pytest.raises(ValueError, match='consumer_binding_missing'):
+        validate_delivery(root)
+
+
+def test_published_report_input_uses_same_context_and_source(delivered):
+    import hashlib
+    from ptm_shared.study_context_delivery import write_context, load_report_context
+    from report_generation.core.dynamic_prompt_generator import format_temporal_evidence_packet_for_llm
+    from report_generation.core.biological_synthesis import format_biological_synthesis_packet_for_llm
+    root, _, _ = delivered; (root/'reader').mkdir()
+    _, binding = write_context(root)
+    (root/'reader/authoring_packet.json').write_text(json.dumps({'study_context_delivery': binding}))
+    files = {str(p.relative_to(root)): {'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
+             for p in root.rglob('*') if p.is_file()}
+    (root/'manifest.json').write_text(json.dumps({'files':files}))
+    (root/'enrichment_free_current.json').write_text(json.dumps({'run_id':'run-a', 'artifacts':{
+        'provenance': {'path':'provenance.json', 'sha256': files['provenance.json']['sha256']}}}))
+    packet = load_report_context(root)
+    assert packet['binding'] == binding and packet['semantic_review_status'] == 'not_performed'
+    for text in [format_temporal_evidence_packet_for_llm({'study_context_delivery':packet}),
+                 format_biological_synthesis_packet_for_llm({'study_context_delivery':packet},section_type='results')]:
+        assert binding['sha256'] in text and '실험 설계 α' in text
+    assert load_report_context(root/'nonexistent')['status'] == 'unavailable'
