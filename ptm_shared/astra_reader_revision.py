@@ -128,6 +128,12 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     validate_reader(tables)
     baseline=json.loads((source/'reproducibility/data_dictionary.json').read_text())
     dictionary=deepcopy(baseline)
+    # A current-code revision adds descriptors to saved scientific bytes; it
+    # must not reserialize those tables or turn old detection into new results.
+    from .quantitative_fields import table_field_semantics
+    for name,frame in tables.items():
+        if name+'.csv' in dictionary:
+            dictionary[name+'.csv'].update(table_field_semantics(name,frame))
     changed=['reader/packet']
     if whole_only or not (access_only or review_plan_only):changed.append('reader/cards')
     update=write_tables({k:tables[k] for k in changed},directory)

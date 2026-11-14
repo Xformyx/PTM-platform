@@ -324,6 +324,8 @@ effect_memberships_json은 카드의 모든 실제 contrast 연결을 보존합�
 시점별 reference/pairing은 그룹을 쪼개지 않습니다. 시간 미기록은 null이며 알려진 시간 뒤에 옵니다.
 구 snapshot이 없으면 legacy_design_unavailable로 표시하며 label에서 시간을 추정하지 않습니다.
 새 index는 새 catalog/cursor 계약입니다. 과거 catalog와 citation을 소급 변경하지 않습니다.
+저장된 reader 재현: `python reader_replay.py --output <new-directory>` (패키지 루트에서).
+이 명령은 archive 자체 코드/저장 표를 사용합니다. 새 코드 revision과 전체 과학 replay는 별도입니다.
 
 선정 findings와 authoring packet의 reader_cards는 요약 preview입니다. 전체 분석 범위가 아닙니다.
 [catalog](evidence_catalog.json) · [전체 인덱스](evidence_index.csv) · [기존 관계](evidence_links.csv).
