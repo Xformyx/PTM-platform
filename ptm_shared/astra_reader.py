@@ -248,7 +248,7 @@ def attach_reading_guidance(tables):
     packet['authoring_rules']['reading_order']=[
         {'step':1,'purpose':'Original questions, design and actual stage readiness',
          'paths':['study/STUDY_BRIEF.md','reader/READ_ME.md#저장된-연구-질문','evidence/readiness.json']},
-        {'step':2,'purpose':'Selected observations are not the full signaling network. Do not build a cascade from the selected findings or from an expected insulin pathway. Choose card_id values from findings.csv and question_map.json; do not read all of cards.csv or authoring_packet.json. Precursor membership_ids are not kinase-candidate contributions; count those from substrate_contributions form_id tokens. Continue to the full emergence, protein, and kinase tables.',
+        {'step':2,'purpose':'Selected observations are not the full signaling network. Do not build a cascade from the selected findings or from an expected pathway. Choose card_id values from findings.csv and question_map.json; do not read all of cards.csv or authoring_packet.json. Precursor membership_ids are not kinase-candidate contributions; count those from substrate_contributions form_id tokens. Continue to the full emergence, protein, and kinase tables.',
          'paths':['reader/READ_ME.md','reader/findings.csv','reader/question_map.json','reader/coverage_summary.json','evidence/emergence_evidence.csv','quant/protein_contrasts.csv','kinase/substrate_contributions.csv','science/inference_results.csv']},
         {'step':3,'purpose':'Saved temporal, native method and literature evidence with limits',
          'paths':['reader/TEMPORAL_EVIDENCE.md',method_path,'reader/LITERATURE.md']},
@@ -667,7 +667,7 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         '선정: 기존 select_finding_cards의 quality/parent/pattern diversity 및 stable ID 기준, 최대 15개. '
         '질문 연결은 선정 이후 수행하며 경로 기대를 점수에 사용하지 않습니다. '
         + kinase_link_sentence(kinase_summary) + ' '
-        '이 선정만으로 insulin cascade를 구성하지 마세요. 전체 emergence, protein, kinase 표로 범위를 넓히세요. '
+        '기록된 연구 질문·기대 경로와 관측 시간 반응을 구분하고, 이 선정만으로 신호전달 흐름을 확정하지 마세요. 전체 emergence, protein, kinase 표로 범위를 넓히세요. '
         'method_id가 repository_measured_gene_zscore인 행은 PhosX 결과가 아닙니다. PhosX_native_functions와 method_executions가 있을 때만 PhosX로 읽습니다.',
         ]
     from .study_display import DISPLAY, study_display, study_display_markdown

@@ -265,6 +265,9 @@ def audit_reader_technical_leakage(
 
 def _study_context_with_override(state: Mapping[str, Any]) -> dict:
     """Merge an explicit report-level verified metadata override into context."""
+    saved = state.get('study_context_delivery') or {}
+    if saved.get('status') == 'connected_to_report_input':
+        return dict(saved['recorded_context'])
     context = _as_mapping(state.get("experimental_context"))
     report_config = _as_mapping(state.get("report_config"))
     # Order-recorded taxonomy is not inferred from a cell-model nickname.
@@ -850,7 +853,11 @@ def build_authoring_packet(
     P-layer readiness data, relation snapshots, and raw diagnostic payloads stay
     in the technical audit inputs and are never copied into ``reader_summary``.
     """
+    from ptm_shared.study_context_delivery import bind_report_state
+    state = bind_report_state(state, state.get('study_context_delivery') or {})
     state = prepare_companion_state(state)
+    from ptm_shared.astra_inputs import CONTEXT_CONTRACT
+    routing = {'entity_contract': 'measured_identity.v1'} if (state.get('study_context_delivery') or {}).get('context', {}).get('question_contract') == CONTEXT_CONTRACT else {}
     temporal = _as_mapping(temporal_evidence_packet or state.get("temporal_report_evidence_packet"))
     synthesis = _as_mapping(biological_synthesis_packet or state.get("biological_synthesis_packet"))
     metadata_contract = build_study_metadata_contract(_study_context_with_override(state))
@@ -913,7 +920,7 @@ def build_authoring_packet(
         "counterevidence": estimator_contract["non_equivalence"],
     })
     observations = build_feature_observation_cards(state, maximum=max(20, len(state.get("vector_plot_raw_data") or [])), minimum_points=1)
-    question_map = build_question_map(state.get("original_research_questions") or state.get("research_questions") or [], observations)
+    question_map = build_question_map(state.get("original_research_questions") or state.get("research_questions") or [], observations, **routing)
     requested_ids = {fid for q in question_map["questions"] for fid in q["feature_ids"]}
     observations.sort(key=lambda c: (c["feature_identity"]["reader_feature_id"] not in requested_ids,))
     for card in observations:
@@ -944,6 +951,7 @@ def build_authoring_packet(
     question_map = build_question_map(
         state.get("original_research_questions") or state.get("research_questions") or [],
         list(observations) + kinase_cards + protein_cards + pathway_cards + companion_cards,
+        **routing,
     )
 
     candidate_cards, candidate_transfer_audit = adapt_discovery_candidates(synthesis, state=state,
@@ -1068,7 +1076,8 @@ def format_authoring_packet_for_llm(packet: Mapping[str, Any], section_type: str
     story_contract = _as_mapping(packet.get("section_story_contract"))
     section_contract = _as_mapping(story_contract.get(section_type))
     allowed_categories = set(section_contract.get("categories") or ())
-    lines = [
+    from ptm_shared.study_context_delivery import format_report_context
+    lines = [format_report_context(packet.get('study_context_delivery')),
         "=== READER-READY AUTHORING PACKET ===",
         f"Mode: {packet.get('mode', 'data_only')}",
         f"Section: {section_type}",

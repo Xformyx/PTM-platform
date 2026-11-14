@@ -155,3 +155,35 @@ def test_published_report_input_uses_same_context_and_source(delivered):
                  format_biological_synthesis_packet_for_llm({'study_context_delivery':packet},section_type='results')]:
         assert binding['sha256'] in text and '실험 설계 α' in text
     assert load_report_context(root/'nonexistent')['status'] == 'unavailable'
+
+
+@pytest.mark.parametrize('design_text', ['insulin response in adipocytes', 'amyloid-treated microglia 시간 반응',
+                                       '약물 A 10 nM; 약물 B 2 µM, 서로 다른 노출 조건'])
+def test_neutral_guidance_and_report_draft_isolation(delivered, design_text):
+    from ptm_shared.study_context_delivery import write_context, context_markdown, bind_report_state
+    from ptm_shared.astra_package import start_here
+    from ptm_shared import astra_reader
+    from report_generation.core.reader_authoring import build_authoring_packet, format_authoring_packet_for_llm
+    from ptm_shared.astra_inputs import source_receipt
+    root, _, snapshot = delivered
+    snapshot['original']['analysis_context']['biological_question'] = design_text
+    snapshot['source_receipt'] = source_receipt(snapshot)
+    (root/'study/user_input_snapshot.json').write_text(json.dumps(snapshot))
+    (root/'reader').mkdir(); _, binding = write_context(root)
+    context = json.loads((root/'reader/STUDY_CONTEXT.json').read_text())
+    saved = {'status':'connected_to_report_input', 'context':context, 'binding':binding,
+             'recorded_context':snapshot['original']['analysis_context'], 'recorded_questions':[]}
+    draft = {'experimental_context':{'biological_question':'WRONG CURRENT DRAFT','cell_type':'WRONG CELL'},
+             'research_questions':['WRONG QUESTION'], 'original_research_questions':['WRONG QUESTION']}
+    report_state = bind_report_state(draft, saved)
+    packet = build_authoring_packet(report_state)
+    text = format_authoring_packet_for_llm(packet, 'introduction')
+    assert design_text in text and 'WRONG CURRENT DRAFT' not in text and 'WRONG CELL' not in text
+    assert packet['research_question_evidence_map']['questions'] == []
+    assert draft['experimental_context']['biological_question']=='WRONG CURRENT DRAFT'
+    assert design_text in context_markdown(context)
+    guide = start_here(snapshot, {}, {})
+    assert 'expected insulin pathway' not in guide and 'insulin cascade' not in guide
+    from inspect import getsource
+    assert 'expected insulin pathway' not in getsource(astra_reader.attach_reading_guidance)
+    assert 'insulin cascade' not in getsource(astra_reader.write_reader)

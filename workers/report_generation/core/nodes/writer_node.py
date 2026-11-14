@@ -331,6 +331,9 @@ def run_section_writing(state: dict) -> dict:
     validated_hypotheses = state.get("validated_hypotheses", [])
     network_analysis = state.get("network_analysis", {})
     parsed_ptms = state.get("parsed_ptms", [])
+    from ptm_shared.study_context_delivery import load_report_context, bind_report_state
+    saved_context=load_report_context(state['output_dir']) if state.get('output_dir') else {'status':'unavailable'}
+    state=bind_report_state(state, saved_context)
     context = state.get("experimental_context", {})
     # RQ0 is the user-visible report contract. RQ2 is an optional internal
     # refinement lens and must never replace or shrink user-entered questions.
@@ -460,8 +463,6 @@ def run_section_writing(state: dict) -> dict:
     temporal_evidence_packet['substrate_signal_flow']=signal_packet
     biological_synthesis_packet['substrate_signal_flow']=signal_packet
     state['substrate_signal_flow']=signal_packet
-    from ptm_shared.study_context_delivery import load_report_context
-    saved_context=load_report_context(state['output_dir']) if state.get('output_dir') else {'status':'unavailable'}
     temporal_evidence_packet['study_context_delivery']=saved_context
     biological_synthesis_packet['study_context_delivery']=saved_context
     state['study_context_delivery']=saved_context

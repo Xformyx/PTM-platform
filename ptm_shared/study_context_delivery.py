@@ -143,10 +143,28 @@ def load_report_context(order_root):
     binding = json.loads(path.read_text()).get('study_context_delivery')
     if not binding: return {'status': 'unavailable', 'reason': 'legacy_reader_without_context_projection'}
     projection = verify_context_binding(root, binding)
+    snapshot=json.loads((root/SOURCES[0]).read_text())
+    execution_context=json.loads((root/SOURCES[1]).read_text())
+    raw=snapshot['original'].get('analysis_context') or {}
+    if 'biological_question' in raw: execution_context['biological_question']=raw['biological_question']
     return {'binding': binding, 'context': projection, 'status': 'connected_to_report_input',
+            'recorded_context': execution_context,
+            'recorded_questions': (snapshot['original'].get('report_options') or {}).get('research_questions'),
             'publication_run_id': provenance.get('run_id'), 'semantic_review_status': 'not_performed'}
 
 
 def format_report_context(packet):
     if not packet or packet.get('status') != 'connected_to_report_input': return ''
-    return '\n=== SAVED STUDY CONTEXT (not measured results) ===\n' + json.dumps(packet, ensure_ascii=False) + '\n'
+    return '\n=== SAVED STUDY CONTEXT (not measured results) ===\n' + json.dumps({k:v for k,v in packet.items() if k not in {'recorded_context','recorded_questions'}}, ensure_ascii=False) + '\n'
+
+
+def bind_report_state(state, saved):
+    """Use the published context for this report input without changing the draft."""
+    from copy import deepcopy
+    if saved.get('status') != 'connected_to_report_input': return dict(state)
+    result = {**state, 'study_context_delivery': saved,
+              'experimental_context': deepcopy(saved['recorded_context'])}
+    if saved['context']['question_contract'] == CONTEXT_CONTRACT:
+        questions = deepcopy(saved.get('recorded_questions') or [])
+        result.update(original_research_questions=questions, research_questions=questions)
+    return result

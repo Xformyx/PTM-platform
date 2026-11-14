@@ -97,6 +97,7 @@ def build_authoring_packet(*, state, observations, question_map, has_traceable_l
                             "drug_repositioning": {"evidence_role": "candidate_hypothesis_context", "independent_validation": "not_performed",
                                                    "analysis": state.get("drug_repositioning_results") or {"evaluation_status": "not_requested"}}},
         "study_design": dict(state.get("sample_manifest") or {}),
+        **({"study_context_delivery": state["study_context_delivery"]} if state.get("study_context_delivery") else {}),
         "research_question_evidence_map": question_map,
         "feature_identity_audit": audit_feature_identities(state.get("vector_plot_raw_data") or []),
         "mode": "citation_complete" if has_traceable_literature else "data_only",

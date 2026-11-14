@@ -36,3 +36,13 @@ MC02 commit: `4af4883`. `_questions`는 snapshot의 명시적 `study_context_rol
 검증: 신규/legacy 계약, 빈 질문, 저장 ID, MAPK1+기술 약자, mixed-case/taxon/검증 alias, 모호한 family, Top-N 0/5/15/50의 전체 question source ID 불변 등 신규 5개 case 통과. 기존 reader/전체 접근 회귀 2개 및 frozen 문헌/원문 prompt/pin 변조 차단 회귀 3개 통과. 문헌 테스트는 기존 retriever/model 대역이며 신규 외부 검색/모델 호출은 없다. Design 원문은 기존 literature study context에 계속 전달된다.
 
 MC03 checkpoint: 10개 관련 검증 통과. 다음 MC04 활성 공통 안내의 benchmark 문구 제거 및 report-context 소비 검증. 과거 frozen 결과나 citation을 재분류하지 않았다.
+
+## MC04 — 중립 안내와 실행 고정 report-input
+
+MC03 commit: `c645814`. 활성 `astra_reader`의 expected insulin pathway / insulin cascade 안내 두 곳을 기록된 기대 경로·시간 반응 안내로 일반화했다. 실제 사용자 insulin 원문과 `astra_literature`의 기존 insulin concentration 호환 projection은 변경하지 않았다. biological synthesis의 사용자 표시명도 Biological Design으로 통일했다.
+
+보고서 writer가 발행된 context를 읽은 후 `bind_report_state`로 보고서 입력용 복사본만 바인딩한다. 최신 draft나 report-level override로 실행 설명을 바꾸지 않는다. 기존 reader authoring serializer/formatter에도 같은 binding을 전달하고 새 계약의 명시적 질문만 라우팅한다. 원문/실행 설계/기대/문헌/관측을 구별하며 파일 연결과 의미 검토 완료를 분리한다.
+
+검증: insulin / amyloid-treated microglia / 두 약물 3개 fixture에서 실제 authoring packet/formatter를 실행해 원문·source hash와 빈 질문 유지, draft 미변경, 잘못된 현재 설명 배제를 확인했다. context/질문 suite 21 passed(기존 case 포함), 기존 biological synthesis 17 passed. 새 입력 UI·wizard·필수 질문은 추가하지 않았다. 새 모델/검색 호출 0회.
+
+MC04 checkpoint: 템플릿/formatter 검증 완료. 다음 MC05 실제 저장 archive 읽기, 격리 DB 저장/재조회, 발행/reader revision/replay 및 보존 통합 검증.

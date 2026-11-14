@@ -579,7 +579,7 @@ def format_biological_synthesis_packet_for_llm(packet: Mapping[str, Any] | None,
         "Protein-abundance-adjusted PTM change is not directly measured phosphorylation occupancy or stoichiometry. "
         "Use 'protein-abundance-adjusted PTM change' or 'PTM-specific regulation adjusted for protein abundance'; do not claim stoichiometry or occupancy.",
         f"Study frame: cell model={frame.get('cell_model')}; organism={frame.get('organism')}; treatment={frame.get('treatment')}; timepoints={', '.join(map(str, frame.get('timepoints') or [])) or 'not specified'}.",
-        f"Biological question: {frame.get('biological_question') or 'not specified'}",
+        f"Biological Design: {frame.get('biological_question') or 'not specified'}",
         f"Quantitative landscape: vector rows={landscape.get('vector_row_count', 0)}; unique sites={landscape.get('unique_site_count', 0)}; unique genes={landscape.get('unique_gene_count', 0)}; max |conventional PTM log2FC|={landscape.get('maximum_absolute_conventional_ptm_log2fc', 0)}; de novo rows={landscape.get('de_novo_vector_row_count', 0)}.",
         "",
         "Data-prioritized candidate discovery cards (observed trajectories; not direct kinase assignments):",
