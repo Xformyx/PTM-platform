@@ -164,9 +164,13 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     if refresh_figures:
         from .astra_figures import figure_packet
         design=json.loads((source/'study/study_design.json').read_text())
-        figure_packet(tables,directory,design)
+        # Refresh only the existing display-revision scope. Re-rendering every
+        # figure can alter unrelated archived captions, fonts and raster bytes.
+        figure_packet(tables,directory,design,figure_names={'substrate_contrast_heatmap','emerging_detection'})
     display_files={'figures/figure_legends.json','figures/substrate_contrast_heatmap.svg',
-        'figures/emerging_detection.svg','figures/emerging_detection_columns.csv'} if refresh_figures else set()
+        'figures/substrate_contrast_heatmap.png','figures/substrate_contrast_heatmap_display.json',
+        'figures/emerging_detection.svg','figures/emerging_detection.png','figures/emerging_detection_display.json',
+        'figures/emerging_detection_columns.csv'} if refresh_figures else set()
     preserved+= [name for name in manifest['files'] if name.startswith(('figures/','references/')) and name not in display_files|{BINDING}]
     preserved+= ['reproducibility/replay_config.json']
     if access_only or whole_only or review_plan_only:
@@ -178,6 +182,7 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     refreshed_code=set(code_files) if not (access_only or whole_only or review_plan_only) else {'astra_evidence_catalog.py','astra_reader.py',
         'astra_reader_revision.py','astra_package.py'}
     if whole_only:refreshed_code|={'astra_reader_full.py','astra_reader_temporal.py'}
+    if refresh_figures:refreshed_code.add('astra_figures.py')
     if review_plan_only:refreshed_code|={'astra_literature_review.py','astra_literature.py','finding_literature.py'}
     refreshed_code.update(READER_CODE_FILES)
     # Older archives predate canonical effect/display helper modules. Bundle

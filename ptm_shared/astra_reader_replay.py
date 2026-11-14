@@ -62,10 +62,12 @@ access_revision=False
 whole_revision=False
 review_revision=False
 execution_revision=False
+saved_reader_revision=False
 review_execution=None
 revision_path=root/'reproducibility/temporal_reader_revision.json'
 if revision_path.is_file():
     operation=json.loads(revision_path.read_text()).get('operation')
+    saved_reader_revision=operation in {'saved_temporal_reader_revision','saved_reader_display_revision'}
     access_revision=operation=='whole_evidence_access_revision'
     whole_revision=operation=='whole_reader_evidence_revision'
     review_revision=operation=='literature_review_plan_revision'
@@ -85,6 +87,13 @@ names=list(dict.fromkeys(names))
 if access_revision:names=['reader/packet']
 if whole_revision:names=[n[:-4] for n in dictionary if not n.startswith(('reader/full_','reader/evidence_'))]
 if review_revision:names=['reader/packet','reader/cards','reader/findings','reader/coverage','reader/full_question_links']
+if saved_reader_revision:
+    # A reader revision retains an already selected reader and its frozen pin.
+    # Re-selecting cards with newer adapters can invalidate that recorded pin.
+    names += ['reader/packet','reader/cards','reader/findings','reader/coverage']
+# Signal views are rebuilt from registered scientific sources, never from their
+# previous output copies (which can be much larger than the underlying inputs).
+names=list(dict.fromkeys(n for n in names if not n.startswith('signal_flow/')))
 tables={name:pd.read_csv(root/(name+'.csv'),float_precision='round_trip',low_memory=False,
     dtype={k:'str' for k,v in dictionary[name+'.csv']['dtypes'].items() if v in {'str','object'}}) for name in names}
 design=json.loads((root/'study/study_design.json').read_text())
@@ -106,6 +115,8 @@ elif whole_revision:
     from ptm_shared.astra_reader_full import attach_full
     attach_access(tables);attach_full(tables)
     reader={k:tables[k] for k in ['reader/cards','reader/packet']}
+elif saved_reader_revision:
+    reader={k:tables[k].copy() for k in ['reader/cards','reader/packet','reader/findings','reader/coverage']}
 else:reader=build_reader_tables(tables,design,snapshot)
 if not (access_revision or whole_revision or review_revision) and (root/'references/finding_literature_pin.json').is_file():
     from ptm_shared.astra_literature import apply
@@ -130,7 +141,8 @@ for name in files:
     if a!=b:raise ValueError('Reader byte mismatch: '+name)
     results.append({'file':name,'sha256':a,'byte_equal':True})
 result={'passed':True,'scope':('M1_access_projection_from_saved_sources' if access_revision else 'reader_and_optional_frozen_literature_from_archived_adapter_and_scientific_tables'),
-        'previous_reader_interpretation_rebuilt':not (access_revision or whole_revision or review_revision),
+        'previous_reader_interpretation_rebuilt':not (access_revision or whole_revision or review_revision or saved_reader_revision),
+        'saved_reader_revision_input':saved_reader_revision,
         'literature_review_plan_rebuilt':review_revision,
         'frozen_typed_literature_rebuilt':review_execution is not None,
         'new_model_calls':0,'scientific_calls':0,'guarded_functions':blocked,

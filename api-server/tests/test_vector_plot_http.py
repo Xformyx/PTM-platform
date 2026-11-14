@@ -46,6 +46,13 @@ def test_route_to_ui_preserves_null_support_and_distinct_forms(tmp_path, monkeyp
     assert len(payload["top_n_ptms"]) == 2
     assert all(r["ptm_protein_adjusted_log2fc"] is None and r["protein_log2fc"] is None for r in payload["vector_data"])
     assert {r["feature_id"] for r in payload["vector_data"]} == {p["feature_id"] for p in payload["top_n_ptms"]}
+    classic=TestClient(app).get('/orders/1/vector-plot-data?classic=true&mode=global_top_n&n=1&axis=unadjusted')
+    assert classic.status_code==200,classic.text
+    assert len(classic.json()['top_n_ptms'])==1
+    assert classic.json()['selection']['mode']=='global_top_n'
+    all_rows=TestClient(app).get('/orders/1/vector-plot-data?classic=true&mode=all_observed&axis=unadjusted')
+    assert all_rows.status_code==200,all_rows.text
+    assert len(all_rows.json()['top_n_ptms'])==2
     # Bundle the same component imported by OrderDetail, then render its actual
     # markup with this route response. This is not a browser layout test.
     frontend = Path(__file__).resolve().parents[2] / "frontend"

@@ -1,0 +1,120 @@
+{
+  "baseline": "92a3776fcc3747b981a77a4ff0838811b5a9b150",
+  "branch": "codex/substrate-signal-flow",
+  "commits": {
+    "SF01": "cbf3f44",
+    "SF02": "300172d",
+    "SF03": "aba72b2",
+    "SF04": "5eeb0aa",
+    "SF05": "87fe6a1",
+    "SF06": "local commit recorded after validation"
+  },
+  "tests": {
+    "unique_tests": 70,
+    "failures": 0,
+    "skipped": 0
+  },
+  "frontend_build": "passed",
+  "real_chrome_synthetic_api": "passed",
+  "actual_source": "/Users/josephk/Projects/PTM-platform/codex-inputs/astra-ai-20261113/actual reader revision/enrichment_free_runs/g0-68d1310ef31a4f32bd164725daac1a1d",
+  "actual_revision": "/Users/josephk/Projects/PTM-platform/codex-inputs/substrate-signal-20261114/final-reader-revision-v3/enrichment_free_runs/g0-adfcea86b3504959b75986baf994ade4",
+  "actual_archive": "/Users/josephk/Projects/PTM-platform/codex-inputs/substrate-signal-20261114/final-reader-revision-v3/astra_analysis_package_g0-adfcea86b3504959b75986baf994ade4.zip",
+  "archive_sha256": "ea3a905d2c5d60ea9735a0f62714f8d6338f38fcc5d6f5ad98964b32a2924926",
+  "source_files_preserved": 273,
+  "revision_preserved_hashes": 116,
+  "actual_projection": {
+    "all_track_points_checked": 84720,
+    "finite_excluded_trace_points": 7261,
+    "joint_decomposition_checked": 13704,
+    "population": {
+      "signal_flow/candidate_associations": 639,
+      "signal_flow/downstream_hypotheses": 9256,
+      "signal_flow/kinase_substrate_bundles": 9256,
+      "signal_flow/kinase_substrate_membership": 663597,
+      "signal_flow/substrate_bundle_membership": 14120,
+      "signal_flow/substrate_trajectories": 14120,
+      "signal_flow/temporal_evidence_links": 283422
+    }
+  },
+  "archive_replay": {
+    "passed": true,
+    "byte_equal_files": 56,
+    "manifest_files_validated": 288,
+    "module_file": "/Users/josephk/Projects/PTM-platform/codex-inputs/substrate-signal-20261114/final-reader-revision-v3/enrichment_free_runs/g0-adfcea86b3504959b75986baf994ade4/reproducibility/code/ptm_shared/astra_reader.py",
+    "scientific_calls": 0,
+    "network_requests": 0
+  },
+  "protected": {
+    "/Users/josephk/Projects/PTM-platform/codex-inputs/astra-ai-20261113/actual reader revision/enrichment_free_current.json": "ce3bfaea23b8e1b48e1ab19c926dae72b138cb8d5c1fdd1f1ca8f3d16b5b4855",
+    "/Users/josephk/Projects/PTM-platform/codex-inputs/astra-ai-20261113/actual reader revision/astra_analysis_package_g0-68d1310ef31a4f32bd164725daac1a1d.zip": "f834248142d9dfe2933dea117d9414d7e2f35926e0ca6153bbf571f4ec2e6827",
+    "/Users/josephk/Projects/PTM-platform/codex-inputs/astra-ai-20261113/actual reader revision/enrichment_free_runs/g0-68d1310ef31a4f32bd164725daac1a1d/manifest.json": "a2f66893cb5ca8a544353b954f83b47497d6b9476ad3038a91682ed2caf9e5dc",
+    "/Users/josephk/Projects/PTM-platform/codex-inputs/report.pr_matrix.tsv": "7160e863ddaf5236d22c5dc95fd3b066355341e8b2b130f11ef12e5a46a52ba4",
+    "/Users/josephk/Projects/PTM-platform/codex-inputs/report.pg_matrix.tsv": "57c874a46f57608a64a779c4ef8ddecd07273cc0603aa228b8fbd662cbfca745",
+    "/Users/josephk/Projects/PTM-platform/codex-inputs/uniprotkb_proteome_Rat_add_human_INSR.fasta": "61b5d367511111d46377c78cfcfc1a09bacb0c1632c9960282520de732823c83"
+  },
+  "intentional_display_files": [
+    "figures/emerging_detection.png",
+    "figures/emerging_detection.svg",
+    "figures/emerging_detection_columns.csv",
+    "figures/emerging_detection_display.json",
+    "figures/figure_legends.json",
+    "figures/substrate_contrast_heatmap.png",
+    "figures/substrate_contrast_heatmap.svg",
+    "figures/substrate_contrast_heatmap_display.json"
+  ],
+  "unverified": [
+    "actual time-matched order",
+    "production DB/UI/queue/download",
+    "new model-generated report quality",
+    "new native PhosX scientific parity"
+  ],
+  "new_actual_science_calls": 0,
+  "new_retrieval_model_calls": 0,
+  "push": false,
+  "deployment": false,
+  "flags_changed": false,
+  "free_bytes": 3736809472,
+  "temporary_processes": "No task Python/Vite/Chrome processes remain; existing caffeinate PIDs2450/5292 preserved",
+  "final_preservation": {
+    "passed": true,
+    "original_evidence_source_keys_preserved": 175537,
+    "zip_pointer_sha256": "ea3a905d2c5d60ea9735a0f62714f8d6338f38fcc5d6f5ad98964b32a2924926",
+    "source_pointer_still_original": true
+  },
+  "changed_files": [
+    "api-server/app/api/orders.py",
+    "api-server/app/api/vector_view.py",
+    "api-server/app/services/vector_view.py",
+    "api-server/tests/test_classic_top_n_plot.py",
+    "api-server/tests/test_substrate_signal_http.py",
+    "api-server/tests/test_vector_plot_http.py",
+    "docs/astra_evidence_integration/SUBSTRATE_SIGNAL_SF01_KO.md",
+    "docs/astra_evidence_integration/SUBSTRATE_SIGNAL_SF02_KO.md",
+    "docs/astra_evidence_integration/SUBSTRATE_SIGNAL_SF03_KO.md",
+    "docs/astra_evidence_integration/SUBSTRATE_SIGNAL_SF04_KO.md",
+    "docs/astra_evidence_integration/SUBSTRATE_SIGNAL_SF05_KO.md",
+    "docs/astra_evidence_integration/SUBSTRATE_SIGNAL_SF06_KO.md",
+    "frontend/src/components/SubstrateSignalFlow.tsx",
+    "frontend/src/pages/OrderDetail.tsx",
+    "ptm_shared/astra_figures.py",
+    "ptm_shared/astra_package.py",
+    "ptm_shared/astra_reader.py",
+    "ptm_shared/astra_reader_replay.py",
+    "ptm_shared/astra_reader_revision.py",
+    "ptm_shared/atlas_context.py",
+    "ptm_shared/quantitative_fields.py",
+    "ptm_shared/substrate_signal_flow.py",
+    "ptm_shared/substrate_signal_reader.py",
+    "ptm_shared/substrate_signal_view.py",
+    "ptm_shared/tests/test_ai_reader_replay.py",
+    "ptm_shared/tests/test_substrate_signal_flow.py",
+    "ptm_shared/tests/test_substrate_signal_reader.py",
+    "workers/report_generation/core/biological_synthesis.py",
+    "workers/report_generation/core/dynamic_prompt_generator.py",
+    "workers/report_generation/core/figure_manifest.py",
+    "workers/report_generation/core/nodes/writer_node.py",
+    "workers/tests/test_atlas_context.py",
+    "docs/astra_evidence_integration/SUBSTRATE_SIGNAL_FLOW_UPGRADE_KO.md",
+    "docs/astra_evidence_integration/SUBSTRATE_SIGNAL_RESULTS.json"
+  ]
+}

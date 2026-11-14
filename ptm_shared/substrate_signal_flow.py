@@ -248,7 +248,7 @@ def kinase_projection(tables, design, registry, trajectories):
             points.append({**point,
                 'contributing_form_count': len({f for r in at_point for f in ids(r.get('form_ids'))}),
                 'contributing_site_count': len({s for r in at_point for s in ids(r.get('site_ids'))}),
-                'contributing_gene_count': len({g for r in at_point for g in ids(r.get('substrate_gene'))}),
+                'contributing_gene_count': None if any(not ids(r.get('substrate_gene')) for r in at_point) else len({g for r in at_point for g in ids(r.get('substrate_gene'))}),
                 'contributing_measurement_group_count': len({r['measurement_group_id'] for r in at_point if r.get('measurement_group_id')}),
                 'membership_event_meaning': 'initial_membership_not_emergence' if i == 0 else 'saved_membership_turnover',
                 'saved_results': {name: [{'values': r, 'source_ref': source.ref(name,r)} for r in group if r.get('contrast_id') == cid]
@@ -257,7 +257,7 @@ def kinase_projection(tables, design, registry, trajectories):
                       for name, group in sources.items() if name in ('temporal/target_excluded_anchors','science/inference_results')}
         bundles.append({'bundle_id': bid, 'candidate_id': candidate, 'effect_series_id': sid, 'track': track,
             'association_form_count': len(prior_forms | form_ids), 'contributing_form_count': len(form_ids),
-            'site_count': len(site_ids), 'gene_count': len(genes), 'measurement_group_count': len(measurement_groups),
+            'site_count': len(site_ids), 'gene_count': None if any(not ids(r.get('substrate_gene')) for r in supports) else len(genes), 'measurement_group_count': len(measurement_groups),
             'independent_validation_count': None, 'family_label': None,
             'association_id':aid,'association_form_ids_json':encode(sorted(prior_forms | form_ids)),
             'points_json': encode(points), 'diagnostics_json': encode(diagnostic),
@@ -322,9 +322,11 @@ def evidence_map(projections):
              [p['source_ref'] for p in json.loads(r['points_json']) if p['source_ref']])
     dependencies=defaultdict(list)
     for m in projections[KINASE_MEMBERS].to_dict('records'):
+        values=json.loads(m['saved_values_json'])
+        kind='method_input_excluded' if values.get('selected') is False else 'method_contribution'
         for tid in json.loads(m['trajectory_ids_json']):
-            dependencies[tid,m['bundle_id'],m['effect_series_id']].append(json.loads(m['source_ref_json']))
-    for (tid,bid,sid),refs in dependencies.items():link('method_contribution',tid,bid,sid,refs)
+            dependencies[kind,tid,m['bundle_id'],m['effect_series_id']].append(json.loads(m['source_ref_json']))
+    for (kind,tid,bid,sid),refs in dependencies.items():link(kind,tid,bid,sid,refs)
     details={}
     for a in projections[ASSOCIATIONS].to_dict('records'):
         sid=a['effect_series_id'];aid=a['association_id'];related={};prior_ids=[];prior_checks=[]

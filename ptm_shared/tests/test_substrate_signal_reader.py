@@ -66,3 +66,20 @@ def test_excluded_finite_a_is_trace_not_heatmap_cell():
     r=frame.loc[row]
     assert pd.isna(grid.loc[r.form_id,r.contrast_id])
     pd.testing.assert_frame_equal(frame,original)
+
+
+def test_display_refresh_preserves_unrelated_figure_bytes(tmp_path):
+    from test_astra_figures import fixture_tables
+    from ptm_shared.astra_figures import figure_packet
+    design,tables=fixture_tables()
+    figure_packet(tables,tmp_path,design)
+    before={p.name:digest(p) for p in (tmp_path/'figures').iterdir()}
+    legends=json.loads((tmp_path/'figures/figure_legends.json').read_text())
+    tables['quant/comparisons']['included']=False
+    figure_packet(tables,tmp_path,design,figure_names={'substrate_contrast_heatmap'})
+    for name,h in before.items():
+        if not name.startswith('substrate_contrast_heatmap') and name!='figure_legends.json':
+            assert digest(tmp_path/'figures'/name)==h
+    after=json.loads((tmp_path/'figures/figure_legends.json').read_text())
+    assert [r for r in legends if r['figure_id']!='substrate_contrast_heatmap']==[r for r in after if r['figure_id']!='substrate_contrast_heatmap']
+    assert all(r['source_table'] for r in after)

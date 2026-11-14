@@ -578,6 +578,11 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
     signal_artifacts,signal_contract=write_signal_flow(directory,tables,source_root=source_root)
     access_artifacts += signal_artifacts
     packet['substrate_signal_flow']=signal_contract
+    signal_note='[전체 기질 시간 반응 → kinase 기질 묶음 → 관측 순서·관계·가설](SUBSTRATE_SIGNAL_FLOW.md). Top-N은 표시 선택이며 전체 근거 범위를 제한하지 않습니다. 관계 prior와 관측·계산 의존성은 인과 검증과 구분합니다.'
+    if access_only or whole_only or review_plan_only:
+        signal_readme=directory/'reader/READ_ME.md'
+        original=signal_readme.read_text() if signal_readme.exists() else ''
+        if signal_note not in original:signal_readme.write_text(original+'\n\n'+signal_note+'\n',encoding='utf-8')
     if review_plan_only:
         json_write(directory/'reader/authoring_packet.json',packet)
         note='\n\n## 전체 문헌 검토 대상 (M3)\n\n[요약과 독립적인 typed 검토 계획](LITERATURE_REVIEW_PLAN.md). 새 검색·비교는 미요청이며 기존 문헌 실행 기록은 보존됩니다.\n'
@@ -619,6 +624,7 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         precursor_membership=tables.get('reader_adapter/precursor_membership'),
         temporal_findings=temporal.get('findings'))
     lines = ['# 주요 관측과 근거 — Astra reader',
+        signal_note,
         '[전체 문헌 검토 대상 계획](LITERATURE_REVIEW_PLAN.md): 신규 검색/비교와 독립된 계획이며 기존 문헌 상태를 보존합니다.',
         '[전체 근거 catalog와 미선정·보류·no-call 조회](EVIDENCE_ACCESS.md). 선정 findings는 요약입니다. 전체 접근 가능성과 실제 검토 범위는 다릅니다.',
         '[실험 원문과 설계](../study/STUDY_BRIEF.md) · [원문 snapshot](../study/user_input_snapshot.json) · '

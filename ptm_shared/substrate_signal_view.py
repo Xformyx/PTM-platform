@@ -1,5 +1,6 @@
 """Bounded read-only pages of registered signal projections; no computation."""
 import base64
+import binascii
 import json
 from pathlib import Path
 
@@ -42,8 +43,14 @@ def signal_page(catalog, kind, filters=None, cursor=None, limit=25):
             if token['binding']!=binding: raise ValueError('Cursor catalog/filter mismatch')
             offset=token['offset']
             if type(offset) is not int or offset<0: raise ValueError('Invalid cursor offset')
-        except (KeyError,TypeError,json.JSONDecodeError) as exc: raise ValueError('Invalid cursor') from exc
-    frame=read_source(catalog.root,name,meta)
+        except (KeyError,TypeError,json.JSONDecodeError,binascii.Error) as exc: raise ValueError('Invalid cursor') from exc
+    # Read filter/key columns first; large JSON payloads are resolved only for
+    # the selected page through the existing bounded catalog source reader.
+    columns=set(meta['unique_key']) | (set(filters)&set(meta['columns']))
+    if 'form_id' in filters and 'form_id' not in meta['columns']:columns.add('association_form_ids_json')
+    if 'bundle_id' in filters and 'bundle_id' not in meta['columns']:columns.update(['from_id','to_id'])
+    if not columns<=set(meta['columns']):raise ValueError('Filter not supported for this signal table')
+    frame=read_source(catalog.root,name,meta,columns=sorted(columns))
     for key,value in filters.items():
         if key in frame: frame=frame.loc[frame[key].eq(value)]
         elif key=='form_id' and 'association_form_ids_json' in frame:
@@ -51,8 +58,8 @@ def signal_page(catalog, kind, filters=None, cursor=None, limit=25):
         elif key=='bundle_id' and 'from_id' in frame:
             ids={value}
             bundle_name=KINDS['kinase_substrate_bundles']
-            meta=catalog.catalog['sources'][bundle_name]
-            bindings=read_source(catalog.root,bundle_name,meta,columns=['bundle_id','association_id'])
+            bundle_meta=catalog.catalog['sources'][bundle_name]
+            bindings=read_source(catalog.root,bundle_name,bundle_meta,columns=['bundle_id','association_id'])
             ids.update(bindings.loc[bindings.bundle_id.eq(value),'association_id'])
             frame=frame.loc[frame.from_id.isin(ids)|frame.to_id.isin(ids)]
         else: raise ValueError('Filter not supported for this signal table: '+key)
@@ -60,7 +67,9 @@ def signal_page(catalog, kind, filters=None, cursor=None, limit=25):
     if offset>total: raise ValueError('Cursor outside population')
     page=frame.iloc[offset:offset+limit];following=offset+len(page)
     token=base64.urlsafe_b64encode(encode({'binding':binding,'offset':following}).encode()).decode() if following<total else None
+    keys=[{k:r[k] for k in meta['unique_key']} for r in clean(page.to_dict('records'))]
+    items=catalog.source_rows(name,keys) if keys else []
     catalog._require()
     return {'status':'available','catalog_id':catalog.catalog['catalog_id'],'source_table':name,
-            'items':clean(page.to_dict('records')),'total_count':total,'returned_count':len(page),'next_cursor':token,
+            'items':items,'total_count':total,'returned_count':len(page),'next_cursor':token,
             'count_unit':'projection_rows_not_independent_observations','scope':'all_saved_rows; page_and_pin_do_not_change_population'}

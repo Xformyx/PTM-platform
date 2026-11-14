@@ -3,6 +3,8 @@ import asyncio
 from pathlib import Path
 from typing import Literal
 import csv
+from functools import lru_cache
+from threading import RLock
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
@@ -13,15 +15,21 @@ from ptm_shared.vector_columnar import VectorColumnar
 router = APIRouter(prefix="/orders", tags=["vector-view"])
 
 
+@lru_cache(maxsize=2)
+def _signal_session(root):
+    from ptm_shared.astra_evidence_catalog import EvidenceCatalog
+    return EvidenceCatalog(root), RLock()
+
+
 @router.post("/{order_id}/substrate-signal/{kind}")
 async def substrate_signal(order_id:int, kind:str, body:dict, db=Depends(get_db), user=Depends(get_current_user)):
     order=await access(db,user,order_id)
     from ptm_shared.substrate_signal_view import published_root, signal_page
-    from ptm_shared.astra_evidence_catalog import EvidenceCatalog
     def read():
         root=published_root(Path(get_settings().OUTPUT_DIR)/order.order_code)
-        catalog=EvidenceCatalog(root)
-        return signal_page(catalog,kind,body.get('filters'),body.get('cursor'),body.get('limit',25))
+        catalog,lock=_signal_session(str(root))
+        with lock:
+            return signal_page(catalog,kind,body.get('filters'),body.get('cursor'),body.get('limit',25))
     try:
         return await asyncio.to_thread(read)
     except FileNotFoundError:

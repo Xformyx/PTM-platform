@@ -74,3 +74,26 @@ def test_revision_captures_dependencies_absent_from_old_code_snapshot(config,tmp
     r=subprocess.run([sys.executable,'-I','-B',str(destination/'reader_replay.py'),'--output',str(tmp_path/'replay')],
         cwd='/tmp',env={k:v for k,v in os.environ.items() if k!='PYTHONPATH'},capture_output=True,text=True)
     assert r.returncode==0,r.stderr+r.stdout
+
+
+def test_display_revision_replays_saved_reader_without_reselecting(config,tmp_path):
+    from ptm_shared import astra_evidence_v6 as engine
+    from ptm_shared.astra_reader_revision import revise_temporal
+    from ptm_shared.annotation_registry import digest
+    config['experimental_context']['quantitation_export_mode']='astra_analysis.v6'
+    result=engine.run('saved-display-fixture',config,tmp_path/'source')
+    root=tmp_path/'source/enrichment_free_runs'/result['run_id']
+    result=revise_temporal(root,tmp_path/'display',refresh_figures=True)
+    revised=tmp_path/'display/enrichment_free_runs'/result['run_id']
+    # Instrument only the synthetic archive. Its stored reader remains the
+    # authoritative input; the source package and real archives are untouched.
+    module=revised/'reproducibility/code/ptm_shared/astra_reader.py'
+    module.write_text(module.read_text()+"\ndef build_reader_tables(*a,**k):\n    raise AssertionError('Saved reader selection must not be rebuilt')\n")
+    manifest=json.loads((revised/'manifest.json').read_text())
+    manifest['files'][str(module.relative_to(revised))].update(bytes=module.stat().st_size,sha256=digest(module))
+    (revised/'manifest.json').write_text(json.dumps(manifest))
+    r=subprocess.run([sys.executable,'-I','-B',str(revised/'reader_replay.py'),'--output',str(tmp_path/'replayed')],
+        cwd='/tmp',env={k:v for k,v in os.environ.items() if k!='PYTHONPATH'},capture_output=True,text=True)
+    assert r.returncode==0,r.stderr+r.stdout
+    checked=json.loads((tmp_path/'replayed/READER_REPLAY_VALIDATION.json').read_text())
+    assert checked['saved_reader_revision_input'] and not checked['previous_reader_interpretation_rebuilt']

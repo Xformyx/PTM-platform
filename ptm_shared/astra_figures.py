@@ -235,13 +235,16 @@ def heatmap_rows(ids, tables):
     return result
 
 
-def figure_packet(tables,directory,design):
+def figure_packet(tables,directory,design,*,figure_names=None):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     matplotlib.rcParams['svg.hashsalt']='PTM-Astra-v4'
     output=directory/'figures';output.mkdir(exist_ok=True);legends=[]
+    requested=set(figure_names) if figure_names is not None else None
+    previous=json.loads((output/'figure_legends.json').read_text()) if requested is not None and (output/'figure_legends.json').is_file() else []
     def save(name,key,draw,selection):
+        if requested is not None and name not in requested:return
         frame=tables[key];frame.to_csv(output/(name+'_source.csv'),index=False)
         fig,ax=plt.subplots(figsize=(10,5));details=draw(ax,frame) or {}
         ax.set_title(details.get('display_title',name.replace('_',' ')));fig.tight_layout()
@@ -355,4 +358,9 @@ def figure_packet(tables,directory,design):
         else:empty(ax)
         ax.set_xlabel('Source observed peak time (minutes)');ax.set_ylabel('Target observed peak time (minutes)')
     save('cross_layer_timing','temporal/cross_layer_links',timing,'all finite supported cross-layer links; sampled peaks are not causal lag estimates')
+    if requested is not None:
+        replacements={r['figure_id']:r for r in legends}
+        if requested-set(replacements):raise ValueError('Unknown requested figure: '+str(sorted(requested-set(replacements))))
+        existing={r['figure_id'] for r in previous}
+        legends=[replacements.get(r['figure_id'],r) for r in previous]+[r for r in legends if r['figure_id'] not in existing]
     json_write(output/'figure_legends.json',legends)

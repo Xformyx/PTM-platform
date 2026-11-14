@@ -172,3 +172,33 @@ def test_native_unselected_membership_is_accessible_but_not_contributing(tmp_pat
     b=result[KINASES].loc[result[KINASES].track.str.startswith('method:')].iloc[0]
     assert b.contributing_form_count==0 and b.measurement_group_count==0
     assert json.loads(result[KINASE_MEMBERS].iloc[0].saved_values_json)['selected'] is False
+    projections.update(result)
+    links=evidence_map(projections)[LINKS]
+    assert 'method_input_excluded' in set(links.edge_type)
+    assert 'method_contribution' not in set(links.edge_type)
+
+
+def test_membership_turnover_keeps_variable_fixed_and_count_units_separate(tmp_path):
+    _,tables,design,registry=fixture(tmp_path)
+    kinase_fixture(tables,design,registry)
+    extra=tables['quant/comparisons'].copy();extra['form_id']='second_form'
+    tables['quant/comparisons']=pd.concat([tables['quant/comparisons'],extra],ignore_index=True)
+    edges=tables['kinase/kinase_candidate_edges'].copy()
+    edges['edge_id']+='second';edges['form_id']='second_form';edges['substrate_gene']='OTHER'
+    tables['kinase/kinase_candidate_edges']=pd.concat([tables['kinase/kinase_candidate_edges'],edges],ignore_index=True)
+    rows=tables['kinase/substrate_contributions']
+    at_later=rows.contrast_id.eq('c_1')
+    rows.loc[at_later,'form_ids']='second_form';rows.loc[at_later,'edge_ids']+='second'
+    rows.loc[at_later,'substrate_gene']='OTHER'
+    fixed=tables['temporal/kinase_fixed_membership']
+    fixed['entered_sites']=[1,1,1]*2;fixed['departed_sites']=[0,1,1]*2
+    projections=trajectory_projection(tables,design,registry)
+    result=kinase_projection(tables,design,registry,projections[TRAJECTORIES])
+    b=result[KINASES].query('candidate_id == "K1" and track == "curated_A"').iloc[0]
+    assert b.contributing_form_count==2 and b.gene_count==2 and b.measurement_group_count==1
+    points=json.loads(b.points_json)
+    assert [p['contributing_form_count'] for p in points]==[1,1,1]
+    assert [p['saved_results']['kinase/kinase_temporal_profiles'][0]['values']['activity_magnitude'] for p in points]==[0,1,2]
+    assert all(p['saved_results']['temporal/kinase_fixed_membership'][0]['values']['fixed_common_score'] is None for p in points)
+    assert [p['saved_results']['temporal/kinase_fixed_membership'][0]['values']['departed_sites'] for p in points]==[0,1,1]
+    assert points[0]['membership_event_meaning']=='initial_membership_not_emergence'
