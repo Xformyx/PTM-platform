@@ -446,6 +446,7 @@ def _attach_enrichment_free_profile(order, config):
             config['source_fixtures_path']=os.getenv('PTM_ASTRA_PROVIDER_FIXTURES')
             from ptm_shared.astra_inputs import capture_order
             config.setdefault('user_input_snapshot',capture_order(order))
+            config.setdefault('research_input_receipt',config['user_input_snapshot'].get('source_receipt'))
             # Preserve the previous hash even on refresh; the worker decides
             # whether to reuse or acquire from the existing refresh flag.
             config['source_pin_sha256']=context.get('astra_source_pin_sha256')
@@ -1716,6 +1717,7 @@ async def start_order(
     if (order.analysis_context or {}).get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'}:
         from app.services.astra_input_capture import prepare_astra_inputs
         task_config['user_input_snapshot'],task_config['literature_pin']=await prepare_astra_inputs(order,db,get_settings().REFERENCE_DIR)
+        task_config['research_input_receipt']=task_config['user_input_snapshot']['source_receipt']
     _attach_enrichment_free_profile(order, task_config)
     task = celery_app.send_task(
         "preprocessing.tasks.run_preprocessing",
@@ -2060,6 +2062,7 @@ async def run_stage(
         if (order.analysis_context or {}).get('quantitation_export_mode') in {'astra_analysis.v4','astra_analysis.v5','astra_analysis.v6'}:
             from app.services.astra_input_capture import prepare_astra_inputs
             task_config['user_input_snapshot'],task_config['literature_pin']=await prepare_astra_inputs(order,db,get_settings().REFERENCE_DIR)
+            task_config['research_input_receipt']=task_config['user_input_snapshot']['source_receipt']
         _attach_enrichment_free_profile(order, task_config)
         task = celery_app.send_task(
             "preprocessing.tasks.run_preprocessing",

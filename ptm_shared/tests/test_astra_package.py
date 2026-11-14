@@ -42,8 +42,8 @@ def test_lossless_input_inventory_and_secret_exclusion(configuration):
     clean=capture_order({**snapshot['original'],'id':42})
     assert 'MUST_NOT_APPEAR' not in json.dumps(clean)
     fields,check,brief=transfer_contract(clean,design,context,{'collections':[]})
-    assert check['unexpected_missing']==0
-    assert check['raw_transferred']==len(list(leaves(clean['original'])))
+    assert check['unexpected_missing'] is None
+    assert check['research_input_fields']==len(list(leaves(clean['original'])))
     assert check['justified_exclusions']==1
     assert len({r['source_field_path'] for r in fields})==len(fields)
     extension=clean['original']['analysis_context']['custom_extension']

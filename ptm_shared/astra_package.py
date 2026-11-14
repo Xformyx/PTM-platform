@@ -57,6 +57,8 @@ def write_study_inputs(directory, snapshot, context, design):
         json_write(Path(directory)/'study'/(name+'.json'),value)
     json_write(Path(directory)/'study/study_display.json',study_display(design,context))
     json_write(Path(directory)/'study/control_comparison.json',comparison_summary(design))
+    from .astra_inputs import write_delivery_receipt
+    write_delivery_receipt(directory, snapshot)
 
 
 def finding_execution_code(root, pin, preferred_run=None):
@@ -638,8 +640,12 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
                         shutil.copyfile(original.parent/relative,dest)
                         if digest(dest)!=resource[part+'_sha256']:raise ValueError('Specificity input checksum mismatch')
             engine.normalized_reference(inputs,context)
+        from .astra_inputs import verify_snapshot
+        verify_snapshot(config.get('user_input_snapshot'), config.get('research_input_receipt'))
         snapshot=config.get('user_input_snapshot') or capture_order({'id':order_id,'order_code':config['order_code'],'analysis_context':context})
-        snapshot=sanitize_research(snapshot);literature=config.get('literature_pin') or {'collections':[],'documents':[],'status':'not_persisted_in_source_order'}
+        snapshot=sanitize_research(snapshot)
+        verify_snapshot(snapshot)
+        literature=config.get('literature_pin') or {'collections':[],'documents':[],'status':'not_persisted_in_source_order'}
         plan=plan_resolver(context,hashes,taxa=fasta_taxonomy(inputs['FASTA']).values())
         if subject_request['mode']!='not_requested':plan['literature_subject_request']=subject_request
         metrics.plan=plan
@@ -868,6 +874,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         json_write(directory/'reproducibility/stage_metrics.json',metrics+[{'stage':'validate_and_publish','status':'archive_publication_metrics_recorded_in_platform_run','note':'Archive duration/size cannot be hashed inside that same archive without changing them'}])
         shutil.copyfile(directory/'stage_checkpoint.json',directory/'reproducibility/stage_ledger.json')
         archive,files=seal_archive(directory,root,run_id,package_version,checkpoint)
+        transfer=json.loads((directory/'study/input_transfer_validation.json').read_text())
         artifacts={name:{'path':str(path.relative_to(root)),'sha256':digest(path)} for name,path in {
             'astra':archive,'report':directory/'evidence_report.html','report_markdown':directory/'START_HERE_ASTRA.md',
             'start_here':directory/'START_HERE_ASTRA.md','study_brief':directory/'study/STUDY_BRIEF.md',
@@ -895,6 +902,8 @@ def validate_package(directory):
         path=(directory/name).resolve()
         if not path.is_relative_to(directory) or not path.is_file() or digest(path)!=entry['sha256'] or path.stat().st_size!=entry['bytes']:
             raise ValueError('Package hash/missing-file failure: '+name)
+    from .astra_inputs import validate_delivery
+    validate_delivery(directory)
     dictionary=json.loads((directory/'reproducibility/data_dictionary.json').read_text());tables={}
     for name,entry in dictionary.items():
         df=pd.read_csv(directory/name,low_memory=False)
@@ -974,6 +983,10 @@ def seal_archive(directory,root,run_id,package_version,checkpoint=lambda:None):
     if (Path(directory)/'reproducibility/code/ptm_shared/astra_reader_replay.py').is_file():
         from .astra_reader_replay import write_entrypoint
         write_entrypoint(directory)
+    from .astra_inputs import validate_delivery
+    delivery = validate_delivery(directory)
+    if delivery.get('status') == 'verified':
+        json_write(directory/'study/input_transfer_validation.json', delivery)
     files={str(p.relative_to(directory)):{'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(directory.rglob('*')) if p.is_file() and p.name not in {'stage_checkpoint.json','manifest.json','platform_run.json'}}
     json_write(directory/'manifest.json',{'schema_version':package_version,'run_id':run_id,'files':files})
     validate_package(directory)
@@ -984,5 +997,6 @@ def seal_archive(directory,root,run_id,package_version,checkpoint=lambda:None):
         if z.testzip():raise ValueError('Archive CRC failure')
         for name,item in files.items():
             if hashlib.sha256(z.read(name)).hexdigest()!=item['sha256']:raise ValueError('Archive manifest failure')
+        validate_delivery(directory, archive=z)
     checkpoint();pending.replace(archive)
     return archive, files

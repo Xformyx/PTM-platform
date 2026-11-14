@@ -7,7 +7,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from app.models.rag_collection import RagCollection, RagDocument
-from ptm_shared.astra_inputs import capture_order
+from ptm_shared.astra_inputs import capture_order, verify_order_capture
 
 
 def _attach_registered_specificity(order, reference_root):
@@ -89,6 +89,7 @@ def _attach_registered_specificity(order, reference_root):
 async def prepare_astra_inputs(order, db, reference_root):
     _attach_registered_specificity(order, reference_root)
     snapshot=capture_order(order)
+    verify_order_capture(order, snapshot)
     context=order.analysis_context or {}
     attachment_hashes=sorted(r.get('sha256','') for r in context.get('research_attachment_records',[]))
     prior=context.get('astra_literature_pin')
