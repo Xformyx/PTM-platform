@@ -53,5 +53,8 @@ AI04.xml: 2 passed. AI04_guard.xml: 2 passed. AI04_revision.xml: 1 passed.
 reader 상한 750,243,224 bytes, 측정 당시 여유 29,682,987,008 bytes, reserve 20GiB다.
 추가 peak 예산은 reader 상한의 2배로 계산했다. 기존 추출본을 재사용해 ZIP 복사/압축하지 않았다.
 결과 경로 `codex-inputs/astra-ai-20261113/old_archive_replay/READER_REPLAY_VALIDATION.json`.
-이 실제 검증의 완료 결과 및 최종 현재-code revision은 통합 보고에 확정 기록한다.
+실제 구 archive 검증이 완료됐다: manifest **257개** 전후 hash/size 불변, 비교 기록42개에 해당하는
+**고유 reader 파일40개** 모두 byte-identical. source reader 모듈은 해당 archive code root였다.
+과학·network·model 호출0, M4 frozen 실행 복원 true. 기존 runner의 중복 artifact 반환은 고유 파일로 중복 집계하지 않았다.
+AI04 commit은 `91618dc`; 최종 현재-code revision은 통합 보고에 기록한다.
 실제 matched/운영 환경과 actual native scientific replay는 검증하지 않았다.

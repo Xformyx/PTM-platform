@@ -16,6 +16,24 @@ MEMBER_COLUMNS=['method_membership_id','candidate_id','contrast_id','method_id',
 EXEC_COLUMNS=['execution_id','method_id','contrast_id','status','reason','parameters','runtime_seconds','input_hash','output_hash','log']
 
 
+ADAPTER_BOOTSTRAP = '''import importlib.util,runpy,sys
+from pathlib import Path
+root=Path(sys.argv.pop(1)).resolve()
+expected=root/'ptm_shared/phosx_activity_adapter.py'
+if not expected.is_file():raise ImportError('Bundled adapter missing')
+sys.path.insert(0,str(root))
+spec=importlib.util.find_spec('ptm_shared.phosx_activity_adapter')
+if spec is None or Path(spec.origin).resolve()!=expected.resolve():raise ImportError('Unexpected bundled adapter origin')
+runpy.run_module('ptm_shared.phosx_activity_adapter',run_name='__main__',alter_sys=True)
+'''
+
+
+def adapter_command(arguments):
+    """Trust this loaded module's code root, not cwd or inherited PYTHONPATH."""
+    code_root=Path(__file__).resolve().parent.parent
+    return [sys.executable,'-I','-B','-c',ADAPTER_BOOTSTRAP,str(code_root),*arguments]
+
+
 def contrast_scope(context, available):
     """Optional native-method scope, never inferred from the observed scores."""
     requested=context.get('science',{}).get('official_methods',{}).get('PhosX',{}).get('contrast_ids')
@@ -79,9 +97,9 @@ def execute_tracks(scientific,inputs,context,resource):
         with tempfile.TemporaryDirectory(prefix='ptm-native-phosx-') as work:
             work=Path(work);ranked=work/'ranked.tsv';frame[['sequence','A']].to_csv(ranked,sep='\t',index=False,header=False)
             output=work/'native';perms=int(settings.get('permutations',10000));seed=int(settings.get('seed',1729))
-            command=[sys.executable,'-m','ptm_shared.phosx_activity_adapter','--input',str(ranked),
+            command=adapter_command(['--input',str(ranked),
                 '--matrix',str(Path(path).parent/manifest['matrix_file']),'--background',str(Path(path).parent/manifest['background_file']),
-                '--output',str(output),'--residue',kind,'--permutations',str(perms),'--seed',str(seed)]
+                '--output',str(output),'--residue',kind,'--permutations',str(perms),'--seed',str(seed)])
             # Fresh process supports Celery prefork workers and isolates PRNG state.
             try:
                 result=subprocess.run(command,capture_output=True,text=True,timeout=int(settings.get('timeout_seconds',14400)),shell=False)
@@ -89,6 +107,8 @@ def execute_tracks(scientific,inputs,context,resource):
                 log=(result.stderr+result.stdout).replace(str(work),'<method-work-directory>')
             except subprocess.TimeoutExpired:
                 reason='native_method_timeout';log='Native method time budget exhausted; quantification retained.'
+            except OSError as error:
+                reason='native_process_start_failed';log='Native process could not start: '+type(error).__name__
             record=json.loads((output/'execution.json').read_text()) if not reason else {}
             context.setdefault('_method_runtime',[]).append({'method':'PhosX','contrast_id':contrast,
                 'runtime_seconds':record.get('runtime_seconds'),'log':log,'status':reason or 'executed'})
