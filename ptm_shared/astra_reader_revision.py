@@ -158,6 +158,7 @@ def revise_temporal(source, output_dir, *, refresh_figures=False, access_only=Fa
     if whole_only:
         from .astra_reader_full import TABLE_KEYS as FULL_KEYS
         allowed|={'reader/cards.csv',*[k+'.csv' for k in FULL_KEYS]}
+    allowed |= {name for name in artifacts if name.startswith('signal_flow/')}
     preserved=[name for name in baseline if name not in allowed]
     manifest=json.loads((source/'manifest.json').read_text())
     if refresh_figures:

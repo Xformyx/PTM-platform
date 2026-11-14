@@ -7,7 +7,7 @@ from ptm_shared.substrate_signal_flow import trajectory_projection, TRAJECTORIES
 from ptm_shared.astra_evidence_catalog import EvidenceCatalog
 from ptm_shared.substrate_signal_flow import kinase_projection, KINASES, KINASE_MEMBERS
 from ptm_shared.effect_series import resolve_series
-from ptm_shared.substrate_signal_flow import observed_order, evidence_map, LINKS, HYPOTHESES
+from ptm_shared.substrate_signal_flow import observed_order, evidence_map, LINKS, HYPOTHESES, ASSOCIATIONS
 
 
 def kinase_fixture(tables,design,registry):
@@ -126,10 +126,10 @@ def test_exact_prior_preserves_opposite_observed_order(tmp_path):
     upstream={**t,'trajectory_id':'upstream','form_id':'kinase_form','identity_json':json.dumps({'protein_group':'P123','taxa':['9606']}),
               'feature_json':json.dumps({'onset_lower_min':15,'onset_upper_min':30}),'feature_refs_json':json.dumps([{'evidence_id':'upstream_feature'}])}
     outputs[TRAJECTORIES]=pd.DataFrame([target,upstream])
-    for i,b in outputs[KINASES].iterrows():
+    for i,b in outputs[ASSOCIATIONS].iterrows():
         edges=json.loads(b.edges_json)
         for e in edges:e.update(edge_type='curated_exact_site_native',site_mapping_status='unique',directness='site_relation_recorded',candidate_accession='P123',input_accession='P456',substrate_taxon=9606,kinase_taxon=9606,evidence_record_ids='prior1')
-        outputs[KINASES].loc[i,'edges_json']=json.dumps(edges)
+        outputs[ASSOCIATIONS].loc[i,'edges_json']=json.dumps(edges)
     outputs[MEMBERS]=outputs[MEMBERS].query('track == "A"')
     result=evidence_map(outputs)
     checks=[c for j in result[HYPOTHESES].prior_observation_checks_json for c in json.loads(j)]
@@ -160,3 +160,15 @@ def test_projection_pages_bind_catalog_and_filters(tmp_path):
     cursor=signal_page(c,'substrate_trajectories',limit=1)['next_cursor']
     with pytest.raises(ValueError,match='Cursor'):signal_page(c,'substrate_trajectories',{'track':'A'},cursor)
     assert signal_page(c,'substrate_trajectories',{'track':'A'})['total_count']==1
+
+
+def test_native_unselected_membership_is_accessible_but_not_contributing(tmp_path):
+    _,tables,design,registry=fixture(tmp_path)
+    tables['kinase/method_membership']=pd.DataFrame([{'method_membership_id':'excluded','candidate_id':'k','contrast_id':'c_0',
+        'method_id':'native','form_ids':'f','site_ids':'s','measurement_group_id':'g','selected':False,'ranking_statistic':4.2}])
+    registry['kinase/method_membership.csv']={'unique_key':['method_membership_id'],'sha256':'fixture'}
+    projections=trajectory_projection(tables,design,registry)
+    result=kinase_projection(tables,design,registry,projections[TRAJECTORIES])
+    b=result[KINASES].loc[result[KINASES].track.str.startswith('method:')].iloc[0]
+    assert b.contributing_form_count==0 and b.measurement_group_count==0
+    assert json.loads(result[KINASE_MEMBERS].iloc[0].saved_values_json)['selected'] is False

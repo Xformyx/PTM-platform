@@ -46,10 +46,15 @@ def signal_page(catalog, kind, filters=None, cursor=None, limit=25):
     frame=read_source(catalog.root,name,meta)
     for key,value in filters.items():
         if key in frame: frame=frame.loc[frame[key].eq(value)]
-        elif key=='form_id' and 'edges_json' in frame:
-            frame=frame.loc[frame.edges_json.map(lambda j:any(e.get('form_id')==value for e in json.loads(j)))]
+        elif key=='form_id' and 'association_form_ids_json' in frame:
+            frame=frame.loc[frame.association_form_ids_json.map(lambda j:value in json.loads(j))]
         elif key=='bundle_id' and 'from_id' in frame:
-            frame=frame.loc[frame.from_id.eq(value)|frame.to_id.eq(value)]
+            ids={value}
+            bundle_name=KINDS['kinase_substrate_bundles']
+            meta=catalog.catalog['sources'][bundle_name]
+            bindings=read_source(catalog.root,bundle_name,meta,columns=['bundle_id','association_id'])
+            ids.update(bindings.loc[bindings.bundle_id.eq(value),'association_id'])
+            frame=frame.loc[frame.from_id.isin(ids)|frame.to_id.isin(ids)]
         else: raise ValueError('Filter not supported for this signal table: '+key)
     total=len(frame)
     if offset>total: raise ValueError('Cursor outside population')

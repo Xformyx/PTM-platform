@@ -566,6 +566,7 @@ def build_data_anchored_rag_queries(packet: Mapping[str, Any] | None, *, section
 
 def format_biological_synthesis_packet_for_llm(packet: Mapping[str, Any] | None, *, section_type: str) -> str:
     """Format a human-readable packet for Results/Discussion/Abstract writers."""
+    from ptm_shared.substrate_signal_reader import format_signal_report
     packet = dict(packet or {})
     if not packet:
         return ""
@@ -636,7 +637,7 @@ def format_biological_synthesis_packet_for_llm(packet: Mapping[str, Any] | None,
         "Do not turn a literature relationship, motif score, Wave co-membership, lag, or pathway diagram into an Order-specific direct kinase–site or causal edge.",
         "=== END DATA-GROUNDED BIOLOGICAL SYNTHESIS PACKET ===",
     ])
-    return "\n".join(lines)
+    return format_signal_report(packet.get("substrate_signal_flow")) + "\n".join(lines)
 
 
 def _report_cell(value: Any) -> str:

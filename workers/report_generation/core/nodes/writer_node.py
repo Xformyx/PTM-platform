@@ -455,6 +455,11 @@ def run_section_writing(state: dict) -> dict:
         ),
         candidate_limit=20,
     )
+    from ptm_shared.substrate_signal_reader import load_report_signal
+    signal_packet=load_report_signal(state['output_dir']) if state.get('output_dir') else {'status':'unavailable','reason':'output_snapshot_unavailable'}
+    temporal_evidence_packet['substrate_signal_flow']=signal_packet
+    biological_synthesis_packet['substrate_signal_flow']=signal_packet
+    state['substrate_signal_flow']=signal_packet
     if reader_authoring_shadow:
         # Prepare actual insertable figures before planning or section writing.
         # The scientific author and final renderer must consume the same frozen

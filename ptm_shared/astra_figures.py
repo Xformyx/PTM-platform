@@ -116,6 +116,8 @@ def heatmap_grid(frame,index,column,value,design):
     retain distinct condition IDs, including controls actually present in rows.
     No quantification or time-label parsing is run here.
     """
+    if value in {'A','U_joint','P_joint'} and 'included' in frame:
+        frame=frame.copy();frame.loc[~frame.included.fillna(False),value]=float('nan')
     if frame[[index,column]].isna().any().any():
         raise ValueError('Heatmap entity/column IDs must be present')
     duplicates=frame.loc[frame.duplicated([index,column],keep=False),[index,column]]

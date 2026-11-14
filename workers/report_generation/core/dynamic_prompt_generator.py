@@ -1449,8 +1449,10 @@ def format_temporal_evidence_packet_for_llm(
     section_type: str = "general",
 ) -> str:
     """Format the packet as a mandatory, compact writer supplement."""
+    from ptm_shared.substrate_signal_reader import format_signal_report
+    signal_text=format_signal_report((packet or {}).get("substrate_signal_flow"))
     if not packet or packet.get("status") != "available":
-        return (
+        return signal_text + (
             "=== TEMPORAL NUMERICAL EVIDENCE PACKET ===\n"
             "Status: unavailable. Do not invent temporal phosphorylation-feature/protein, within-cluster interval-wise activity-state concordance, or kinase timing results.\n"
             "=== END TEMPORAL NUMERICAL EVIDENCE PACKET ==="
@@ -1504,7 +1506,7 @@ def format_temporal_evidence_packet_for_llm(
         f"Claim boundary: {packet.get('claim_boundary', '')}",
         "=== END TEMPORAL NUMERICAL EVIDENCE PACKET ===",
     ])
-    return "\n".join(lines)
+    return signal_text + "\n".join(lines)
 
 
 def format_compact_attribution_readiness_for_report(packet: Mapping[str, Any] | None) -> str:

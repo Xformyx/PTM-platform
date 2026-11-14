@@ -151,7 +151,20 @@ def field_semantics(table, column, *, row=None, dtype=None):
     def known(meaning, unit, scale='identity', statistical_unit='not_applicable', restriction_class='recorded_metadata', **extra):
         out.update(meaning=meaning, unit=unit, scale=scale, statistical_unit=statistical_unit,
                    restriction_class=restriction_class, status='known', unknown_reason=None, **extra)
-    if table=='quant/detection' and column in {'post_reference_U','raw_candidate_A','eligible_A'} and row.get('detection_version')!='target_arm_post_reference.v2':
+    if table.startswith('signal_flow/'):
+        if column.endswith('_count') or column in {'eligible_points','registered_points'}:
+            known('Count of the named saved entity/point grain; not biological n or independent validation.',
+                  'count','integer','named_projection_grain','coverage',range={'min':0})
+        elif column=='points_json':
+            known('Canonical numeric target/reference minutes and saved values. Trajectory value is an eligible log2 ratio; calculation_trace_value may be excluded. Kinase saved_results retain their own source method units and status.',
+                  'typed_json',restriction_class='source_projection',nested_contract='substrate_signal_flow.v1; source_ref + quantitative_fields(source_table, field, row)')
+        elif column.endswith('_json'):
+            known('Typed saved source locators/metadata. Nested quantities use their original source field contracts; null is unavailable, never zero.',
+                  'typed_json',restriction_class='source_projection',nested_contract='source_table + canonical source_key + source_sha256')
+        else:
+            known('Signal projection identity or recorded descriptive status; no new calibrated or causal claim.',
+                  'identifier' if column.endswith('_id') else 'recorded_metadata',restriction_class='source_projection')
+    elif table=='quant/detection' and column in {'post_reference_U','raw_candidate_A','eligible_A'} and row.get('detection_version')!='target_arm_post_reference.v2':
         out.update(unknown_reason='legacy_detection_semantics_not_versioned',restriction_class='relative_effect',
                    meaning='Stored legacy detection track; preserved without recalculation. Cross-time eligibility has not been upgraded.')
     elif column in LOG_EFFECTS and table.startswith(('quant/', 'temporal/', 'evidence/')):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 from typing import Any, Mapping
 
 from ptm_shared.de_novo_representation import conventional_quantitation_eligibility, is_de_novo_representation
@@ -1025,8 +1026,38 @@ def prepare_reader_figure_manifest(state: Mapping[str, Any], *, citation_complet
     joint = _generate_joint_trajectory_entry(state, output_dir)
     if joint:
         manifest["figures"].append(joint)
+    signal = saved_signal_figure(state.get('substrate_signal_flow'))
+    if signal:
+        manifest['figures'].append(signal)
     manifest["prepared_before_writer"] = True
     return _assign_reader_figure_labels(manifest)
+
+
+def saved_signal_figure(packet):
+    """Same published points/IDs as UI and Astra; never re-render scientific data."""
+    from ptm_shared.annotation_registry import digest
+    from ptm_shared.astra_evidence_catalog import safe_path
+    if not packet or packet.get('status')!='available' or not packet.get('source_package_root'):
+        return None
+    root=Path(packet['source_package_root'])
+    name='reader/substrate_UPA_trajectories.png'
+    manifest=json.loads((root/'manifest.json').read_text())
+    entry=manifest['files'].get(name)
+    if not entry:return None
+    path=safe_path(root,name)
+    if digest(path)!=entry['sha256']:raise ValueError('Signal figure hash mismatch')
+    bindings=[{'trajectory_id':r['trajectory_id'],'form_id':r['form_id'],'bundle_ids':r['bundle_ids'],
+               **p} for r in packet['representative_observations'] for p in r['points']]
+    return _entry('substrate_signal_UPA','saved_substrate_signal_trajectory',str(path),
+        question='Which measured substrate U/P/A responses support the candidate associations and their alternatives?',
+        evidence_tier='O1',source_evidence_ids=sorted({p['source_ref']['evidence_id'] for p in bindings if p.get('source_ref')}),
+        caption_facts={'data_scope':'published canonical form/effect-series snapshot','data_unit_scope':'quantified form; log2 contrast',
+            'visual_encoding':'U_joint/P_joint/A at actual numeric times; gaps/exclusions not connected',
+            'interpretation_boundary':'sampled response and substrate association, not kinase activation or causality'},
+        selection_rule='finite observation count then stable ID preview; full population remains accessible',
+        placement='supplementary',suppression_reason=None,quantitative_bindings=bindings,
+        source_run_id=packet.get('source_run_id'),source_packet_sha256=packet.get('source_packet_sha256'),
+        figure_sha256=entry['sha256'],full_population=packet['population'])
 
 
 def attach_reader_heatmap(manifest: Mapping[str, Any], image_path: str, selected_features: list[Mapping[str, Any]]) -> dict:

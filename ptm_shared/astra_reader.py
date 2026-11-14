@@ -574,6 +574,10 @@ def write_reader(directory, tables, *, source_root=None, access_only=False, whol
         if full.is_file() and not (access_only or review_plan_only):
             note='\n\n실제 typed 문헌 실행과 요청/전체 범위는 [M4 실행 기록](LITERATURE_SUBJECT_REVIEW.md)을 따릅니다. 대상 계획의 not_requested는 실행 결과를 덮어쓰지 않습니다.\n'
             if note not in full.read_text():full.write_text(full.read_text()+note,encoding='utf-8')
+    from .substrate_signal_reader import write_signal_flow
+    signal_artifacts,signal_contract=write_signal_flow(directory,tables,source_root=source_root)
+    access_artifacts += signal_artifacts
+    packet['substrate_signal_flow']=signal_contract
     if review_plan_only:
         json_write(directory/'reader/authoring_packet.json',packet)
         note='\n\n## 전체 문헌 검토 대상 (M3)\n\n[요약과 독립적인 typed 검토 계획](LITERATURE_REVIEW_PLAN.md). 새 검색·비교는 미요청이며 기존 문헌 실행 기록은 보존됩니다.\n'
