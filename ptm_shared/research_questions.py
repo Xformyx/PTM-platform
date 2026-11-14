@@ -31,7 +31,50 @@ def classify_question_intent(text: str) -> str:
     return "unspecified"
 
 
-def build_question_map(questions, cards):
+def verified_question_entities(text, cards, reference_inventory=(), taxon=None):
+    """Resolve symbols/accession aliases only through actual measured identities.
+
+    Unrecognized uppercase text is retained for review, never a hard gene filter.
+    No static family expansion or inferred species/isoform mapping is performed.
+    """
+    registry = {}
+    for card in cards:
+        identity = card.get('feature_identity') or {}
+        gene = str(identity.get('gene') or '')
+        recorded_taxon = str(identity.get('fasta_taxonomy_id') or '')
+        if not gene or gene in {'?', 'UNKNOWN', 'UNMAPPED'} or ';' in gene: continue
+        if taxon is not None and str(taxon) != recorded_taxon: continue
+        item = {'gene': gene, 'taxon': recorded_taxon or None,
+                'feature_id': identity.get('feature_id'), 'card_id': card.get('card_id'),
+                'source': 'reader/cards.csv#card_id=' + str(card.get('card_id'))}
+        registry.setdefault(gene.casefold(), []).append(item)
+        accessions = set(str(identity.get('protein_group') or '').split(';'))
+        for entry in reference_inventory:
+            # Exact accession + recorded taxon is required before consuming an alias.
+            if str(entry.get('accession')) not in accessions or str(entry.get('taxon')) != recorded_taxon: continue
+            if str(entry.get('gene') or '').casefold() != gene.casefold(): continue
+            for alias in [entry.get('accession'), entry.get('raw_identifier')]:
+                if alias and str(alias).lower() != 'nan':
+                    registry.setdefault(str(alias).casefold(), []).append({**item,
+                        'alias_source': 'science/reference_inventory.csv', 'accession': entry['accession']})
+    resolved = []
+    for term, candidates in sorted(registry.items()):
+        if not re.search(r'(?<![\w])' + re.escape(term) + r'(?![\w])', text, re.I): continue
+        unique = {c['card_id']: c for c in candidates}
+        scopes = {(c['gene'].casefold(), c['taxon']) for c in unique.values()}
+        resolved.append({'term': term, 'status': 'ambiguous_taxon_or_identity' if len(scopes)>1 else 'measured_identity',
+                         'candidates': list(unique.values()), 'isoform_assignment': 'not_inferred'})
+    candidates = sorted(set(re.findall(r'\b[A-Z][A-Z0-9]{1,11}\b', text)) - (STOP - {'ERK', 'AKT'}))
+    unresolved = [term for term in candidates if term.casefold() not in {r['term'] for r in resolved}]
+    return {'schema_version': 'measured_identity.v1', 'resolved': resolved,
+            'unresolved_terms': [{'term': term, 'status': 'not_verified_in_measured_identity', 'hard_filter': False} for term in unresolved],
+            'matched_card_ids': sorted({c['card_id'] for r in resolved for c in r['candidates']}),
+            'entities': sorted({c['gene'] for r in resolved for c in r['candidates']}),
+            'status': 'resolved_with_unverified_terms' if resolved and unresolved else 'resolved' if resolved else 'relevance_unresolved',
+            'restriction': 'A symbol match is not an isoform, family, localization or kinase-activity determination.'}
+
+
+def build_question_map(questions, cards, *, entity_contract=None, reference_inventory=()):
     result, automatic = [], {}
     for index, value in enumerate(questions or [], 1):
         record = value if isinstance(value, dict) else {"text": str(value), "origin": "user"}
@@ -45,6 +88,11 @@ def build_question_map(questions, cards):
         for name, genes in aliases.items():
             if re.search(r"\b" + name + r"\b", normalized):
                 entities.extend(genes)
+        entity_resolution = None
+        if entity_contract == 'measured_identity.v1':
+            entity_resolution = verified_question_entities(normalized, cards, reference_inventory,
+                                                           record.get('taxon_id'))
+            entities = entity_resolution['entities']
         key = re.sub(r"\W+", " ", normalized.lower()).strip()
         qid = str(record.get("question_id") or f"RQ-{index:03}")
         if record.get("origin") == "automatic" and key in automatic:
@@ -59,6 +107,8 @@ def build_question_map(questions, cards):
             identity = card.get("feature_identity") or {}
             gene = str(identity.get("gene") or "")
             category = str(card.get("category") or "")
+            if entity_resolution and entities and card.get('card_id') not in entity_resolution['matched_card_ids']:
+                continue
             if intent == "kinase_context" and category == "kinase_context":
                 matches.append(card)
                 continue
@@ -80,7 +130,7 @@ def build_question_map(questions, cards):
             if intent == "atlas_observation" and card.get("evidence_type") == "atlas_observation":
                 matches.append(card)
                 continue
-            if entities and gene and gene not in entities:
+            if not entity_resolution and entities and gene and gene not in entities:
                 continue
             if not entities and not adjustment and intent not in {"feature_trajectory", "joint_ptm_protein"}:
                 continue
@@ -128,10 +178,18 @@ def build_question_map(questions, cards):
                  "results_paragraph_ids": [], "discussion_paragraph_ids": [],
                  "unresolved_reason": "Measured precursor context is available; direct functional or causal interpretation requires matched mapping and intervention evidence." if matches
                                       else "No matching measured feature or question-specific analysis was supplied."}
+        if entity_resolution is not None:
+            entry['entity_resolution'] = entity_resolution
+            if not matches:
+                entry['unresolved_reason'] = 'Question relevance is unresolved in reader cards; inspect full raw/withheld/no-call evidence. This is not absence of a biological response.'
+            if entity_resolution['unresolved_terms'] and not entities:
+                entry.update(answerability='relevance_unresolved', descriptive_answerable=False,
+                             answer_status='unanswered',
+                             unresolved_reason='Only broad context links are available; unverified terms are not gene restrictions or evidence of absence.')
         result.append(entry)
         if entry["origin"] == "automatic":
             automatic[key] = entry
-    return {"schema_version": VERSION, "questions": result}
+    return {"schema_version": 'research_question_evidence_map.v3' if entity_contract else VERSION, "questions": result}
 
 
 def audit_question_coverage(sections, question_map):

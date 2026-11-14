@@ -26,3 +26,13 @@ MC01 commit: `99752c7`. 새 `study_context_delivery`는 resolver가 아닌 실�
 검증: 긴 원문/preview/consumer hash와 published report-input 2개 추가, 기존 isolated bundled reader replay 1개 통과. 해당 suite 14 passed (이전 MC01 회귀 포함), 현재 고유 검증 17개. 새 interpreter/다른 cwd/공백 경로에서 reader 재생성 byte 비교 및 source read-only guard 통과. 첫 replay에서 method registry 작성 순서로 availability가 달라지는 문제를 발견해, 생성 시점의 파일 유무를 실행 사실로 단정하지 않고 최종 실행 manifest를 참조하도록 수정했다. 모델 호출은 없다. 기존 tiny fixture의 production 과학 함수는 package/replay 경계 검증에만 사용했으며 실제 자료의 재계산은 없다.
 
 MC02 checkpoint: 공통 projection·reader·report 연결 검증 완료. 다음 MC03 신규/legacy 질문 계약과 실제 identity 기반 entity routing.
+
+## MC03 — Design/질문 의미와 entity 계약
+
+MC02 commit: `4af4883`. `_questions`는 snapshot의 명시적 `study_context_roles.v2`에서만 Design→BQ 자동 생성을 중단한다. 호환 키/원문은 original_questions와 공통 context에 남는다. 명시적 질문 빈 배열은 빈 상태이며 저장된 question_id는 유지한다. marker가 없는 archive는 문장이나 BQ 존재로 추정하지 않고 기존 BQ-001/RQ 동작을 유지한다.
+
+기존 `build_question_map`의 선택적 `measured_identity.v1` 경로는 전체 observation의 실제 feature identity/taxon/gene을 검증한다. case-insensitive symbol matching은 form/card/taxon을 합치지 않는다. accession/raw_identifier alias는 실제 `science/reference_inventory`의 accession+taxon+gene 일치가 있을 때만 사용한다. 제공되지 않은 gene synonym/family/isoform은 생성하지 않는다. 기술 약자와 미확인 entity는 원문·unresolved로 보존하고 hard gene filter로 쓰지 않는다. ERK/AKT의 정적 family 확장은 신규 계약에 적용하지 않는다. 기존 v2 질문 경로는 그대로다.
+
+검증: 신규/legacy 계약, 빈 질문, 저장 ID, MAPK1+기술 약자, mixed-case/taxon/검증 alias, 모호한 family, Top-N 0/5/15/50의 전체 question source ID 불변 등 신규 5개 case 통과. 기존 reader/전체 접근 회귀 2개 및 frozen 문헌/원문 prompt/pin 변조 차단 회귀 3개 통과. 문헌 테스트는 기존 retriever/model 대역이며 신규 외부 검색/모델 호출은 없다. Design 원문은 기존 literature study context에 계속 전달된다.
+
+MC03 checkpoint: 10개 관련 검증 통과. 다음 MC04 활성 공통 안내의 benchmark 문구 제거 및 report-context 소비 검증. 과거 frozen 결과나 citation을 재분류하지 않았다.

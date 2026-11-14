@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from .astra_card_inputs import clean, encode, equivalent, consumer_states
-from .astra_inputs import stable_id
+from .astra_inputs import stable_id, CONTEXT_CONTRACT
 from .measured_feature_cards import (build_feature_observation_cards,
     build_quantitation_comparison_cards, select_finding_cards)
 from .research_questions import build_question_map
@@ -76,19 +76,25 @@ def _bind(card, state, source):
 
 def _questions(snapshot, metadata):
     original = (snapshot or {}).get('original', {})
-    context = original.get('analysis_context') or metadata['recorded_context']
+    current = (snapshot or {}).get('context_contract') == CONTEXT_CONTRACT
+    context = (original.get('analysis_context') or {}) if current else original.get('analysis_context') or metadata['recorded_context']
     report = original.get('report_options') or {}
     raw = {'biological_question': context.get('biological_question'),
            'research_questions': report.get('research_questions'),
            'research_questions_status': ('persisted' if 'research_questions' in report
                                          else 'not_persisted_in_source_order')}
     questions = []
-    if raw['biological_question'] is not None:
+    if current:
+        raw.update(context_contract=CONTEXT_CONTRACT, biological_question_role='study_design_context',
+                   biological_question_source='study/user_input_snapshot.json#/original/analysis_context/biological_question')
+    if not current and raw['biological_question'] is not None:
         questions.append({'text': raw['biological_question'], 'question_id': 'BQ-001',
                           'origin': 'analysis_context.biological_question'})
     for i, value in enumerate(raw['research_questions'] or [], 1):
         record = dict(value) if isinstance(value, dict) else {'text': value}
-        record.update(question_id=f'RQ-{i:03}', origin='report_options.research_questions')
+        if current: record.setdefault('question_id', f'RQ-{i:03}')
+        else: record['question_id'] = f'RQ-{i:03}'
+        record['origin'] = 'report_options.research_questions'
         questions.append(record)
     return raw, questions
 
@@ -121,7 +127,10 @@ def build_reader_tables(tables, design, snapshot=None):
     selected_states = {c['consumer_state_id'] for c in selected}
     finding_ids = {c['card_id']: finding_id_for_card(c['card_id']) for c in selected}
     raw_questions, questions = _questions(snapshot, metadata)
-    question_map = build_question_map(questions, observations)
+    current = (snapshot or {}).get('context_contract') == CONTEXT_CONTRACT
+    inventory = tables.get('science/reference_inventory', pd.DataFrame()).to_dict('records')
+    question_map = build_question_map(questions, observations,
+        entity_contract='measured_identity.v1' if current else None, reference_inventory=inventory)
     for q in question_map['questions']:
         matches = set(q['evidence_ids'])
         q.update(finding_ids=[finding_ids[c['card_id']] for c in selected if c['card_id'] in matches],
