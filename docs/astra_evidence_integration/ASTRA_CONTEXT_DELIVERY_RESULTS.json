@@ -5,23 +5,23 @@
   "stages": {
     "MC01": {
       "status": "complete",
-      "commit": "99752c7"
+      "commit": "99752c7965e923dc1b1cc9af51ef36806888ced9"
     },
     "MC02": {
       "status": "complete",
-      "commit": "4af4883"
+      "commit": "4af4883a87e317f9982fc72b762c6b8d5a49b452"
     },
     "MC03": {
       "status": "complete",
-      "commit": "c645814"
+      "commit": "c6458144cdcef7ce077d6145d67375013b3eab49"
     },
     "MC04": {
       "status": "complete",
-      "commit": "b588d3c"
+      "commit": "b588d3c71f1e0e4cd23240dd669436a7ecd6c7b4"
     },
     "MC05": {
-      "status": "verified_pending_local_commit",
-      "commit": null
+      "status": "complete",
+      "commit": "fe58f925798775df97499d19d57a45b77f0f8b35"
     }
   },
   "tests": {
@@ -216,7 +216,7 @@
   },
   "disk": {
     "initial_available_GiB": 3.35,
-    "final_available_bytes": 7123795968,
+    "final_available_bytes": 7126220800,
     "actual_revision_peak_budget": "approximately 4.7 GiB extraction + 0.6 GiB ZIP + 2.5 GiB replay + 2 GiB reserve; no large copies made"
   },
   "processes": {
@@ -233,5 +233,11 @@
     "merge": false,
     "deploy": false,
     "flag_change": false
+  },
+  "checkpoint": {
+    "status": "complete",
+    "next_command": null,
+    "remaining_validation": "only explicitly unavailable actual/operational resources listed above",
+    "working_tree": "tracked changes committed; preexisting codex-inputs remains untracked"
   }
 }

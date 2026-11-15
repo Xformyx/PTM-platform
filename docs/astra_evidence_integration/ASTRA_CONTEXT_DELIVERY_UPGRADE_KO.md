@@ -122,3 +122,19 @@ env -u PYTHONPATH codex-inputs/round11-20261010/runtime/bin/python -I -B \
 출력 경로는 아직 존재하지 않는 새 경로여야 한다. 현재 코드 revision 생성과 해당 archive 자체 코드 replay는 서로 다른 검증이며, 과거 실자료 reader 전부와 byte-identical이라고 주장하지 않는다.
 
 MC05 checkpoint: 69개 고유 자동 case와 최종 합성 revision/replay 통과. 실제 저장 자료의 제한은 위와 같다. 다음 명령은 필요한 소스·테스트·문서의 로컬 커밋이며 추가 과학 실행이나 원격 변경은 없다.
+
+### 로컬 커밋과 최종 상태
+
+브랜치: `codex/astra-context-delivery`. 구현·검증 단계별 커밋은 다음과 같다.
+
+| 단계 | 상태 | 로컬 SHA |
+|---|---|---|
+| MC01 | 구현·가능한 검증 완료 | `99752c7965e923dc1b1cc9af51ef36806888ced9` |
+| MC02 | 구현·가능한 검증 완료 | `4af4883a87e317f9982fc72b762c6b8d5a49b452` |
+| MC03 | 구현·가능한 검증 완료 | `c6458144cdcef7ce077d6145d67375013b3eab49` |
+| MC04 | 구현·가능한 검증 완료 | `b588d3c71f1e0e4cd23240dd669436a7ecd6c7b4` |
+| MC05 | 구현·가능한 검증 완료 | `fe58f925798775df97499d19d57a45b77f0f8b35` |
+
+최종 디스크 가용 공간: 7,126,220,800 bytes (약 6.64 GiB). 2026-11-15 11:55:56 KST 프로세스 점검에서 이번 작업의 Python/서버/브라우저 잔여 프로세스는 0개였으며 기존 caffeinate 2개는 유지했다.
+
+체크포인트: MC01–MC05 완료. 독립적으로 가능한 개발·검증은 끝났으며, 실제 운영 DB/queue/download·실제 matched 입력·대형 실제 revision/replay·신규 모델 보고서는 위에 명시한 범위대로 미검증이다. 구현 커밋 이후 이 SHA와 최종 결과를 기록하는 문서 커밋만 추가한다. 원격 변경은 없다.
