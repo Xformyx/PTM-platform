@@ -32,7 +32,7 @@ from .generic_kinase import fasta_taxonomy
 
 VERSION='astra_analysis_package.v4'
 READER_CODE_FILES=['research_questions.py','study_context_delivery.py','astra_inputs.py','astra_evidence_catalog.py','astra_reader_full.py','astra_literature_review.py','quantitative_fields.py','astra_execution_status.py','astra_reader_replay.py','astra_evidence_bundle.py','astra_claim_check.py','substrate_signal_flow.py','substrate_signal_view.py','substrate_signal_reader.py']
-CODE_FILES=sorted(set(V3_CODE+['astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
+CODE_FILES=sorted(set(V3_CODE+['species_registry.py','study_context_delivery.py','astra_plan.py','astra_inputs.py','astra_sources.py','astra_discovery.py','astra_temporal.py',
     'astra_evidence.py','astra_figures.py','feature_identity.py','astra_package.py','analysis_context.py','study_input_metadata.py','study_display.py','study_display.json','control_comparison.py','effect_series.py','kea3_evidence.py','motif_candidate_calibration.py','motif_library.json',
     'substrate_temporal_dynamics.py','kinase_trajectory_evidence.py','directed_temporal_relationship.py','quantitative_fields.py']))
 EXTRA_KEYS={'kinase_candidate_edges':['edge_id'],'kinase_temporal_profiles':['candidate_id','contrast_id','track'],
@@ -53,12 +53,18 @@ def write_study_inputs(directory, snapshot, context, design):
     """The package's input metadata boundary, usable without scientific execution."""
     from .study_display import study_display
     from .control_comparison import comparison_summary
+    from .astra_inputs import verify_execution_context
+    context = sanitize_research(context)
+    design = sanitize_research(design)
+    verify_execution_context(snapshot, context, design)
     for name,value in [('user_input_snapshot',snapshot),('study_context',context),('study_design',design)]:
         json_write(Path(directory)/'study'/(name+'.json'),value)
     json_write(Path(directory)/'study/study_display.json',study_display(design,context))
     json_write(Path(directory)/'study/control_comparison.json',comparison_summary(design))
     from .astra_inputs import write_delivery_receipt
     write_delivery_receipt(directory, snapshot)
+    from .study_context_delivery import write_context
+    write_context(directory)
 
 
 def finding_execution_code(root, pin, preferred_run=None):
@@ -546,7 +552,7 @@ def start_here(snapshot,counts,readiness):
     method_path='reader/PHOSX_TIME_COURSE.md' if readiness.get('native_method_runtime') else 'kinase/method_executions.csv'
     return '\n\n'.join(['# START HERE — Astra analysis package',f"Project: {original.get('project_name')} | Order: {original.get('order_code')}",
         (f'1. Read [saved study context, original Biological Design and execution comparisons](reader/STUDY_CONTEXT.md), then [whole denominators, question links and typed citation instructions](reader/FULL_EVIDENCE.md), then the original questions and design in [STUDY_BRIEF](study/STUDY_BRIEF.md), [question coverage](reader/READ_ME.md#저장된-연구-질문) and [actual readiness](evidence/readiness.json).\n\n2. Resolve question-linked originals and unresolved scopes through the catalog, then read [summary observations and withheld coverage](reader/READ_ME.md).\n\n3. Follow the saved [temporal](reader/TEMPORAL_EVIDENCE.md), [PhosX]({method_path}) and [literature](reader/LITERATURE.md) evidence.\n\n4. Trace individual claims to source row keys. Consult [source queries](references/source_query_ledger.csv) and the large source pin only when a specific claim requires them.' if readiness.get('reader') else
-         'First read [STUDY_BRIEF](study/STUDY_BRIEF.md), [design](study/study_design.json) and [readiness](evidence/readiness.json). Consult individual source queries and the large source pin only when needed.'),
+         'First read [saved study context](reader/STUDY_CONTEXT.md), [STUDY_BRIEF](study/STUDY_BRIEF.md), [design](study/study_design.json) and [readiness](evidence/readiness.json). Consult individual source queries and the large source pin only when needed.'),
         'Stage status: '+json.dumps({'calculation':readiness.get('completion_status'),'reference':readiness.get('source_execution',{}).get('status'),'incomplete_reference_queries':len(readiness.get('source_execution',{}).get('incomplete_queries',[])),
             'literature':readiness.get('literature',{}).get('status'),'site_attribution':readiness.get('strict_attribution',{}).get('status')},ensure_ascii=False)+
             '. research_full is a policy, not collection completion. Partial references, missing localization and uncalibrated calls remain separate limits.',
@@ -645,6 +651,8 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         snapshot=config.get('user_input_snapshot') or capture_order({'id':order_id,'order_code':config['order_code'],'analysis_context':context})
         snapshot=sanitize_research(snapshot)
         verify_snapshot(snapshot)
+        from .astra_inputs import verify_execution_context
+        verify_execution_context(snapshot, context, design)
         literature=config.get('literature_pin') or {'collections':[],'documents':[],'status':'not_persisted_in_source_order'}
         plan=plan_resolver(context,hashes,taxa=fasta_taxonomy(inputs['FASTA']).values())
         if subject_request['mode']!='not_requested':plan['literature_subject_request']=subject_request
@@ -865,7 +873,7 @@ def run_astra_analysis(order_id,config,output_dir,checkpoint=lambda:None,progres
         if engine and engine.PROFILE=='astra_analysis.v6':
             with (directory/'methods/METHODS.md').open('a',encoding='utf-8') as method:
                 method.write('\nV6 audit-only preserves matrix quantification. Localization is joined by precursor and injection, then gated on the actual reference and target joint masks. Run minimum confidence, library confidence, q-values and parsed site probability retain separate scopes. Specificity membership consumes a recorded percentile/rank policy; unselected scores remain exported. Method enrichment p/q are separate from biological p/q. Calibrated inference requires a domain/resource-matched policy artifact; descriptive and exploratory signals remain available without one. Actual optional method executions and restrictions are recorded in methods/method_registry.json. Biological improvement and independent experimental validation are not implied.\n')
-        json_write(directory/'reproducibility/replay_config.json',{'engine_profile':profile,'context':context,'design':design,'inputs':{k:str(p.relative_to(directory)) for k,p in inputs.items() if not k.startswith('_')},
+        json_write(directory/'reproducibility/replay_config.json',{'engine_profile':profile,'context':sanitize_research(context),'design':sanitize_research(design),'inputs':{k:str(p.relative_to(directory)) for k,p in inputs.items() if not k.startswith('_')},
             'required_external_resources':{'specificity_manifest_sha256':digest(inputs['_LOCAL_SPECIFICITY'])} if '_LOCAL_SPECIFICITY' in inputs else {},'snapshot':snapshot,'literature':literature})
         (directory/'replay.py').write_text("from pathlib import Path\nimport sys,argparse\nROOT=Path(__file__).resolve().parent\nsys.path.insert(0,str(ROOT/'reproducibility/code'))\nfrom ptm_shared.astra_package import replay_package,validate_package\np=argparse.ArgumentParser()\np.add_argument('--output',type=Path)\np.add_argument('--validate-only',action='store_true')\np.add_argument('--specificity-manifest',type=Path)\na=p.parse_args()\nvalidate_package(ROOT) if a.validate_only else replay_package(ROOT,a.output,specificity_manifest=a.specificity_manifest)\n")
         json_write(directory/'reproducibility/v3_migration.json',{'legacy_v3_tables':{name+'.csv':'quant/'+name+'.csv' for name in TABLE_KEYS},'v3_tables_preserve_meanings':True,'new_typed_kinase_tables_are_additional_not_curated_replacements':True})
@@ -903,7 +911,7 @@ def validate_package(directory):
         if not path.is_relative_to(directory) or not path.is_file() or digest(path)!=entry['sha256'] or path.stat().st_size!=entry['bytes']:
             raise ValueError('Package hash/missing-file failure: '+name)
     from .astra_inputs import validate_delivery
-    validate_delivery(directory)
+    validate_delivery(directory, require_consumers=True)
     dictionary=json.loads((directory/'reproducibility/data_dictionary.json').read_text());tables={}
     for name,entry in dictionary.items():
         df=pd.read_csv(directory/name,low_memory=False)
@@ -984,7 +992,7 @@ def seal_archive(directory,root,run_id,package_version,checkpoint=lambda:None):
         from .astra_reader_replay import write_entrypoint
         write_entrypoint(directory)
     from .astra_inputs import validate_delivery
-    delivery = validate_delivery(directory)
+    delivery = validate_delivery(directory, require_consumers=True)
     if delivery.get('status') == 'verified':
         json_write(directory/'study/input_transfer_validation.json', delivery)
     files={str(p.relative_to(directory)):{'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(directory.rglob('*')) if p.is_file() and p.name not in {'stage_checkpoint.json','manifest.json','platform_run.json'}}
@@ -997,6 +1005,6 @@ def seal_archive(directory,root,run_id,package_version,checkpoint=lambda:None):
         if z.testzip():raise ValueError('Archive CRC failure')
         for name,item in files.items():
             if hashlib.sha256(z.read(name)).hexdigest()!=item['sha256']:raise ValueError('Archive manifest failure')
-        validate_delivery(directory, archive=z)
+        validate_delivery(directory, archive=z, require_consumers=True)
     checkpoint();pending.replace(archive)
     return archive, files

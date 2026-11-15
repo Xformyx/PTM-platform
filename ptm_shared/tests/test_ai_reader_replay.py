@@ -12,8 +12,16 @@ def test_bundled_reader_entry_isolated_and_source_read_only(config,tmp_path):
     from ptm_shared import astra_evidence_v6 as engine
     from ptm_shared.annotation_registry import digest
     config['experimental_context']['quantitation_export_mode']='astra_analysis.v6'
+    from ptm_shared.astra_inputs import capture_order
+    config['user_input_snapshot']=capture_order({**config,'id':'reader-entry-fixture',
+        'analysis_context':config['experimental_context'],
+        'report_options':{'research_questions':[{'question_id':'RQ-accession',
+            'text':'SYNTHETIC0 time response with DIA-NN FASTA acquisition'}]}})
     result=engine.run('reader-entry-fixture',config,tmp_path/'package with spaces')
     root=tmp_path/'package with spaces/enrichment_free_runs'/result['run_id']
+    questions=json.loads((root/'reader/question_map.json').read_text())['questions']
+    assert len(questions)==1 and questions[0]['entities']==['GENA'] and questions[0]['evidence_ids']
+    assert questions[0]['question_id']=='RQ-accession'
     before={str(p.relative_to(root)):digest(p) for p in root.rglob('*') if p.is_file()}
     assert (root/'reader_replay.py').is_file()
     env={k:v for k,v in os.environ.items() if k!='PYTHONPATH'}

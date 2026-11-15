@@ -19,6 +19,10 @@ from ptm_shared.astra_package import write_study_inputs
 
 def test_policy_save_reload_dispatch_worker_snapshot(tmp_path, monkeypatch):
     context, samples = inputs('time_matched')
+    design_text='두 처리·Control 연구 설계 α\n'+('긴 원문 ' * 300)
+    context.update(biological_question=design_text, cell_type='microglia',
+                   custom_context={'a/b~c':[None,False,0,'',[]]},
+                   special_conditions='human transgene in recorded host; not inferred')
     settings=SimpleNamespace(INPUT_DIR=str(tmp_path/'inputs'),OUTPUT_DIR=str(tmp_path/'outputs'),REFERENCE_DIR=str(tmp_path/'references'))
     monkeypatch.setattr(orders,'get_settings',lambda:settings)
     monkeypatch.setattr('app.config.get_settings',lambda:settings)
@@ -41,13 +45,16 @@ def test_policy_save_reload_dispatch_worker_snapshot(tmp_path, monkeypatch):
             assert preview.status_code==200,preview.text
             initial=preview.json()['analysis_context'];design=initial['study_design']
             created=await client.post('/orders',data={'project_name':'Control_synthetic','species':'human','ptm_type':'phosphorylation',
-                'sample_config':json.dumps(samples),'analysis_context':json.dumps(initial),'rag_collections':'[]'},
+                'sample_config':json.dumps(samples),'analysis_context':json.dumps(initial),'rag_collections':'[]',
+                'report_options':json.dumps({'research_questions':[]})},
                 files={'pr_matrix':('PR.tsv',matrix),'pg_matrix':('PG.tsv',matrix),
                     'fasta_file':('reference.fasta',b'>sp|P1|P1 GN=GENE OX=9606\nMASKASK\n')})
             assert created.status_code==201,created.text
             oid=created.json()['id']
             read=await client.get(f'/orders/{oid}')
             assert read.json()['analysis_context']['study_design']==design
+            assert read.json()['analysis_context']['biological_question']==design_text
+            assert read.json()['analysis_context']['custom_context']['a/b~c']==[None,False,0,'',[]]
             zero=next(c['condition_id'] for c in design['conditions'] if c['time']['minutes']==0)
             changed=await client.patch(f'/orders/{oid}',json={'analysis_context':{'control_comparison':{
                 'strategy':'shared_reference','reference_condition_id':zero,'source':'user_input'}}})
@@ -78,9 +85,31 @@ def test_policy_save_reload_dispatch_worker_snapshot(tmp_path, monkeypatch):
             monkeypatch.setattr('common.db_engine.get_engine',Mock(side_effect=RuntimeError('isolated fixture')))
             received=[]
             def metadata_only(order_id,config,output,**kwargs):
+                from ptm_shared.astra_inputs import verify_snapshot, transfer_contract, validate_delivery
+                from ptm_shared.study_context_delivery import verify_context_binding, write_context
+                import pandas as pd
+                import zipfile
+                verify_snapshot(config['user_input_snapshot'],config['research_input_receipt'])
                 execution=config['experimental_context'];received.append(deepcopy(execution['study_design']))
                 (output/'study').mkdir(parents=True)
+                fields,_,_=transfer_contract(config['user_input_snapshot'],execution['study_design'],execution,config['literature_pin'])
+                pd.DataFrame(fields).to_csv(output/'study/input_field_manifest.csv',index=False)
+                (output/'references').mkdir()
+                (output/'references/literature_pin.json').write_text(json.dumps(config['literature_pin']))
                 write_study_inputs(output,config['user_input_snapshot'],execution,execution['study_design'])
+                _,binding=write_context(output)
+                (output/'reader/authoring_packet.json').write_text(json.dumps({'study_context_delivery':binding}))
+                projected=verify_context_binding(output,binding)
+                ref=projected['roles']['study_design_context']['fields']['biological_question']['source_ref']
+                assert ref['pointer'].endswith('/biological_question')
+                assert config['user_input_snapshot']['original']['analysis_context']['biological_question']==design_text
+                assert projected['roles']['research_question']['values']==[]
+                assert validate_delivery(output)['unexpected_missing']==0
+                archive=output/'metadata.zip'
+                with zipfile.ZipFile(archive,'w') as z:
+                    for path in output.rglob('*'):
+                        if path.is_file() and path != archive:z.write(path,path.relative_to(output))
+                with zipfile.ZipFile(archive) as z:assert validate_delivery(output,z)['status']=='verified'
                 policy=json.loads((output/'study/control_comparison.json').read_text())
                 assert policy['effective_policy']['strategy']=='shared_reference'
                 assert {a['contrast_id'] for a in policy['assignments']}=={c['contrast_id'] for c in actual['contrasts']}

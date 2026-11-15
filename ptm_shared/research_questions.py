@@ -38,6 +38,9 @@ def verified_question_entities(text, cards, reference_inventory=(), taxon=None):
     No static family expansion or inferred species/isoform mapping is performed.
     """
     registry = {}
+    by_accession_taxon = {}
+    for entry in reference_inventory:
+        by_accession_taxon.setdefault((str(entry.get('accession')), str(entry.get('taxon'))), []).append(entry)
     for card in cards:
         identity = card.get('feature_identity') or {}
         gene = str(identity.get('gene') or '')
@@ -49,9 +52,8 @@ def verified_question_entities(text, cards, reference_inventory=(), taxon=None):
                 'source': 'reader/cards.csv#card_id=' + str(card.get('card_id'))}
         registry.setdefault(gene.casefold(), []).append(item)
         accessions = set(str(identity.get('protein_group') or '').split(';'))
-        for entry in reference_inventory:
+        for entry in (e for accession in sorted(accessions) for e in by_accession_taxon.get((accession, recorded_taxon), [])):
             # Exact accession + recorded taxon is required before consuming an alias.
-            if str(entry.get('accession')) not in accessions or str(entry.get('taxon')) != recorded_taxon: continue
             if str(entry.get('gene') or '').casefold() != gene.casefold(): continue
             for alias in [entry.get('accession'), entry.get('raw_identifier')]:
                 if alias and str(alias).lower() != 'nan':

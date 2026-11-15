@@ -1,0 +1,237 @@
+{
+  "schema_version": "astra_context_delivery_results.v1",
+  "baseline": "97eb0cb960a730381f8e74d54ad168e0fa4d6480",
+  "branch": "codex/astra-context-delivery",
+  "stages": {
+    "MC01": {
+      "status": "complete",
+      "commit": "99752c7"
+    },
+    "MC02": {
+      "status": "complete",
+      "commit": "4af4883"
+    },
+    "MC03": {
+      "status": "complete",
+      "commit": "c645814"
+    },
+    "MC04": {
+      "status": "complete",
+      "commit": "b588d3c"
+    },
+    "MC05": {
+      "status": "verified_pending_local_commit",
+      "commit": null
+    }
+  },
+  "tests": {
+    "unique_cases": 69,
+    "runs": [
+      {
+        "junit": "codex-inputs/context-delivery-20261114/FINAL_TESTS_V2.xml",
+        "cases": 68,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      {
+        "junit": "codex-inputs/context-delivery-20261114/FINAL_BOUNDARIES_V3.xml",
+        "cases": 31,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      {
+        "junit": "codex-inputs/context-delivery-20261114/FINAL_METADATA_V4.xml",
+        "cases": 26,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      }
+    ],
+    "known_failures": 0,
+    "warnings": "existing pandas FutureWarning only",
+    "profiled_run": {
+      "cases": 64,
+      "file": "codex-inputs/context-delivery-20261114/SYNTHETIC_CALLS.json",
+      "counts": {
+        "scope": "parent interpreter synthetic tests only; dispatch counts are not executed native/LLM calls",
+        "counts": {
+          "astra_package.py:run_astra_analysis": 9,
+          "generic_workflow.py:calculate": 12,
+          "contrast_quantification.py:quantify_contrasts": 12,
+          "astra_evidence_v6.py:run": 4,
+          "official_method_tracks.py:execute_tracks": 4,
+          "astra_literature.py:collect": 14
+        },
+        "actual_data_scientific_recalculations": 0,
+        "new_external_searches": 0,
+        "new_real_model_calls": 0
+      },
+      "limit": "instrumented run only, not cumulative counts of all development retries"
+    },
+    "final_changes": "31 affected cases rechecked after alias indexing/legacy-origin metadata; 26 metadata cases after manifest semantic-role gate, including one new case"
+  },
+  "actual_saved_package": {
+    "scope": "actual saved shared-control package metadata read; no DB/queue/new science",
+    "source_root": "codex-inputs/substrate-signal-20261114/final-reader-revision-v3/enrichment_free_runs/g0-adfcea86b3504959b75986baf994ade4",
+    "source_archive": "codex-inputs/substrate-signal-20261114/final-reader-revision-v3/astra_analysis_package_g0-adfcea86b3504959b75986baf994ade4.zip",
+    "archive_sha256": "ea3a905d2c5d60ea9735a0f62714f8d6338f38fcc5d6f5ad98964b32a2924926",
+    "archive_bytes": 591638849,
+    "metadata_bytes_read": 325857352,
+    "metadata_files_verified": 13,
+    "source_file_hashes": {
+      "study/user_input_snapshot.json": "1582a3403df116c745fe1eaa79c772d6abb12875d088485d9c25d97feb04ec06",
+      "study/study_context.json": "b50a603b07c0e83e81c49e2481311cd4d90e78720813ba7c77d2971d6d4bf1cd",
+      "study/study_design.json": "2aa7e7f0191839ed37d318ae32d4cf1d67093bb3645ca05a24c753a9d2236336",
+      "study/input_field_manifest.csv": "95ef79db8e4b0043fa793f5e7972d28d3a9953dc150ed8c1c6e721a12070a50c",
+      "study/STUDY_BRIEF.md": "9e026080574d32dc9ecaffff923e8add37df04d19dc4347fef485d479fd519a0",
+      "reader/authoring_packet.json": "b468138144067ac80751d416c3eeaeeda071eb00afb87887d8129d92ad369cac",
+      "reader/question_map.json": "70504cdfc26d7f5c4bc0e9ac302f8a0c9e14e796f28fc5964b5b03626148366b",
+      "references/source_pin.json": "f49b30786ce34ddf219aa5d868623d7eff93277752c7571c68869a55b9ef9b33",
+      "references/literature_pin.json": "de95eed8076da7939fc8e70391320e72e92a573113c0ff55a434b045565ccf7c",
+      "provenance.json": "b50bd49a1e13ab3e9c8a572ea0ef96bfdd1077cc33aa66a525d801b905c2ad9c",
+      "manifest.json": "8711c38628ad15a447b4ddb36ca7a33f70d1ba0585c434c39f07681d08f195eb",
+      "references/literature_subject_execution_pin.json": "5d06d5ff6b8f0686afecfda9d3e576857c162a7ab3f4fbf9a87709adc3dc6911",
+      "references/finding_literature_pin.json": "f6041704cc26405a5d4102098cb6f77576685cf692795e3fd933357bb256e214"
+    },
+    "raw_locators_resolved": 684,
+    "canonical_locators_resolved": 97,
+    "legacy_unresolved_locators": [],
+    "old_validation_status": {
+      "status": "legacy_unverified",
+      "validation_scope": "package_json"
+    },
+    "new_projection": {
+      "directory": "codex-inputs/context-delivery-20261114/actual-context-preview",
+      "binding": {
+        "schema_version": "study_context_delivery.v1",
+        "file": "reader/STUDY_CONTEXT.json",
+        "sha256": "c4503af13b6801d16e37b12e8266d198f7df5319c20b6cac1ed93185445ca629",
+        "source_record_id": "1",
+        "source_refs": [
+          {
+            "file": "study/user_input_snapshot.json",
+            "pointer": "",
+            "sha256": "1582a3403df116c745fe1eaa79c772d6abb12875d088485d9c25d97feb04ec06"
+          },
+          {
+            "file": "study/study_context.json",
+            "pointer": "",
+            "sha256": "b50a603b07c0e83e81c49e2481311cd4d90e78720813ba7c77d2971d6d4bf1cd"
+          },
+          {
+            "file": "study/study_design.json",
+            "pointer": "",
+            "sha256": "2aa7e7f0191839ed37d318ae32d4cf1d67093bb3645ca05a24c753a9d2236336"
+          }
+        ],
+        "status": "connected_to_reading_material",
+        "semantic_review_status": "not_performed"
+      },
+      "files": [
+        "reader/STUDY_CONTEXT.json",
+        "reader/STUDY_CONTEXT.md"
+      ]
+    },
+    "old_question_ids": [
+      "BQ-001"
+    ],
+    "old_bindings_and_pins_preserved": true,
+    "archive_and_pointer_hash_unchanged": true,
+    "source_db_comparison": "unavailable",
+    "actual_time_matched_input": "not_available",
+    "new_full_reader_revision": "not_created_disk_budget; standalone_context_preview_only",
+    "new_scientific_calls": 0,
+    "new_external_search_calls": 0,
+    "new_model_calls": 0
+  },
+  "synthetic_package": {
+    "zip": "codex-inputs/context-delivery-20261114/final-boundaries-v3/test_bundled_reader_entry_isol0/package with spaces/astra_analysis_package_g0-3e932671ce214b60a421d4216a8801f7.zip",
+    "sha256": "d2cca96c7fe4547c0e8adbfe586f8926d201b5e6015e4143e0df3f93a41c6f30",
+    "bytes": 2609091,
+    "reader_replay_result": "codex-inputs/context-delivery-20261114/final-boundaries-v3/test_bundled_reader_entry_isol0/output with spaces/READER_REPLAY_VALIDATION.json",
+    "reader_artifacts_byte_equal": 47,
+    "passed": true,
+    "scientific_calls_during_reader_replay": 0,
+    "network_requests_during_reader_replay": 0,
+    "note": "Use the immutable ZIP. The test deliberately corrupts extracted fixture files after replay to test rejection."
+  },
+  "final_current_code_revision": {
+    "source_zip": "codex-inputs/context-delivery-20261114/final-boundaries-v3/test_bundled_reader_entry_isol0/package with spaces/astra_analysis_package_g0-3e932671ce214b60a421d4216a8801f7.zip",
+    "source_sha256_unchanged": true,
+    "zip": "codex-inputs/context-delivery-20261114/final-synthetic-reader-revision/astra_analysis_package_g0-720c6f3ba6a54a9f9f0550e75ec5f7e3.zip",
+    "sha256": "31b581df33419597b7658eeca4cb6fc1e79a10cbba13e35cb46cb4e652caded0",
+    "bytes": 2630248,
+    "reader_replay": "codex-inputs/context-delivery-20261114/final-synthetic-reader-replay",
+    "byte_equal_artifacts": 35,
+    "reader_replay_passed": true,
+    "preserved_table_hash_count": 125,
+    "new_scientific_calls": 0,
+    "new_external_searches": 0,
+    "new_real_model_calls": 0,
+    "execution_snapshot": "source synthetic run; current draft not used",
+    "revision": "current code reader revision; original archive remains immutable"
+  },
+  "actual_context_preview": {
+    "codex-inputs/context-delivery-20261114/actual-context-preview/reader/STUDY_CONTEXT.json": "c4503af13b6801d16e37b12e8266d198f7df5319c20b6cac1ed93185445ca629",
+    "codex-inputs/context-delivery-20261114/actual-context-preview/reader/STUDY_CONTEXT.md": "b474f0a6ad0e5d3e9ca0e53ebfa7b9fe62a468ac08395dc11b3d5c28a4d81667"
+  },
+  "validation_levels": {
+    "actual": "13 metadata/source-pin file hashes and 684 raw/97 canonical pointers in saved shared-control archive; original BQ and pins unchanged",
+    "synthetic": "real FastAPI ASGI/SQLite ORM save+reload+PATCH, capture/profile preparation, worker entry and metadata ZIP; production package/reader/revision/replay",
+    "doubles": "Celery/Redis/progress/run-control and scientific sink in API fixture; frozen synthetic literature retriever/model; source providers use fixtures",
+    "not_performed": [
+      "original operational DB comparison",
+      "operating UI/queue/download",
+      "actual time-matched input",
+      "actual full reader revision/replay in this MC task",
+      "new model-authored report/semantic approval"
+    ]
+  },
+  "preserved": {
+    "original_archive_and_pointer": true,
+    "source_and_literature_pins": true,
+    "legacy_BQ_RQ_bindings": true,
+    "science_numeric_code_changed": false,
+    "quant_cache_reused_for_context_only_change": true,
+    "scientific_csv_byte_parity": "50-table small archived replay passed; reader/metadata changes are intentional"
+  },
+  "intentional_changes": [
+    "study/input_field_manifest.csv",
+    "study/input_delivery_receipt.json",
+    "study/input_transfer_validation.json",
+    "study/user_input_snapshot.json new v2 contract only",
+    "reader/STUDY_CONTEXT.json",
+    "reader/STUDY_CONTEXT.md",
+    "reader/question_map and full links for new contract",
+    "reader/authoring_packet and guides",
+    "code snapshot / catalog descriptor hashes"
+  ],
+  "calls": {
+    "actual_data_scientific_recalculations": 0,
+    "new_external_searches": 0,
+    "new_real_model_calls": 0,
+    "small_existing_scientific_functions": "executed in listed synthetic package/replay fixtures; profile counts are scoped to one run"
+  },
+  "disk": {
+    "initial_available_GiB": 3.35,
+    "final_available_bytes": 7123795968,
+    "actual_revision_peak_budget": "approximately 4.7 GiB extraction + 0.6 GiB ZIP + 2.5 GiB replay + 2 GiB reserve; no large copies made"
+  },
+  "processes": {
+    "task_background_processes": [],
+    "checked_at": "2026-11-15T11:55:56+09:00",
+    "existing_caffeinate_pids": [
+      2450,
+      5292
+    ],
+    "sleep_prevention": "pmset PreventUserIdleSystemSleep=1 confirmed; preexisting caffeinate retained"
+  },
+  "remote_actions": {
+    "push": false,
+    "merge": false,
+    "deploy": false,
+    "flag_change": false
+  }
+}

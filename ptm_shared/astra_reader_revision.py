@@ -322,6 +322,11 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
         config['snapshot']['original']['rag_collections']=deepcopy(requested)
         for context in (config['context'],config['snapshot']['original'].get('analysis_context',{})):
             context.setdefault('literature_context',{})['selected_collection_ids']=deepcopy(requested)
+        if config['snapshot'].get('source_receipt'):
+            from .astra_inputs import source_receipt
+            config['snapshot']['source_receipt'] = source_receipt(config['snapshot'])
+            config['snapshot']['receipt_revision'] = {'mode':'explicit_literature_selection_revision',
+                'parent_original_sha256': selection_revision['previous_snapshot']['source_receipt']['original_sha256']}
         config['literature_selection_revision']=selection_revision
     elif refresh_reason is not None:
         raise ValueError('Selection refresh reason requires an explicit literature pin')
@@ -375,6 +380,8 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
             json_write(directory/'study/literature_selection_revision.json',{**selection_revision,'field_provenance':fields})
             json_write(directory/'study/user_input_snapshot.json',config['snapshot'])
             json_write(directory/'study/study_context.json',config['context'])
+            from .astra_inputs import write_delivery_receipt
+            write_delivery_receipt(directory, config['snapshot'])
             json_write(directory/'study/input_transfer_validation.json',transfer)
             json_write(directory/'references/literature_pin.json',config['literature'])
             json_write(directory/'reproducibility/replay_config.json',config)
@@ -406,6 +413,7 @@ def revise_literature(source, output_dir, *, settings=None, retriever=None, llm=
             literature_result_pin_sha256=pin['sha256'],code_sha256=code_hashes,
             origin_analysis_code_sha256=origin.get('origin_analysis_code_sha256',origin['code_sha256']),
             operation='reader_literature_revision',scientific_recalculation=False)
+        provenance['execution_snapshot_run_id'] = origin.get('execution_snapshot_run_id', origin['run_id'])
         provenance.update(literature_pin_hash=object_hash(config['literature']),
                           input_context_hash=object_hash(config['snapshot']))
         if selection_revision:provenance['literature_selection_revision']={k:v for k,v in selection_revision.items() if k!='previous_snapshot'}

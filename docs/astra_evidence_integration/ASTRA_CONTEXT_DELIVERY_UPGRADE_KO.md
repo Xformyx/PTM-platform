@@ -46,3 +46,79 @@ MC03 commit: `c645814`. 활성 `astra_reader`의 expected insulin pathway / insu
 검증: insulin / amyloid-treated microglia / 두 약물 3개 fixture에서 실제 authoring packet/formatter를 실행해 원문·source hash와 빈 질문 유지, draft 미변경, 잘못된 현재 설명 배제를 확인했다. context/질문 suite 21 passed(기존 case 포함), 기존 biological synthesis 17 passed. 새 입력 UI·wizard·필수 질문은 추가하지 않았다. 새 모델/검색 호출 0회.
 
 MC04 checkpoint: 템플릿/formatter 검증 완료. 다음 MC05 실제 저장 archive 읽기, 격리 DB 저장/재조회, 발행/reader revision/replay 및 보존 통합 검증.
+
+## MC05 — 통합 검증과 지원 경계
+
+MC04 commit: `b588d3c`. 2026-11-15 KST에 통합 검증을 마쳤다. 저장 당시 source record/허용된 제외 사유/계약 marker를 독립적으로 대조하고, canonical study에서 원문 설명·host taxonomy·실제 injection/Rep. 매핑이 사라지는 오류도 발행 전에 거부한다. `false`와 `0`을 Python equality로 혼동하지 않도록 reader projection도 JSON 값·타입으로 검증한다. manifest의 의미 역할을 관측 결과로 바꾸는 변형도 검출한다. 새 provenance에는 revision의 발행 run과 원래 execution snapshot run을 구분한다.
+
+일반 writer는 reader가 없는 구 Astra profile에서도 공통 맥락 파일을 생성한다. explicit literature selection revision은 기존 허용 정책과 parent receipt 이력을 유지한 채 새 selection receipt만 기록한다. 질문용 reference inventory가 reader-only replay의 입력 목록에서 빠지지 않도록 연결했다. 실제 측정 accession alias 질문을 ZIP 자체 코드로 재현하는 검증을 추가했다.
+
+### 실제 호출 경로
+
+1. 기존 OrderCreate/StudyInputFields/수정 UI → `Order`의 sample_config / analysis_context / report_options JSON 저장. 새 UI는 없다.
+2. API ORM 재조회 → `prepare_astra_inputs` → `capture_order` / `verify_order_capture` → 기존 dispatch의 `user_input_snapshot` + 별도 `research_input_receipt`.
+3. `_attach_enrichment_free_profile` → `preprocessing.tasks.run_preprocessing` → 기존 `run_primary_analysis` → `astra_package`: snapshot receipt와 원문 보존 계약을 검증한 후 기존 정량/cache 경로를 사용한다.
+4. `transfer_contract` → 실제 CSV/JSON → `write_study_inputs` → `write_context` → `write_reader`. 원문/full locator와 bounded preview가 같은 source hash를 참조한다.
+5. `validate_delivery` → `seal_archive`의 JSON pointer/값/타입/consumer link/ZIP entry bytes 검증 → 기존 atomic publish/성공 pointer. 실패하면 이전 성공이 유지된다.
+6. 발행 pointer → `load_report_context` / `bind_report_state` → 기존 writer의 temporal·biological synthesis·reader authoring serializer/formatter. 모델 호출 없이 report-input까지만 검증했다.
+7. CODE_FILES / READER_CODE_FILES → 일반 발행·immutable reader revision·bundled `reader_replay.py`. 과거 archive의 코드는 덮어쓰지 않는다.
+
+전체 필드 대응과 conversion/제한은 `ASTRA_CONTEXT_DELIVERY_MAPPING.csv`의 21개 항목을 참조한다. 실제 각 leaf의 pointer는 패키지 `study/input_field_manifest.csv`가 제공한다. `source_receipt`와 `input_delivery_receipt`는 전달 검증용 metadata이며 별도의 입력 저장소나 설계 resolver가 아니다.
+
+### 검증 결과
+
+- 고유 자동 case **69개 통과**, 실패/skip 0. 최종 전체 suite 68개, 이후 변경 경계 31개 및 metadata 경계 26개를 재검증했다. 중복 case를 합산하지 않았다.
+- 원래 inventory의 성공 표시와 실제 readback을 분리했다. 원문·snapshot·context·canonical·manifest·ZIP·reader의 삭제/변형/잘못된 pointer/stale binding을 경계와 field path로 검출했다.
+- 실제 FastAPI ASGI + 격리 SQLite ORM 생성/GET/PATCH/재조회 → 실제 capture/profile 준비 → worker 함수 → metadata ZIP 검증 통과. Celery/Redis/progress/run-control과 과학 sink만 대역이다. 운영 queue/DB에 접속하지 않았다.
+- 공통/시간대별/직접 연결의 실제 contrast IDs·양쪽 시간·반복·unknown pairing 보존. 두 arm의 다른 dose/unit/vehicle/exposure, rat host와 human transgene, 예정 3/등록 2, 조건별 6주입/2 biological units를 분리했다. 자유문장 dose를 새 사실로 파싱하지 않았다.
+- Design-only/빈 질문, MAPK1 + DIA/DIA-NN/FASTA, mixed-case/실제 accession alias, 모호한 taxon/family, 과거 BQ/RQ/frozen pin, Top-N 0/5/15/50의 전체 질문 접근을 검증했다.
+- context-only 변경에서 기존 quant cache를 재사용하고 U/P/A·NA·ID를 보존했다. 작은 기존 archive의 과학/metadata table 50개는 기존 scientific replay에서 byte-identical이었다. reader/field manifest/새 context 산출물 변경과 과학 수치 불변을 구분한다.
+- bundled reader는 저장소 밖 cwd·공백 경로·PYTHONPATH 없는 새 interpreter에서 source hash 검증과 과학/네트워크/문헌 실행 guard를 통과했다. native PhosX 실수치 검증은 이 회차 범위가 아니다.
+- 경고는 기존 pandas empty/all-NA concatenation FutureWarning이다. frontend 변경이 없어 frontend build는 수행하지 않았다. 새로운 방법, 대규모 과학 계산, 운영 end-to-end는 수행하지 않았다.
+
+### 실제 저장 자료 확인
+
+기존 SF 최종 실제 shared-Control archive:
+`codex-inputs/substrate-signal-20261114/final-reader-revision-v3/astra_analysis_package_g0-adfcea86b3504959b75986baf994ade4.zip`
+
+원본 ZIP SHA256: `ea3a905d2c5d60ea9735a0f62714f8d6338f38fcc5d6f5ad98964b32a2924926`.
+
+실제 metadata/source-pin 13개 파일의 ZIP entry와 기존 추출본 hash를 대조했다. 684 raw pointer와 97 canonical pointer가 resolve됐고 미해결 pointer는 0이었다. 기존 `BQ-001`·원문·frozen 문헌 binding/pin과 원본 ZIP/성공 pointer hash를 보존했다. 309MB source pin은 streaming hash로 읽었고 복제하지 않았다.
+
+이것은 접근 가능한 저장 결과 한 건의 검증이다. 최초 운영 DB와 독립적으로 대조한 것은 아니므로 구 `unexpected_missing=0`을 DB→ZIP 전체 증명으로 승격하지 않았다. 구 snapshot은 계속 `legacy_unverified`이며 과거 질문 의미도 재분류하지 않았다. 실제 time-matched 자료, 운영 UI/queue/download는 미검증이다.
+
+현재 코드의 실제 자료 기반 맥락 preview는 `codex-inputs/context-delivery-20261114/actual-context-preview/reader/STUDY_CONTEXT.md`와 `.json`이다. 원문 ZIP을 수정한 reader revision이 아니라, 동일 원문 locator/hash를 사용한 별도 projection이다. 실제 full reader revision/replay는 약 4.7GiB 추출본 + 0.6GiB ZIP + 2.5GiB replay + 2GiB reserve가 필요하여 만들지 않았다. 원본/실패 후보/cache/runtime 삭제로 공간을 확보하지 않았다.
+
+### 변경·보존 및 판단 한계
+
+허용 변경: 새 input receipt/field manifest/전달 검증, context JSON·guide·brief·START_HERE, 신규 계약의 질문 map/전체 link, authoring/report-input, reader code snapshot/catalog descriptor hash. catalog_id가 달라질 수 있지만 과거 evidence/source key를 새 run 소속으로 재표시하지 않는다.
+
+보존: 원본 PR/PG/FASTA, quant 값·NA·mask·normalization, kinase/method 점수·membership·coverage/no-call, canonical condition/contrast/material/pair IDs, source/literature pin과 과거 BQ/RQ·frozen 문헌 결과, 기존 성공 ZIP/pointer, SF 전체 관측·signal-flow bindings. 수치 엔진 파일은 변경하지 않았다.
+
+새 실제 자료 과학 계산 **0회**, 신규 외부 검색 **0회**, 실제 모델 호출 **0회**. 합성 검증에서는 기존 함수를 실행했다. 한 번의 계측 suite에서 `calculate`/`quantify_contrasts` 각각 12회, native dispatch 4회, literature collect 대역 14회를 기록했다. 이것은 해당 suite의 계측이며 개발 전체 누적 횟수나 실제 native/LLM 실행 횟수가 아니다. 계측 overhead가 커 후속 검증은 계측 없이 실행했다.
+
+자료 저장, reader/report 연결, 모델의 실제 열람, 의미 승인, 연구 성능 향상은 별개다. 이번 결과는 저장 정보와 source scope의 전달·검증 완료이며 새 보고서 모델 품질 또는 생물학적 타당성을 승인한 결과가 아니다.
+
+기존 caffeinate PID 2450/5292는 유지했고 `pmset`의 PreventUserIdleSystemSleep=1을 확인했다. 작업용 Python/서버/브라우저 잔여 프로세스는 최종 점검에서 없었다. 최초 디스크 여유 약 3.35GiB, 최종 값과 산출물 hash/명령은 RESULTS.json에 기록한다. 기존 untracked `codex-inputs/`는 커밋하지 않는다. push·merge·배포·flag 변경은 수행하지 않았다.
+
+### 최종 current-code revision / archive reader replay
+
+최종 코드로 작은 합성 archive의 immutable reader revision을 생성하고, 그 새 archive 자체 코드의 reader-only replay를 별도 경로에서 실행했다. 원본 합성 ZIP hash는 유지됐고 저장 표 125개의 hash를 보존했다. 새 reader 산출물 35개는 byte-identical이었다. 이 검증은 자동 case 수에 별도로 더하지 않았다.
+
+- 새 합성 ZIP: `codex-inputs/context-delivery-20261114/final-synthetic-reader-revision/astra_analysis_package_g0-720c6f3ba6a54a9f9f0550e75ec5f7e3.zip`
+- SHA256: `31b581df33419597b7658eeca4cb6fc1e79a10cbba13e35cb46cb4e652caded0`
+- 크기: 2630248 bytes
+- reader replay 출력: `codex-inputs/context-delivery-20261114/final-synthetic-reader-replay`
+- 현재 코드 revision 중 신규 과학/외부 검색/실제 모델 호출: 모두 0회. 기존 archive 코드를 덮어쓰지 않았다.
+
+새 출력 경로로 reader-only 재현하는 명령(저장소 루트 기준):
+
+```sh
+env -u PYTHONPATH codex-inputs/round11-20261010/runtime/bin/python -I -B \
+  codex-inputs/context-delivery-20261114/final-synthetic-reader-revision/enrichment_free_runs/g0-720c6f3ba6a54a9f9f0550e75ec5f7e3/reader_replay.py \
+  --output /tmp/ptm-context-reader-new-output
+```
+
+출력 경로는 아직 존재하지 않는 새 경로여야 한다. 현재 코드 revision 생성과 해당 archive 자체 코드 replay는 서로 다른 검증이며, 과거 실자료 reader 전부와 byte-identical이라고 주장하지 않는다.
+
+MC05 checkpoint: 69개 고유 자동 case와 최종 합성 revision/replay 통과. 실제 저장 자료의 제한은 위와 같다. 다음 명령은 필요한 소스·테스트·문서의 로컬 커밋이며 추가 과학 실행이나 원격 변경은 없다.

@@ -76,6 +76,7 @@ if revision_path.is_file():
 names=['quant/summary','quant/comparisons','science/inference_results',
        'reader_adapter/form_identity','reader_adapter/form_contrasts',
        'reader_adapter/precursor_membership','reader_adapter/study_metadata']
+if 'science/reference_inventory.csv' in dictionary:names.append('science/reference_inventory')
 if hasattr(sys.modules['ptm_shared.astra_reader'],'phosx_time_views'):
     names += ['science/site_identity_audit','science/specificity_scores',
               'kinase/method_executions','kinase/method_scores','kinase/method_membership','kinase/kinase_candidate_edges']

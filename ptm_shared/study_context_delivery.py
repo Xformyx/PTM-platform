@@ -10,9 +10,9 @@ VERSION = 'study_context_delivery.v1'
 PATH = 'reader/STUDY_CONTEXT.json'
 GUIDE = 'reader/STUDY_CONTEXT.md'
 SOURCES = ('study/user_input_snapshot.json', 'study/study_context.json', 'study/study_design.json')
-RAW_FIELDS = ('biological_question', 'cell_type', 'tissue', 'species', 'model', 'treatment',
+RAW_FIELDS = ('biological_question', 'cell_type', 'tissue', 'species', 'host_species', 'host_organism', 'transgene', 'model', 'treatment',
               'special_conditions', 'time_points', 'treatment_arms', 'dose', 'vehicle', 'exposure',
-              'enrichment', 'pre_treatment', 'acquisition', 'processing', 'science',
+              'enrichment', 'enrichment_status', 'pre_treatment', 'acquisition', 'acquisition_metadata', 'processing', 'science',
               'sample_manifest', 'replication_plan')
 
 
@@ -47,6 +47,7 @@ def context_projection(root):
             'display': study_display(design, context), 'control_comparison': comparison_summary(design),
             'arms': design.get('arms', []), 'conditions': design.get('conditions', []),
             'contrasts': design.get('contrasts', []), 'issues': design.get('issues', []),
+            'metadata_conflicts': design.get('metadata_conflicts', []),
             'validity': design.get('status'), 'context_completeness': 'not_assessed'},
         'research_question': {'values': explicit.get('research_questions'),
             'information_status': 'provided_structured' if 'research_questions' in explicit else 'not_recorded',
@@ -58,6 +59,9 @@ def context_projection(root):
             'rule': 'Expectations embedded in the original prose remain prose; no extraction or factual promotion.'}}
     return {'schema_version': VERSION, 'source_record_id': snapshot.get('source_record_id'),
         'question_contract': snapshot.get('context_contract', 'legacy_question_contract'),
+        'legacy_question_bindings': ({'source': 'reader/question_map.json', 'status': 'preserved_if_present',
+            'classification': 'unchanged', 'migration': 'none; original BQ/RQ IDs and frozen bindings retained'}
+            if snapshot.get('context_contract') != CONTEXT_CONTRACT else None),
         'source_refs': [source_ref(root, name) for name in SOURCES], 'roles': roles,
         'execution_run_id': (json.loads((root/'study/input_delivery_receipt.json').read_text()).get('run_id')
                              if (root/'study/input_delivery_receipt.json').is_file() else None),
@@ -92,6 +96,7 @@ def write_context(directory, *, source_root=None):
     projection = context_projection(root)
     # This view is replayable independently of whether another view has already been written.
     projection['execution_records']['reader/EXECUTION_STATUS.json']['status'] = 'see_current_execution_projection'
+    (directory/'reader').mkdir(parents=True, exist_ok=True)
     json_write(directory/PATH, projection)
     (directory/GUIDE).write_text(context_markdown(projection), encoding='utf-8')
     return [PATH, GUIDE], {'schema_version': VERSION, 'file': PATH,
@@ -124,8 +129,17 @@ def verify_context_binding(root, binding, read=None):
     walk(projection)
     if binding.get('source_refs') != projection['source_refs']:
         raise ValueError('Research context: consumer source refs differ')
-    if projection['roles'] != context_projection(root)['roles']:
-        raise ValueError('Research context: projected value or role differs from execution snapshot')
+    if binding.get('source_record_id') != projection['source_record_id']:
+        raise ValueError('Research context: consumer /source_record_id differs')
+    expected = context_projection(root)
+    expected['execution_records']['reader/EXECUTION_STATUS.json']['status'] = 'see_current_execution_projection'
+    if value_hash(projection) != value_hash(expected):
+        from .astra_inputs import leaves
+        actual = dict(leaves(projection))
+        for path, value in leaves(expected):
+            if path not in actual or value_hash(actual[path]) != value_hash(value):
+                raise ValueError('Research context: consumer ' + path + ' value_type_or_role_changed')
+        raise ValueError('Research context: consumer unexpected projection field')
     return projection
 
 

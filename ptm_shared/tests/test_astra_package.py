@@ -153,6 +153,14 @@ def test_real_orchestrator_offline_replay_and_interruption(configuration,tmp_pat
     original=(out/'enrichment_free_current.json').read_bytes()
     changed=copy.deepcopy(configuration);changed['experimental_context']['biological_question']='EGF question only'
     changed['source_pin_sha256']=result['source_pin_sha256']
+    # A stale dispatch snapshot must fail before reusing scientific stages.
+    with pytest.raises(ValueError,match='Research input delivery'):
+        run_astra_analysis(42,changed,out)
+    assert (out/'enrichment_free_current.json').read_bytes()==original
+    changed['experimental_context']['study_design']=resolve_study_design(changed['experimental_context'],
+        snapshot['original']['sample_config'],taxonomy_id='9606',species='human')
+    changed['user_input_snapshot']=capture_order({**snapshot['original'],'id':42,
+        'analysis_context':changed['experimental_context']})
     rerun=run_astra_analysis(42,changed,out)
     assert rerun['provenance']['stage_reuse']['quant']['status']=='reused'
     assert rerun['source_pin_sha256']==result['source_pin_sha256']
