@@ -3596,4 +3596,26 @@
 - **해석 한계:** Running은 그 단계의 완료나 kinase 활성이 아니다. 진행률이 50%인 것은 Astra 전처리 콜백의 고정 표시일 수 있다.
 - **결정성:** 새 seed·solver·dtype 없음. 정량·PhosX·문헌 검색은 실행하지 않았다.
 
+### [2026-11-15] 조건 라벨의 비유한 시간
+
+- **분류:** 정정
+- **대상:** `ptm_shared/enrichment_free_temporal_sidecar.py` `_recorded_minutes`, `ptm_shared/directed_temporal_relationship.py` `recorded_timepoint_minutes`
+- **구현 대상 설계:** 신규 — 선언 먼저. 조건 라벨에 분이 없으면 저장값은 null이다. inf는 정렬용이며 측정값이 아니다. 새 임계 없음.
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). Order Universe_AF의 AF·mgAF가 temporal sidecar JSON에서 inf로 거절된 뒤.
+- **내용:** 단백질 `peak_minutes`와 directed relationship의 `timepoint_minutes`는 유한한 기록 시간만 저장한다. 파싱되지 않은 라벨은 None이다. 선후 계산은 모든 라벨이 유한할 때만 기존 경로를 탄다. TMM 점수와 wave membership은 바꾸지 않는다.
+- **논문에서의 용도:** limitation (시간 미기록). kinase 귀속 결과에는 쓰지 않는다.
+- **해석 한계:** None은 0분이 아니고, 시간축이 없다는 생물학적 결론도 아니다. 이 값으로 선후나 kinase 활성을 말하지 않는다.
+- **결정성:** 새 seed·solver·dtype 없음. 회귀 검사는 `python -m pytest ptm_shared/tests/test_unparsed_condition_time_json.py`. Universe_AF는 다시 실행하지 않았다.
+
+### [2026-11-16] 정량 문장 검증의 feature_id
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/quantitative_claims.py` `_feature_axis_record`
+- **구현 대상 설계:** 신규 — 선언 먼저. 부위·조건·축 대조 검증은 `feature_id`가 있는 feature_axis 행만 본다. kinase·pathway·multiform 집계 행에는 그 키가 없고, 없어도 보고서 전체를 중단하지 않는다. 새 임계 없음.
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). Order Universe_AF가 report_copilot에서 KeyError `'feature_id'`로 실패한 뒤.
+- **내용:** 정량 문장의 부위 대조 후보는 typed aggregate 행을 제외한다. 키가 없는 행은 그 문장에 결합되지 않는다. q<0.05 규칙과 값 허용오차는 바꾸지 않는다.
+- **논문에서의 용도:** limitation (문장 결합). kinase 귀속 결과에는 쓰지 않는다.
+- **해석 한계:** 검증을 통과한 문장은 그 행의 기록값과 맞는다는 뜻이다. kinase 활성, 비활성, 또는 경로 유의성이 아니다.
+- **결정성:** 새 seed·solver·dtype 없음. 회귀 검사는 `python -m pytest workers/tests/test_typed_record_dispatch.py`. Universe_AF는 다시 실행하지 않았다.
+
 

@@ -105,7 +105,7 @@ export default function Dashboard() {
   }, []);
 
   const allOrders = orders?.orders ?? [];
-  const RUNNING_STATUSES = new Set(["running", "preprocessing", "rag_enrichment", "report_generation", "queued", "registered"]);
+  const RUNNING_STATUSES = new Set(["running", "preprocessing", "rag_enrichment", "report_generation", "queued"]);
   const counts = {
     total: orders?.total ?? 0,
     running: allOrders.filter((o) => RUNNING_STATUSES.has(o.status)).length,
@@ -121,10 +121,10 @@ export default function Dashboard() {
   ).map(([name, value]) => ({ name, value }));
 
   const kpiCards = [
-    { label: "Total Orders", value: counts.total, icon: ClipboardList, color: "text-foreground" },
-    { label: "Running", value: counts.running, icon: Loader2, color: "text-blue-500" },
-    { label: "Completed", value: counts.completed, icon: CheckCircle2, color: "text-emerald-500" },
-    { label: "Failed", value: counts.failed, icon: AlertCircle, color: "text-red-500" },
+    { label: "Total Orders", value: counts.total, icon: ClipboardList, color: "text-foreground", status: "all" },
+    { label: "Running", value: counts.running, icon: Loader2, color: "text-blue-500", status: "running" },
+    { label: "Completed", value: counts.completed, icon: CheckCircle2, color: "text-emerald-500", status: "completed" },
+    { label: "Failed", value: counts.failed, icon: AlertCircle, color: "text-red-500", status: "failed" },
   ];
 
   if (loading) {
@@ -153,16 +153,22 @@ export default function Dashboard() {
           return (
             <StaggerItem key={kpi.label}>
               <Card>
-                <CardContent className="flex items-center gap-4 p-5">
-                  <div className={`rounded-lg bg-muted p-2.5 ${kpi.color}`}>
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">{kpi.label}</p>
-                    <p className="text-2xl font-bold">
-                      <CountUp target={kpi.value} />
-                    </p>
-                  </div>
+                <CardContent className="p-0">
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-4 p-5 text-left transition-colors hover:bg-muted/60"
+                    onClick={() => navigate(kpi.status === "all" ? "/admin/orders" : `/admin/orders?status=${kpi.status}`)}
+                  >
+                    <div className={`rounded-lg bg-muted p-2.5 ${kpi.color}`}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">{kpi.label}</p>
+                      <p className="text-2xl font-bold">
+                        <CountUp target={kpi.value} />
+                      </p>
+                    </div>
+                  </button>
                 </CardContent>
               </Card>
             </StaggerItem>

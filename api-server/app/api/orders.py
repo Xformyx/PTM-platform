@@ -11,7 +11,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile, File, Form, status
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import select, text, func as sqlfunc, update
+from sqlalchemy import delete, select, text, func as sqlfunc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -123,6 +123,24 @@ def _normalize_report_options(report_options: dict | None) -> dict:
         )
     options["report_config"] = effective
     return options
+
+
+def _report_chain_fields(report_options: dict | None, *, secondary_ptm_type: str | None = None) -> dict:
+    """Copy the stored Report request into a RAG stage rerun.
+
+    A RAG-only rerun chains into Report generation. The stored audience and
+    reader mode have to travel with that task. An empty report_config is not
+    a technical audit and is rejected by the Report worker.
+    """
+    options = dict(report_options or {})
+    return {
+        "research_questions": options.get("research_questions", []),
+        "report_type": options.get("report_type", "comprehensive"),
+        "report_config": dict(options.get("report_config") or {}),
+        "co_scientist_integration": options.get("co_scientist_integration", {}),
+        "analysis_mode": options.get("analysis_mode", "ptm_only"),
+        "secondary_ptm_type": secondary_ptm_type,
+    }
 
 
 async def _save_celery_task_id(order_id: int, task_id: str) -> None:
@@ -2092,6 +2110,7 @@ async def run_stage(
             "rag_llm_provider": (order.report_options or {}).get("rag_llm_provider"),
             "report_title": (order.report_options or {}).get("report_title", "PTM Comprehensive Analysis Report"),
             "temporal_contract": (order.report_options or {}).get("temporal_contract", "dynamics_v1"),
+            **_report_chain_fields(order.report_options, secondary_ptm_type=order.secondary_ptm_type),
             "chain_to_next": True,
             "run_generation": run_generation,
         }
@@ -2279,10 +2298,14 @@ async def delete_order(
     order_code = order.order_code
 
     from app.config import get_settings
+    from app.models.analysis_job import AnalysisHead, AnalysisJob
     settings = get_settings()
     input_dir = Path(settings.INPUT_DIR) / order_code
     output_dir = Path(settings.OUTPUT_DIR) / order_code
 
+    # These tables reference orders.id without ON DELETE CASCADE.
+    await db.execute(delete(AnalysisHead).where(AnalysisHead.order_id == order_id))
+    await db.execute(delete(AnalysisJob).where(AnalysisJob.order_id == order_id))
     await db.delete(order)
     await db.commit()
 

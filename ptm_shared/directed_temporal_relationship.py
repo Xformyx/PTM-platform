@@ -39,6 +39,18 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def recorded_timepoint_minutes(labels: Sequence[Any]) -> List[Optional[float]]:
+    """JSON에 남길 분 값. 라벨이 시간이 아니면 None이다.
+
+    구현 대상: docs/implementation_log.md [2026-11-15] 조건 라벨의 비유한 시간
+    사전등록: 2026-11-15. Universe_AF의 AF·mgAF가 timepoint_minutes에 inf로
+    남아 sidecar 저장이 거절된 뒤. 탐색적. primary 승격 금지.
+    해석 한계: None은 미기록이다. 정렬용 inf를 측정된 시간으로 바꾸지 않는다.
+    주장 금지: None으로 선후 관계나 kinase 활성을 말하지 않는다.
+    """
+    return [value if math.isfinite(value) else None for value in (timepoint_to_minutes(label) for label in labels)]
+
+
 def timepoint_to_minutes(label: Any) -> float:
     """Normalize min/hour/day labels to minutes while preserving source labels."""
     text = str(label or "").strip().lower()
@@ -314,7 +326,7 @@ def analyze_directed_temporal_relationship(
         "source": {"key": str(source.get("key") or "unknown")},
         "target": {"key": str(target.get("key") or "unknown")},
         "timepoints": ordered,
-        "timepoint_minutes": minutes,
+        "timepoint_minutes": recorded_timepoint_minutes(ordered),
         "causality_status": "not_tested",
         "biological_support": support,
         "interpretation_boundary": "Temporal precedence evidence only; no causal intervention was evaluated.",

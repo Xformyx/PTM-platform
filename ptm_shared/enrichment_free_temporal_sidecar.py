@@ -26,6 +26,11 @@ DEFAULT_CROSS_LAYER_CONFIG = dict(CROSS_LAYER_CONFIG)
 
 
 def _minutes(label: str) -> float:
+    """Sort key only. An unparseable label sorts after recorded times.
+
+    The sentinel is math.inf and must not be stored. Stored minutes go
+    through _recorded_minutes().
+    """
     text = str(label or "").strip().lower()
     digits = "".join(character for character in text if character.isdigit() or character == ".")
     if not digits:
@@ -34,6 +39,20 @@ def _minutes(label: str) -> float:
     if "hour" in text or text.endswith("hr") or text.endswith("h"):
         return value * 60.0
     return value
+
+
+def _recorded_minutes(label: str) -> float | None:
+    """Return minutes only when the condition label records a finite time.
+
+    구현 대상: docs/implementation_log.md [2026-11-15] 조건 라벨의 비유한 시간
+    사전등록: 2026-11-15. Universe_AF의 AF·mgAF가 inf로 저장되며 temporal
+    sidecar JSON이 거절된 뒤. 탐색적. primary 승격 금지.
+    해석 한계: None은 라벨에 기록된 분이 없다는 뜻이다. 0분이나 시간축 부재의
+    생물학적 결론이 아니다.
+    주장 금지: None으로 kinase 활성, 시간적 선후, 분석 완료를 말하지 않는다.
+    """
+    value = _minutes(label)
+    return value if math.isfinite(value) else None
 
 
 def _optional_float(value: Any) -> float | None:
@@ -127,7 +146,7 @@ def load_protein_time_series(output_dir: Path, ptm_type: str) -> tuple[list[dict
                 "observed_timepoint_count": len(values),
                 "missing_timepoints": [condition for condition in conditions if condition not in values],
                 "peak_timepoint": peak_condition,
-                "peak_minutes": _minutes(peak_condition),
+                "peak_minutes": _recorded_minutes(peak_condition),
                 "peak_log2fc": peak_value,
                 "peak_direction": "up" if peak_value > 0 else "down" if peak_value < 0 else "neutral",
                 "replicate_provenance": {
@@ -840,7 +859,7 @@ def build_production_site_observations(
                 "site": site,
                 "temporal_values": values,
                 "peak_timepoint": peak_timepoint,
-                "peak_minutes": _minutes(peak_timepoint),
+                "peak_minutes": _recorded_minutes(peak_timepoint),
                 "peak_log2fc": peak_value,
                 "phosphorylation_direction": "up" if peak_value > 0 else "down" if peak_value < 0 else "neutral",
                 "observed_timepoint_count": len(values),

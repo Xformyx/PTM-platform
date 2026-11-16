@@ -35,6 +35,20 @@ _TYPED_RECORD_TYPES = {
 }
 
 
+def _feature_axis_record(record: Mapping[str, Any]) -> bool:
+    """부위·조건·축 대조에만 feature_id가 필요하다.
+
+    구현 대상: docs/implementation_log.md [2026-11-16] 정량 문장 검증의 feature_id
+    사전등록: 결과 열람 후. Universe_AF report_copilot KeyError 이후. 탐색적.
+    primary 승격 금지.
+    해석 한계: feature_id가 없는 집계 행은 그 문장의 부위 측정 근거가 아니다.
+    주장 금지: 이 구분으로 kinase 활성, 비활성, 또는 대조의 유의성을 말하지 않는다.
+    """
+    if record.get("record_type") in _TYPED_RECORD_TYPES:
+        return False
+    return "feature_id" in record
+
+
 def _display_identity(identity: Mapping[str, Any], card: Mapping[str, Any] | None = None) -> str:
     display = str(identity.get("reader_display_identity") or "").strip()
     disambiguator = str(identity.get("reader_disambiguator") or "").strip()
@@ -147,7 +161,10 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
             return ["precursor_identity_ambiguous_or_stitched"]
     if re.search(r"(?:(?<!\w)no(?!\w)|without|unavailable|not available|not recorded).{0,70}(?:independent |unadjusted )+PTM|(?:independent |unadjusted )+PTM.{0,70}(?:unavailable|not available|not recorded)", sentence, re.I):
         scope_cards = cards or packet.get("reader_cards") or []
-        if any(r["axis"] == "unadjusted" and r["value"] is not None for c in scope_cards for r in quantitative_records(c)):
+        if any(
+            _feature_axis_record(r) and r.get("axis") == "unadjusted" and r.get("value") is not None
+            for c in scope_cards for r in quantitative_records(c)
+        ):
             return ["available_unadjusted_observation_denied"]
     explicit_ids = set(_ID.findall(sentence.upper()))
     known_ids = {c.get("feature_identity", {}).get("reader_feature_id") for c in packet.get("reader_cards") or []}
@@ -183,7 +200,7 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
     clean = _ID.sub(lambda m: " " * len(m[0]), clean)
     clean = _TIME.sub(lambda m: " " * len(m[0]), clean)
     clean = re.sub(r"\bFigure\s+\d+[A-Z]?\b", lambda m: " " * len(m[0]), clean, flags=re.I)
-    records = [r for card in cards for r in quantitative_records(card)]
+    records = [r for card in cards for r in quantitative_records(card) if _feature_axis_record(r)]
     significance = bool(re.search(r"\bsignifican(?:t|tly|ce)\b", sentence, re.I)) and not re.search(r"\b(?:not|no|without|unavailable)\b", sentence, re.I)
     if significance and re.search(r"descriptive (?:tolerance|band)|after (?:protein )?adjustment|adjustment effect", sentence, re.I):
         return ["quantitative_adjustment_effect_not_tested"]
@@ -206,7 +223,7 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
                 fid = unique_displays[0]
             elif len(ids) == 1:
                 fid = next(iter(ids))
-        condition_patterns = [_TIME.pattern] + [r"(?<!\w)" + re.escape(str(r["condition"])) + r"(?!\w)" for r in records if r["condition"]]
+        condition_patterns = [_TIME.pattern] + [r"(?<!\w)" + re.escape(str(r.get("condition"))) + r"(?!\w)" for r in records if r.get("condition")]
         condition_pattern = re.compile("|".join(condition_patterns), re.I)
         times = list(condition_pattern.finditer(before))
         all_times = list(condition_pattern.finditer(sentence))
@@ -216,7 +233,12 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
         axis = "unadjusted" if label.startswith("unadjusted") else "adjusted" if "adjusted" in label else "protein" if label else None
         field_match = re.search(r"\b(p|q)(?:[- ]value)?\s*[=:]?\s*$|\b(control|treatment)\s+n\s*[=:]?\s*$", before, re.I)
         field = (field_match[1].lower() if field_match[1] else field_match[2].lower() + "_n") if field_match else "value"
-        candidates = [r for r in records if r["feature_id"] == fid and _condition(r["condition"]) == _condition(condition) and r["axis"] == axis]
+        candidates = [
+            r for r in records
+            if r.get("feature_id") == fid
+            and _condition(r.get("condition")) == _condition(condition)
+            and r.get("axis") == axis
+        ]
         if not candidates:
             return ["quantitative_feature_condition_axis_unbound"]
         for figure_label in re.findall(r"\bFigure\s+\d+[A-Z]?\b", sentence, re.I):
@@ -228,11 +250,11 @@ def validate_quantitative_sentence(sentence: str, packet: Mapping[str, Any]) -> 
                 for b in figure["quantitative_bindings"]
             ):
                 return ["quantitative_figure_condition_axis_mismatch"]
-        if significance and not any(r["q"] is not None and r["q"] < .05 for r in candidates):
+        if significance and not any(r.get("q") is not None and r.get("q") < .05 for r in candidates):
             return ["quantitative_axis_significance_unsupported"]
         printed = number[0].replace("−", "-")
         tolerance = .5 * 10 ** Decimal(printed).as_tuple().exponent + 1e-12
-        if not any(r[field] is not None and math.isclose(float(printed), r[field], abs_tol=tolerance, rel_tol=0) for r in candidates):
+        if not any(r.get(field) is not None and math.isclose(float(printed), r.get(field), abs_tol=tolerance, rel_tol=0) for r in candidates):
             return ["quantitative_source_value_mismatch"]
     return []
 

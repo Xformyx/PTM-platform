@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { PlusCircle, ClipboardList, Play, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, AlertCircle, Trash2, Square, Share2, Loader2, GitCompareArrows, StretchHorizontal, UnfoldHorizontal } from "lucide-react";
 import { api } from "@/lib/api";
@@ -82,6 +82,13 @@ const statusBadgeVariant = (s: string): { variant: "success" | "destructive" | "
 };
 
 type StatusFilter = "all" | "registered" | "running" | "completed" | "failed";
+
+function statusFilterFromParam(value: string | null): StatusFilter {
+  if (value === "registered" || value === "running" || value === "completed" || value === "failed") {
+    return value;
+  }
+  return "all";
+}
 type SortField = "created_at" | "completed_at";
 type SortDir = "asc" | "desc";
 type TableLayoutMode = "fit" | "expand";
@@ -182,12 +189,13 @@ function ColResizeHandle({
 
 export default function OrderList() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filter = statusFilterFromParam(searchParams.get("status"));
   const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<StatusFilter>("all");
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir } | null>({ field: "created_at", dir: "desc" });
   const [expandedError, setExpandedError] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; order_code: string } | null>(null);
@@ -334,6 +342,7 @@ export default function OrderList() {
   };
 
   useEffect(() => { fetchOrders(); }, []);
+  useEffect(() => { setPage(1); }, [filter]);
 
   const handleRun = async (e: React.MouseEvent, order: Order) => {
     e.stopPropagation();
@@ -477,8 +486,8 @@ export default function OrderList() {
               variant={filter === f ? "default" : "outline"}
               className="cursor-pointer capitalize"
               onClick={() => {
-                setFilter(f);
-                setPage(1);
+                if (f === "all") setSearchParams({}, { replace: true });
+                else setSearchParams({ status: f }, { replace: true });
               }}
             >
               {f}

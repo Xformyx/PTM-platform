@@ -59,6 +59,39 @@ def test_kinase_value_and_denominator_tampering_is_rejected():
     )
 
 
+def test_multiform_row_does_not_crash_feature_axis_validation():
+    from ptm_shared.evidence_record_contract import typed_record
+
+    feature = {
+        "feature_identity": {
+            "reader_feature_id": "PF-ABCDEF12",
+            "gene": "MAPK1",
+            "candidate_residue_annotation": "S123",
+            "reader_display_identity": "MAPK1 modified-precursor feature annotated at S123",
+        },
+        "trajectory": [{"condition": "AF", "ptm_unadjusted_log2fc": 1.25}],
+    }
+    multiform = {
+        "feature_identity": {"gene": "MAPK1", "reader_display_identity": "MAPK1"},
+        "value_records": [typed_record(
+            record_type="multiform_comparison",
+            entity_id="MAPK1",
+            metric_id="n_compared_forms",
+            value=2,
+            unit="form_count",
+            estimator="same_parent_precursor_forms.v1",
+            support_status="computed",
+            evidence_id="multiform.MAPK1",
+        )],
+    }
+    packet = {"reader_cards": [feature, multiform], "figure_cards": []}
+    sentence = (
+        "MAPK1 modified-precursor feature annotated at S123 at AF "
+        "had an unadjusted PTM contrast of +1.250."
+    )
+    assert validate_quantitative_sentence(sentence, packet) == []
+
+
 def test_kinase_question_is_not_rewritten_and_keeps_separate_coverage():
     assert classify_question_intent("Which kinase candidates are supported?") == "kinase_context"
     mapping = build_question_map(
