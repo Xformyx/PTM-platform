@@ -3618,4 +3618,15 @@
 - **해석 한계:** 검증을 통과한 문장은 그 행의 기록값과 맞는다는 뜻이다. kinase 활성, 비활성, 또는 경로 유의성이 아니다.
 - **결정성:** 새 seed·solver·dtype 없음. 회귀 검사는 `python -m pytest workers/tests/test_typed_record_dispatch.py`. Universe_AF는 다시 실행하지 않았다.
 
+### [2026-11-18] kinase 간격 비교의 독자 문장
+
+- **분류:** 정정
+- **대상:** `workers/report_generation/core/reader_authoring.py` `_kinase_context_cards`
+- **구현 대상 설계:** `docs/report_audience_mode_contract_v1.md` §5. 연구자 본문은 진단 상태 문자열을 싣지 않는다. 새 임계 없음.
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). Order Universe_AF 본문이 `not evaluable`과 `no_evaluable_signed_interval_comparison`을 실은 뒤 `blocked_final`이 된 것을 본 뒤.
+- **내용:** 계산되지 않은 signed interval comparison은 저장 구간에서 쓸 수 없다고만 적는다. 상태 코드와 unavailable_reason은 본문에 넣지 않는다. footprint 점수와 간격 비교 계산은 바꾸지 않는다.
+- **논문에서의 용도:** limitation (비교 미기록). kinase 귀속 결과에는 쓰지 않는다.
+- **해석 한계:** 이 문장은 후보가 비활성이라는 뜻이 아니다. 비교가 없다는 관찰이다.
+- **결정성:** 새 seed·solver·dtype 없음. 회귀 검사는 `python -m pytest workers/tests/test_companion_evidence.py`. Universe_AF는 다시 실행하지 않았다.
+
 

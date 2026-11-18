@@ -14,6 +14,7 @@ from report_generation.core.companion_evidence import (
 )
 from report_generation.core.quantitative_claims import quantitative_records, value_token_catalog
 from report_generation.core.reader_authoring import (
+    audit_reader_technical_leakage,
     _kinase_context_cards,
     build_authoring_packet,
     deterministic_authoring_plan,
@@ -222,6 +223,25 @@ def test_cluster_token_is_not_an_entity():
         [{"category": "temporal_profile", "evidence_ids": ["cluster.profile.1"], "feature_identity": {}}],
     )
     assert "TW" not in mapping["questions"][0]["entities"]
+
+
+def test_not_evaluable_interval_stays_out_of_reader_summary():
+    heatmap = {
+        "kinase_scores": [{
+            "canonical": "CK1",
+            "peak_score": 1.0,
+            "footprint_diagnostics": {"status": "computed"},
+            "trajectory_evidence": {
+                "support_status": "not_evaluable",
+                "unavailable_reason": "no_evaluable_signed_interval_comparison",
+            },
+        }]
+    }
+    cards = _kinase_context_cards({"kinase_activity_heatmap": heatmap})
+    summary = " ".join(card["reader_summary"] for card in cards)
+    assert "not evaluable" not in summary.lower()
+    assert "no_evaluable_signed_interval_comparison" not in summary
+    assert audit_reader_technical_leakage(summary)["status"] == "clean"
 
 
 def test_kinase_cards_emit_without_computed_footprint():

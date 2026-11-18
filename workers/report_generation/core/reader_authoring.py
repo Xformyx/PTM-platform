@@ -507,7 +507,15 @@ def _normalization_card(state: Mapping[str, Any]) -> dict:
 
 
 def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
-    """Build bounded family-level kinase candidate context without raw diagnostics."""
+    """Build bounded family-level kinase candidate context without raw diagnostics.
+
+    구현 대상: docs/report_audience_mode_contract_v1.md §5;
+    docs/implementation_log.md [2026-11-18] kinase 간격 비교의 독자 문장
+    사전등록: 2026-09-15 누수 검사. 이 문장 정정은 Universe_AF 열람 후. 탐색적.
+    primary 승격 금지.
+    해석 한계: 간격 비교가 없다는 문장은 그 비교가 기록되지 않았다는 뜻이다.
+    주장 금지: 이 문장으로 kinase 비활성, 부재, 또는 예측 향상을 말하지 않는다.
+    """
     heatmap = _as_mapping(state.get("kinase_activity_heatmap")) or _as_mapping(state.get("frontend_kinase_analysis"))
     scores = [
         _as_mapping(row) for row in heatmap.get("kinase_scores") or []
@@ -599,8 +607,8 @@ def _kinase_context_cards(state: Mapping[str, Any]) -> list[dict]:
             )
         elif trajectory and trajectory_status != "legacy_unavailable":
             trajectory_clause = (
-                f" {family_label} signed interval comparison was {trajectory_status.replace('_', ' ')} "
-                f"({trajectory.get('unavailable_reason') or 'insufficient shared observed intervals'})."
+                f" {family_label} signed interval comparison was not available from the stored intervals. "
+                "This is not evidence that the candidate is inactive."
             )
         else:
             trajectory_clause = f" {family_label} signed interval comparison was not available on this stored heatmap."
