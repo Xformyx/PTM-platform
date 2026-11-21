@@ -92,7 +92,21 @@ class VectorColumnar:
         path = self.root/self.manifest["filename"]
         if path.parent != self.root: raise ValueError("invalid_columnar_path")
         self.db = duckdb.connect(config={"threads":1})
-        self.db.read_parquet(str(path)).create_view("observations")
+        self.db.read_parquet(str(path)).create_view("raw_observations")
+        from .vector_plot import DISPLAY_SCOPE_FIELDS
+        # All rows in this index have the same TSV header. Old indices keep it in source_record.
+        sample = self.db.execute("SELECT record_json FROM raw_observations WHERE NOT malformed LIMIT 1").fetchone()
+        fields = {k.lower(): k for k in json.loads(sample[0]).get("source_record", {})} if sample else {}
+        expression = "condition"
+        parts = {}
+        for field in DISPLAY_SCOPE_FIELDS:
+            if field in fields:
+                value = f"nullif(json_extract_string(record_json,'$.source_record.{fields[field]}'),'')"
+                parts[field] = f"coalesce(' · {field}=' || {value},'')"
+                expression += " || " + parts[field]
+        empty = "''"
+        scope = f"coalesce(nullif({parts.get('effect_series_id', empty)},''), {parts.get('arm_id', empty)} || {parts.get('reference_condition_id', empty)})"
+        self.db.execute(f"CREATE VIEW observations AS SELECT * REPLACE (({expression}) AS condition), condition AS source_condition, substr({scope},4) AS curve_scope FROM raw_observations")
         # Conflict withholding is axis-independent and includes statistics/units.
         self.db.execute("CREATE VIEW cells AS SELECT feature_id, condition, count(*) AS source_rows, count(DISTINCT measurement_hash)>1 AS conflict, CASE WHEN count(DISTINCT measurement_hash)=1 THEN max(a) END AS a, CASE WHEN count(DISTINCT measurement_hash)=1 THEN max(u) END AS u, CASE WHEN count(DISTINCT measurement_hash)=1 THEN max(p) END AS p FROM observations WHERE feature_id IS NOT NULL GROUP BY feature_id, condition")
 
@@ -101,7 +115,9 @@ class VectorColumnar:
     def manifest_counts(self):
         row = self.db.execute("SELECT count(*), count(DISTINCT feature_id), count(*) FILTER (WHERE feature_id IS NULL), count(*) FILTER (WHERE malformed) FROM observations").fetchone()
         from .plot_selection import condition_grid
-        grid=condition_grid([{"condition":r[0],"time_minutes":r[1]} for r in self.db.execute("SELECT DISTINCT condition,time_minutes FROM observations WHERE condition IS NOT NULL").fetchall()])
+        columns = ("condition", "time_minutes", "source_condition", "curve_scope")
+        registered = self.db.execute("SELECT DISTINCT condition,time_minutes,source_condition,curve_scope FROM observations WHERE condition IS NOT NULL").fetchall()
+        grid = condition_grid(dict(zip(columns,row)) for row in registered)
         return {"source_rows":row[0],"identified_features":row[1],"identity_unresolved_rows":row[2]-row[3],"malformed_source_rows":row[3],"measurement_revision":self.manifest["measurement_revision"],"conditions":[p["condition"] for p in grid], "condition_grid":grid}
 
     def selection_statistics(self, axis):
@@ -158,7 +174,8 @@ class VectorColumnar:
     def trajectories(self, feature_ids):
         if len(feature_ids)>1000: raise ValueError("trajectory_request_requires_pagination")
         if not feature_ids: return []
-        rows = [json.loads(r[0]) for r in self.db.execute("SELECT record_json FROM observations WHERE feature_id IN (SELECT unnest(?)) ORDER BY feature_id,condition,source_line", [feature_ids]).fetchall()]
+        records = self.db.execute("SELECT record_json,condition FROM observations WHERE feature_id IN (SELECT unnest(?)) ORDER BY feature_id,condition,source_line", [feature_ids]).fetchall()
+        rows = [{**json.loads(record), "condition": condition} for record, condition in records]
         return normalize_plot_records(rows)
 
     def diagnostics(self, *, kind="identity_unresolved", after=0, limit=200):

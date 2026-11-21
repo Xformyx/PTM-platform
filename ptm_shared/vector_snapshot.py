@@ -2,10 +2,10 @@
 import csv
 import hashlib
 from pathlib import Path
-from ptm_shared.vector_plot import normalize_plot_records, project_plot_row
+from ptm_shared.vector_plot import normalize_plot_records, project_plot_row, scoped_condition
 from ptm_shared.tabular_import import validate_tabular_header
 
-def load_vector_snapshot(output_dir, suffix):
+def load_vector_snapshot(output_dir, suffix, *, display_scope=False):
     rows, quarantine, count = [], [], 0
     for name in (f"ptm_vector_data_normalized{suffix}.tsv", f"ptm_vector_data_with_motifs{suffix}.tsv"):
         path = Path(output_dir) / name
@@ -28,6 +28,11 @@ def load_vector_snapshot(output_dir, suffix):
                     continue
                 raw["source_row_lineage"] = [locator]
                 projected = project_plot_row(raw)
+                if display_scope:
+                    projected["source_condition"] = projected["condition"]
+                    projected["condition"] = scoped_condition(projected["condition"], raw)
+                    projected["curve_scope"] = (scoped_condition("", raw, ("effect_series_id",)) or
+                                                scoped_condition("", raw, ("arm_id", "reference_condition_id"))).removeprefix(" · ")
                 projected["source_record"] = raw
                 rows.append(projected)
         after = path.stat()

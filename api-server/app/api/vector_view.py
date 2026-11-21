@@ -108,7 +108,12 @@ def query(directory, suffix, operation, revision, options):
         try:
             store = VectorColumnar(directory, suffix)
         except FileNotFoundError:
-            snapshot = load_vector_snapshot(directory, suffix)
+            try:
+                snapshot = load_vector_snapshot(directory, suffix, display_scope=True)
+            except (FileNotFoundError, ValueError) as exc:
+                if isinstance(exc, ValueError) and str(exc) != "measurement_revision_changed":
+                    raise
+                raise HTTPException(409, "measurement_revision_changed") from exc
             if revision != snapshot["measurement_revision"]:
                 raise HTTPException(409, "measurement_revision_changed")
             grid = condition_grid(snapshot["rows"])

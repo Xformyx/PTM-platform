@@ -54,10 +54,18 @@ function label(row:Row) {
   return `${raw?.source_gene_label || row.source_gene_label || row.gene || 'Unmapped'} ${row.position||''} · ${row.precursor_id||row.feature_id} · z${row.precursor_charge||'?'}`;
 }
 
-function Curves({features, conditions, track,grid}: {grid?:Row[];features:Row[];conditions:string[];track:string}) {
-  const [checked,setChecked] = useState<string[]>([]), [zoom,setZoom] = useState(false);
-  const identity = features.map(r=>r.feature_id).join('|');
-  useEffect(()=>{setChecked(features.slice(0,3).map(r=>r.feature_id));setZoom(false);},[identity]);
+type CurvePreferences = {values: Record<string, boolean>; toggle: (id:string, enabled:boolean)=>void};
+function Curves({features,conditions,track,grid,preferences}: {
+  grid?:Row[];features:Row[];conditions:string[];track:string;preferences?:CurvePreferences
+}) {
+  const [local,setLocal]=useState<Record<string,boolean>>({});
+  const [zoom,setZoom]=useState(false);
+  const values=preferences?.values??local;
+  const checked=features.filter((f,i)=>values[f.feature_id]??(i<3)).map(f=>f.feature_id);
+  function toggle(id:string,enabled:boolean) {
+    if(preferences) preferences.toggle(id,enabled);
+    else setLocal(current=>({...current,[id]:enabled}));
+  }
   const rows = useMemo(()=>conditions.map(condition=>{
     const point=grid?.find(p=>p.condition===condition);
     const recorded=new Set(features.map(f=>f.observations?.[condition]?.source?.time_minutes).filter(Number.isFinite));
@@ -70,7 +78,7 @@ function Curves({features, conditions, track,grid}: {grid?:Row[];features:Row[];
     <p className="text-sm">페이지 {features.length} precursor · 표시 {checked.length} · {track==='relative'?'A: protein-adjusted log2 contrast':track==='unadjusted'?'U: unadjusted log2 contrast (모델 입력과 다른 표현)':'paired occupancy logit delta'}.</p>
     <p className="text-xs text-muted-foreground">없는 시점은 gap이며 실제 0은 관측입니다. precursor 수는 biological n이 아닙니다. 체크와 확대는 계산 결과를 변경하지 않습니다.</p>
     <details><summary>조건별 시간 출처</summary>{rows.map(r=><p key={r.condition}>{r.condition} · {Number.isFinite(r.minute)?r.minute+" min":"미기록"} · {r.source}</p>)}</details>
-    <div className="h-72 w-full min-w-0" role="img" aria-label="선택 precursor의 실제 시간 곡선">
+    <div className="h-72 w-full min-w-0 overflow-hidden" role="img" aria-label="선택 precursor의 실제 시간 곡선">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={timed?rows.filter(r=>Number.isFinite(r.minute)):rows} margin={{left:8,right:24,top:10,bottom:20}}>
         <CartesianGrid strokeDasharray="3 3"/><XAxis dataKey={timed?'minute':'condition'} type={timed?'number':'category'} domain={['dataMin','dataMax']} label={{value:timed?'Time (min)':'Declared condition',position:'bottom'}}/>
         <YAxis domain={zoom?[-2,2]:['auto','auto']} allowDataOverflow={zoom} tickFormatter={v=>Number(v).toFixed(1)}/>
@@ -80,7 +88,7 @@ function Curves({features, conditions, track,grid}: {grid?:Row[];features:Row[];
     </div>
     <Button size="sm" variant="outline" onClick={()=>setZoom(z=>!z)}>{zoom?'전체 범위 복원':'±2 범위 확대'}</Button>
     {zoom&&<p role="status">±2 밖의 점은 잘립니다. 전체 범위 복원으로 확인할 수 있습니다.</p>}
-    <div className="max-h-44 overflow-auto border rounded p-2">{features.map(f=><label key={f.feature_id} className="block text-xs py-1 break-all"><input type="checkbox" checked={checked.includes(f.feature_id)} onChange={e=>setChecked(c=>e.target.checked?[...c,f.feature_id]:c.filter(id=>id!==f.feature_id))}/> {label(f)}</label>)}</div>
+    <div className="max-h-44 overflow-auto border rounded p-2">{features.map(f=><label key={f.feature_id} className="block text-xs py-1 break-all"><input type="checkbox" checked={checked.includes(f.feature_id)} onChange={e=>toggle(f.feature_id,e.target.checked)}/> {label(f)}</label>)}</div>
   </div>;
 }
 
@@ -121,11 +129,14 @@ export function SignalingEvidenceExplorer({orderId,initialN:savedN=50,selection}
     if(!bundleId && ready)setBundleId(ready.bundle_id);
   },[bundleId,runs.data]);
   const chosen=bundleId;
+  const [curveChecks,setCurveChecks]=useState<Record<string,boolean>>({});
+  useEffect(()=>setCurveChecks({}),[chosen]);
   const base=chosen?`/orders/${orderId}/evidence-runs/${encodeURIComponent(chosen)}`:null;
   const bundle=useRead<Row>(base,retry), pathways=useRead<Page>(base?`${base}/pathways?limit=100${pathwayCursor?`&cursor=${encodeURIComponent(pathwayCursor)}`:''}`:null,retry);
   const members=useRead<Page>(base?`${base}/features?limit=50&track=${track}&mode=${mode}${mode.endsWith('top_n')?`&n=${n}`:''}${pathway?`&pathway_key=${encodeURIComponent(pathway)}`:''}${kinase?`&kinase=${encodeURIComponent(kinase)}`:''}${moduleId?`&module_id=${encodeURIComponent(moduleId)}`:''}${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`:null,retry);
   const matched=!!selection && bundle.data?.vector_measurement_revision===selection.revision;
   const exact=useRead<Page>(matched?`${base}/features/${encodeURIComponent(selection!.feature_id)}`:null,retry);
+  useEffect(()=>setFeatureId(""),[selection?.revision,selection?.feature_id]);
   const activeFeature=featureId || exact.data?.records.find(f=>f.feature_id===selection?.feature_id)?.feature_id || '';
   const kinases=usePage(base?`${base}/kinases?limit=100`:null,retry);
   const details=usePage(base&&activeFeature?`${base}/contributions?feature_id=${encodeURIComponent(activeFeature)}&track=${track}`:null,retry);
@@ -137,7 +148,7 @@ export function SignalingEvidenceExplorer({orderId,initialN:savedN=50,selection}
   const unmapped=usePage(base?`${base}/unmapped-modules`:null,retry);
   const hypotheses=usePage(base?`${base}/mechanism-hypotheses`:null,retry);
   const suggestions=usePage(base?`${base}/experiment-suggestions`:null,retry);
-  useEffect(()=>{setCursor('');setFeatureId('');},[track,mode,n,chosen,kinase,moduleId]);
+  useEffect(()=>{setCursor('');},[track,mode,n,chosen,kinase,moduleId]);
   useEffect(()=>{setPathwayCursor('');setKinase('');setModuleId('');setModelId('');},[chosen]);
   const error = runs.error;
   if(error)return <Card><CardContent className="py-5"><p role="alert">결과 조회 실패: {error}</p><Button onClick={()=>setRetry(r=>r+1)}>다시 시도</Button></CardContent></Card>;
@@ -156,8 +167,8 @@ export function SignalingEvidenceExplorer({orderId,initialN:savedN=50,selection}
     {base&&bundle.data&&<>
       <Card><CardHeader><CardTitle>경로 × 시간</CardTitle></CardHeader><CardContent>
         <p className="text-xs mb-3">구성원 contrast의 기술적 요약 · precursor 중앙값을 단백질별로 요약한 후 평균 · 활성/억제 검정이 아닙니다. 회색은 미평가, 흰색은 0입니다. 시간 열은 범주로 배치됩니다.</p>
-        {pathways.error?<p role="alert">{pathways.error} <Button onClick={()=>setRetry(r=>r+1)}>경로 다시 조회</Button></p>:!pathways.data?<p role="status">경로 조회 중…</p>:pathways.data.records.length===0?<p>경로 결과 없음 · reference 상태: {bundle.data.pathway_source?.status}. 유효한 PTM과 kinase 결과는 아래에서 조회할 수 있습니다.</p>:<div className="overflow-x-auto max-h-96"><table className="text-xs w-full"><thead><tr><th>경로 / provider</th>{bundle.data!.conditions.map((c:string)=><th key={c}>{c}</th>)}</tr></thead><tbody>{pathways.data.records.map(p=><tr key={p.pathway_key}><td><button className="text-left underline p-2" aria-pressed={pathway===p.pathway_key} onClick={()=>{setPathway(p.pathway_key);setCursor('');setFeatureId('');}}>{p.name} · {p.provider} · {p.member_feature_count} features</button></td>{p.scores.map((s:Row)=><td key={s.condition} title={`${s.condition}: ${s.value??'미평가'}; hit/background ${s.hit_proteins}/${s.background_proteins}; ${s.evaluation_status}`} style={{color:'#111827',background:s.value===null?'#ddd':s.value===0?'white':s.value>0?'#fecaca':'#bfdbfe'}} className="p-2">{s.value===null?'—':Number(s.value).toFixed(2)}</td>)}</tr>)}</tbody></table></div>}
-        <Button variant="outline" size="sm" disabled={!pathways.data?.next_cursor} onClick={()=>setPathwayCursor(pathways.data!.next_cursor!)}>다음 경로</Button> <Button variant="outline" size="sm" onClick={()=>setPathwayCursor('')}>처음 경로</Button> <Button variant="outline" size="sm" onClick={()=>{setPathway('');setCursor('');setFeatureId('');}}>전체 feature</Button>
+        {pathways.error?<p role="alert">{pathways.error} <Button onClick={()=>setRetry(r=>r+1)}>경로 다시 조회</Button></p>:!pathways.data?<p role="status">경로 조회 중…</p>:pathways.data.records.length===0?<p>경로 결과 없음 · reference 상태: {bundle.data.pathway_source?.status}. 유효한 PTM과 kinase 결과는 아래에서 조회할 수 있습니다.</p>:<div className="overflow-x-auto max-h-96"><table className="text-xs w-full"><thead><tr><th>경로 / provider</th>{bundle.data!.conditions.map((c:string)=><th key={c}>{c}</th>)}</tr></thead><tbody>{pathways.data.records.map(p=><tr key={p.pathway_key}><td><button className="text-left underline p-2" aria-pressed={pathway===p.pathway_key} onClick={()=>{setPathway(p.pathway_key);setCursor('');}}>{p.name} · {p.provider} · {p.member_feature_count} features</button></td>{p.scores.map((s:Row)=><td key={s.condition} title={`${s.condition}: ${s.value??'미평가'}; hit/background ${s.hit_proteins}/${s.background_proteins}; ${s.evaluation_status}`} style={{color:'#111827',background:s.value===null?'#ddd':s.value===0?'white':s.value>0?'#fecaca':'#bfdbfe'}} className="p-2">{s.value===null?'—':Number(s.value).toFixed(2)}</td>)}</tr>)}</tbody></table></div>}
+        <Button variant="outline" size="sm" disabled={!pathways.data?.next_cursor} onClick={()=>setPathwayCursor(pathways.data!.next_cursor!)}>다음 경로</Button> <Button variant="outline" size="sm" onClick={()=>setPathwayCursor('')}>처음 경로</Button> <Button variant="outline" size="sm" onClick={()=>{setPathway('');setCursor('');}}>전체 feature</Button>
       </CardContent></Card>
       <Card><CardHeader><CardTitle>PTM 관측과 곡선</CardTitle></CardHeader><CardContent className="space-y-3">
         {members.error&&<p role="alert">{members.error} <Button onClick={()=>setRetry(r=>r+1)}>관측 다시 조회</Button></p>}<p>조회 범위 {pathway?'선택 경로 전체':'전체 inventory'} · {members.data?.total_count??'…'} precursor · 페이지 {members.data?.records.length??0}</p>
@@ -165,7 +176,7 @@ export function SignalingEvidenceExplorer({orderId,initialN:savedN=50,selection}
         <label>PTM 곡선 표시 <select aria-label="PTM display selection" value={mode} onChange={e=>setMode(e.target.value)}><option value="inventory">범위 내 전체 inventory</option><option value="all_observed">유효 관측 전체</option><option value="global_top_n">전체 Top N</option><option value="per_condition_top_n">조건별 Top N 합집합</option></select></label>
         {mode.endsWith('top_n')&&<label>N <input aria-label="Display N" type="number" min="1" value={n} onChange={e=>{const value=Number(e.target.value);if(Number.isInteger(value)&&value>0)setN(value);}}/></label>}
         <label>정량 표현 <select aria-label="Explorer track" value={track} onChange={e=>setTrack(e.target.value)}><option value="relative">A · 분석 track</option><option value="unadjusted">U · 관측 보기</option><option value="occupancy">유효 paired occupancy</option></select></label>
-        {members.data?<><Curves grid={bundle.data.condition_grid} features={members.data.records} conditions={bundle.data.conditions} track={track}/>
+        {members.data?<><Curves preferences={{values:curveChecks,toggle:(id,enabled)=>setCurveChecks(prev=>({...prev,[id]:enabled}))}} grid={bundle.data.condition_grid} features={members.data.records} conditions={bundle.data.conditions} track={track}/>
           <div className="max-h-60 overflow-auto"><table className="text-xs w-full"><thead className="sticky top-0 bg-background"><tr><th>Precursor</th>{bundle.data.conditions.map((c:string)=><th key={c}>{c}</th>)}</tr></thead><tbody>{members.data.records.map(f=><tr key={f.feature_id}><td><button data-feature-id={f.feature_id} className="underline text-left p-1" onClick={()=>setFeatureId(f.feature_id)}>{label(f)}</button></td>{bundle.data!.conditions.map((c:string)=><td className="p-2" key={c} title={`${c} ${track}`} style={{color:'#111827',background:f.trajectories?.[track]?.[c]==null?'#ddd':f.trajectories[track][c]>0?'#fecaca':f.trajectories[track][c]<0?'#bfdbfe':'white'}}>{f.trajectories?.[track]?.[c]==null?'—':Number(f.trajectories[track][c]).toFixed(2)}</td>)}</tr>)}</tbody></table></div>
           <Button size="sm" variant="outline" onClick={()=>setCursor('')}>처음</Button> <Button size="sm" disabled={!members.data.next_cursor} onClick={()=>setCursor(members.data!.next_cursor!)}>다음 50개</Button>
         </>:<p role="status">회원 조회 중…</p>}
@@ -174,7 +185,7 @@ export function SignalingEvidenceExplorer({orderId,initialN:savedN=50,selection}
         <p className="text-xs">기질 footprint이며 catalytic activity 확정이나 정답 확률이 아닙니다. 경로 선택으로 전역 score를 재계산하지 않습니다.</p>
         <div className="max-h-64 overflow-auto">{kinases.data?.records.map(k=><details key={k.canonical}><summary>{k.canonical} · {k.tmm_profile_type} · footprint peak {k.peak_condition??'보류'}</summary><p className="text-xs">{bundle.data!.conditions.map((c:string)=>`${c}: ↑${k.up_sums?.[c]??'—'} / ↓${k.down_sums?.[c]??'—'}`).join(' · ')}</p><Button size="sm" variant="outline" onClick={()=>setKinase(k.canonical)}>이 후보에 연결된 관측 보기</Button></details>)}</div>
         <PageStatus page={kinases} title="Kinase"/>
-        {activeFeature&&<div className="mt-3"><p>선택 precursor: {label(members.data?.records.find(f=>f.feature_id===activeFeature)||exact.data?.records[0]||{feature_id:activeFeature})}</p>
+        {activeFeature&&<div className="mt-3"><p>선택 precursor: {label(members.data?.records.find(f=>f.feature_id===activeFeature)||exact.data?.records.find(f=>f.feature_id===activeFeature)||{feature_id:activeFeature})} {members.data&&!members.data.records.some(f=>f.feature_id===activeFeature)&&'· 현재 페이지 밖'}</p>
           {details.data?.records.map(d=><details key={d.kinase}><summary>{d.kinase}: {d.resolution} · 개별 ratio {d.contribution_ratio??'보류'} · whole-trajectory ratio · {d.unsupported_reason||d.score_status||''}</summary>
             <p className="text-xs">Profile: {d.profile_provenance?.profile_type||'미기록'} · prior peak {d.profile_peak_condition??'보류'}</p>
             <div className="overflow-auto"><table className="text-xs"><thead><tr><th>조건</th><th>귀속 평가</th><th>합산 포함</th><th>기여</th></tr></thead><tbody>{Object.entries(d.condition_evaluations||{}).map(([c,v])=><tr key={c}><td>{c}</td><td>{String((v as Row).allocation_evaluable)}</td><td>{String((v as Row).included_in_score)}</td><td>{(v as Row).score_contribution??'보류'}</td></tr>)}</tbody></table></div></details>)}

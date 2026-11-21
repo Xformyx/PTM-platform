@@ -73,7 +73,7 @@ def load_vector_view(output_dir, suffix, report_options=None, *, mode="per_condi
         finally:
             store.close()
     else:
-        snapshot = load_vector_snapshot(output_dir, suffix)
+        snapshot = load_vector_snapshot(output_dir, suffix, display_scope=True)
     annotations, source = load_annotations(output_dir, suffix)
     for row in snapshot["rows"]:
         for current_axis, prefix in (("unadjusted", "ptm_unadjusted"), ("protein", "protein"), ("adjusted", "ptm_protein_adjusted")):

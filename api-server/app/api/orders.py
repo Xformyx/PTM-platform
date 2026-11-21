@@ -532,8 +532,8 @@ async def resolve_order_design(body:dict=Body(...),user=Depends(get_current_user
 
 
 @router.get("/{order_id}/enrichment-free-evidence")
-async def get_enrichment_free_evidence(order_id:int, artifact:Optional[str]=None, expected_run_id:Optional[str]=None,
-    db:AsyncSession=Depends(get_db), user=Depends(get_current_user)):
+async def get_enrichment_free_evidence(order_id:int, artifact:Optional[str]=None,
+    db:AsyncSession=Depends(get_db), user=Depends(get_current_user), expected_run_id:Optional[str]=None):
     from ptm_shared.enrichment_free_workflow import recorded_run
     import asyncio
     result = await db.execute(select(Order).where(Order.id==order_id))

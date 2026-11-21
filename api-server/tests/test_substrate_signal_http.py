@@ -47,6 +47,18 @@ def test_saved_snapshot_access_pagination_and_tamper(tmp_path, monkeypatch):
     access.side_effect=HTTPException(403,'no access')
     assert client.post(path,json={}).status_code==403
     access.side_effect=None
+    pointer=tmp_path/'ORDER/enrichment_free_current.json'
+    original=pointer.read_bytes()
+    replacement=tmp_path/'ORDER/second/provenance.json'
+    replacement.parent.mkdir()
+    json_write(replacement,{'run_id':'next-fixture-run'})
+    json_write(pointer,{'run_id':'next-fixture-run','artifacts':{'provenance':{
+        'path':'second/provenance.json','sha256':digest(replacement)}}})
+    for kind in ('substrate_trajectories','kinase_substrate_bundles','temporal_evidence_links'):
+        stale=client.post('/orders/1/substrate-signal/'+kind,json={
+            'expected_run_id':first['run_id'],'expected_catalog_id':first['catalog_id']})
+        assert stale.status_code==409 and stale.json()['detail']=='published_run_changed'
+    pointer.write_bytes(original)
     source=root/'signal_flow/kinase_substrate_bundles.csv'
     source.write_text(source.read_text()+'\n')
     assert client.post(path,json={}).status_code==409

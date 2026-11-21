@@ -26,7 +26,8 @@ const fixture = async (name, axis) => JSON.parse(await fs.readFile(path.join(fix
 await page.route("**/api/orders/**", async route => {
   const url = new URL(route.request().url());
   assert.equal(route.request().method(), "GET", "Scatter must never enqueue work");
-  if (url.pathname.includes("/files/")) {
+  if (url.pathname.endsWith("/vector-scatter-source")) {
+    assert.equal(url.searchParams.get("sha256"), (await fixture("small","adjusted")).source.sha256);
     return route.fulfill({ body: await fs.readFile(path.join(fixtureDir, "small", "ptm_vector_data_normalized_phospho.tsv")),
       contentType: "text/tab-separated-values", headers: { "Content-Disposition": "attachment; filename=original.tsv" } });
   }

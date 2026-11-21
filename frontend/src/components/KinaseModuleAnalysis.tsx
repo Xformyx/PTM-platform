@@ -817,7 +817,7 @@ export default function KinaseModuleAnalysis({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Tab navigation */}
-        <div className="flex gap-1 border-b pb-2">
+        <div className="flex flex-wrap gap-1 border-b pb-2">
           <Button
             variant={activeTab === "cowave" ? "default" : "ghost"}
             size="sm"
@@ -904,7 +904,7 @@ export default function KinaseModuleAnalysis({
           >
             <Target className="h-3 w-3 mr-1" /> IP Overlay
           </Button>
-          <div className="ml-auto">
+          <div className="max-w-full sm:ml-auto">
             {temporalArtifactReady && (
               <span className="mr-2 inline-flex items-center rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
                 Temporal phosphorylation–protein artifact ready
@@ -913,7 +913,7 @@ export default function KinaseModuleAnalysis({
             <Button
               variant="outline"
               size="sm"
-              className="text-xs h-7 border-amber-400 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+              className="text-xs min-h-7 h-auto max-w-full whitespace-normal flex-wrap border-amber-400 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
               disabled={globalKinaseLoading}
               onClick={() => runGlobalKinaseModules(false)}
             >
@@ -1018,8 +1018,8 @@ export default function KinaseModuleAnalysis({
                   className="rounded-lg border bg-card p-3 space-y-2"
                 >
                   {/* Module header */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => toggleModuleExpand(moduleKey)}
                         className="flex items-center gap-1 text-sm font-medium hover:text-primary"
@@ -1106,7 +1106,7 @@ export default function KinaseModuleAnalysis({
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {onSelectPtms && (() => {
                         const modKeys = mod.ptms.map((p) => featureKey(p));
                         const isActive = highlightedPtmKeys && highlightedPtmKeys.size > 0 &&

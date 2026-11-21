@@ -3,9 +3,9 @@ import {api} from '../lib/api';
 import {type QuantAxis} from '../lib/quantitation';
 import {featureColor,LatestRequest,representationValue,sharedViewRequest} from '../lib/vectorView';
 
-type Manifest={measurement_revision:string;identified_features:number;source_rows:number;conditions:string[];condition_grid?:Array<{condition:string;time_minutes:number|null}>};
+type Manifest={measurement_revision:string;identified_features:number;source_rows:number;conditions:string[];condition_grid?:Array<{condition:string;time_minutes:number|null;curve_scope?:string}>};
 /** Exact paginated curves over an all-feature distribution. A page is not an analysis subset. */
-export function FullTrajectoryBrowser({orderId,axis}:{orderId:number;axis:QuantAxis}) {
+export function FullTrajectoryBrowser({orderId,axis,revision}:{orderId:number;axis:QuantAxis;revision?:string}) {
  const [manifest,setManifest]=useState<Manifest|null>(null),[distribution,setDistribution]=useState<any>(null);
  const [page,setPage]=useState<{feature_ids:string[];next_cursor:string|null}|null>(null),[rows,setRows]=useState<any[]>([]);
  const [after,setAfter]=useState(''),[search,setSearch]=useState(''),[error,setError]=useState('');
@@ -22,23 +22,31 @@ export function FullTrajectoryBrowser({orderId,axis}:{orderId:number;axis:QuantA
  },[manifest]);
  const inspect=async(id:string)=>{const token=detailRequests.current.begin();try{const packet=await api.post<any>(`/orders/${orderId}/vector-view/annotations`,{measurement_revision:manifest?.measurement_revision,options:{axis:axis==='relative'?'adjusted':axis,search:id,limit:1}});if(detailRequests.current.current(token))setDetail(packet);}catch(e){if(detailRequests.current.current(token))setDetail({error:String(e)});}};
  useEffect(()=>{setDetail(null);detailRequests.current.invalidate();return()=>detailRequests.current.invalidate();},[orderId,axis,manifest?.measurement_revision]);
- useEffect(()=>{setAfter('');setPinned([]);setManifest(null);setRows([]);setPage(null);},[orderId,axis]);
+ useEffect(()=>{setAfter('');setPinned([]);setChecked({});setManifest(null);setRows([]);setPage(null);},[orderId]);
  useEffect(()=>{const token=latest.current.begin();setError('');
   const call=(operation:string,options={},revision?:string)=>sharedViewRequest(JSON.stringify([orderId,operation,options,revision]),()=>api.post<any>(`/orders/${orderId}/vector-view/${operation}`,{measurement_revision:revision,options}));
-  (async()=>{const m=manifest??await call('manifest');const [d,p]=await Promise.all([call('distribution',{axis:axis==='relative'?'adjusted':axis},m.measurement_revision),call('features',{axis:axis==='relative'?'adjusted':axis,after,search,limit:100},m.measurement_revision)]);
-   const ids=[...new Set([...pinned,...p.feature_ids])];const r=await call('trajectories',{feature_ids:ids},m.measurement_revision);
+  (async()=>{const m=manifest??await call('manifest',{},revision);const [d,p]=await Promise.all([call('distribution',{axis:axis==='relative'?'adjusted':axis},m.measurement_revision),call('features',{axis:axis==='relative'?'adjusted':axis,after,search,limit:100},m.measurement_revision)]);
+   const ids=[...new Set([...pinned,...p.feature_ids])],r=[];
+   for(let i=0;i<ids.length;i+=1000)r.push(...await call('trajectories',{feature_ids:ids.slice(i,i+1000)},m.measurement_revision));
    if(!latest.current.current(token))return;setManifest(m);setDistribution(d);setPage(p);setRows(r);setChecked(previous=>({...Object.fromEntries(ids.map(id=>[id,true])),...previous}));
   })().catch(e=>{if(latest.current.current(token))setError(String(e.message||e));});
   return ()=>latest.current.invalidate();
- },[orderId,axis,after,search,pinned]);
+ },[orderId,axis,after,search,pinned,revision]);
  useEffect(()=>{const ctx=distributionCanvas.current?.getContext('2d');if(!ctx||!manifest||!distribution)return;ctx.clearRect(0,0,760,200);
   const max=distribution.bins.reduce((m:number,b:any)=>Math.max(m,b.count),1),w=760/Math.max(1,manifest.conditions.length);
   for(const b of distribution.bins){const x=manifest.conditions.indexOf(b.condition)*w,y=200-(b.bin+1)*200/distribution.resolution;
    ctx.fillStyle=`rgba(37,99,235,${0.15+0.85*Math.log1p(b.count)/Math.log1p(max)})`;ctx.fillRect(x,y,w,200/distribution.resolution+0.2);}
  },[manifest,distribution]);
- useEffect(()=>{const ctx=canvas.current?.getContext('2d');if(!ctx||!manifest||!distribution?.bounds)return;ctx.clearRect(0,0,760,320);
-  const [low,high]=distribution.bounds;for(const [id,values]of numericIndex){if(!checked[id])continue;ctx.strokeStyle=ctx.fillStyle=featureColor(id);ctx.beginPath();let previous=false;
-   manifest.conditions.forEach((condition,j)=>{const v=values.get(condition);if(v===undefined||positions[j]===null){previous=false;return;}const x=12+736*positions[j]!,y=308-(v-low)*296/Math.max(high-low,1e-9);if(previous)ctx.lineTo(x,y);else ctx.moveTo(x,y);previous=true;});ctx.stroke();
+ useEffect(()=>{const ctx=canvas.current?.getContext('2d');if(!ctx)return;ctx.clearRect(0,0,760,320);if(!manifest||!distribution?.bounds)return;
+  const [low,high]=distribution.bounds;for(const [id,values]of numericIndex){if(!checked[id])continue;ctx.strokeStyle=ctx.fillStyle=featureColor(id);ctx.beginPath();
+   const previous=new Map<string,[number,number]>();
+   manifest.conditions.forEach((condition,j)=>{
+     const scope=manifest.condition_grid?.[j]?.curve_scope||"",v=values.get(condition);
+     if(v===undefined||positions[j]===null){previous.delete(scope);return;}
+     const x=12+736*positions[j]!,y=308-(v-low)*296/Math.max(high-low,1e-9),start=previous.get(scope);
+     if(start){ctx.moveTo(...start);ctx.lineTo(x,y);}
+     previous.set(scope,[x,y]);
+   });ctx.stroke();
    manifest.conditions.forEach((condition,j)=>{const v=values.get(condition);if(v===undefined||positions[j]===null)return;const x=12+736*positions[j]!,y=308-(v-low)*296/Math.max(high-low,1e-9);ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();});}
  },[numericIndex,manifest,distribution,checked]);
  if(error)return <p role="alert">전체 trajectory 인덱스를 조회할 수 없습니다. 기존 TSV 관측은 Signaling Explorer의 구버전 관측 보기와 Scatter에서 확인할 수 있습니다.</p>;

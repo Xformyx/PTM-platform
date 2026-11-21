@@ -7,6 +7,15 @@ import hashlib
 from .feature_identity import FEATURE_IDENTITY_VERSION
 
 
+DISPLAY_SCOPE_FIELDS = ("condition_id", "arm_id", "contrast_id", "reference_condition_id", "effect_series_id")
+
+
+def scoped_condition(label, raw, fields=DISPLAY_SCOPE_FIELDS):
+    """Keep equal display labels distinct when the saved TSV declares comparison IDs."""
+    keys = {key.lower(): value for key, value in raw.items()}
+    return label + "".join(f" · {field}={keys[field]}" for field in fields if keys.get(field))
+
+
 def quantitative_cache_key(rows):
     """Cache only identical measured inputs, independent of TSV row ordering."""
     records = sorted(json.dumps(row, sort_keys=True, allow_nan=False) for row in rows)

@@ -1902,6 +1902,8 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   type TopNPtmMeta = {
     feature_id?: string;
+    accession?: string;
+    precursor_id?: string;
     gene: string;
     position: string;
     label: string;
@@ -1917,8 +1919,12 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
     conventional_log2fc_na?: boolean;
     shared_peptide?: boolean;
   };
-  const [data, setData] = useState<{ condition_grid?: Array<{condition:string; time_minutes:number|null; source:string; label_conflict?:boolean}>; conditions?:string[]; measurement_revision?:string; vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; error?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
+  const [data, setData] = useState<{ condition_grid?: Array<{condition:string; time_minutes:number|null; source:string; curve_scope?:string; label_conflict?:boolean}>; conditions?:string[]; measurement_revision?:string; coverage?:{identified_features:number;source_rows:number}; vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; error?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
   const [retry, setRetry] = useState(0);
+  const [searchTerm,setSearchTerm]=useState("");
+  const [requestedScope,setRequestedScope]=useState("");
+  const [featurePage,setFeaturePage]=useState(0);
+  const lastMeasurement=useRef<string>();
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<QuantAxis>("relative");
@@ -1944,8 +1950,17 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
       .catch(() => setIpOverlayData(null));
   }, [orderId]);
 
-  const fetchVectorPlotData = () => {
-    return api.get<{ condition_grid?: Array<{condition:string; time_minutes:number|null; source:string; label_conflict?:boolean}>; conditions?:string[]; measurement_revision?:string; vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: any[] }>(`/orders/${orderId}/vector-plot-data?classic=true&representation=${displayRepresentation}&axis=${metric==="relative"?"adjusted":metric}&mode=${displayMode}${displayMode==="all_observed"?"":`&n=${displayN}`}`);
+  const fetchVectorPlotData = async () => {
+    if(displayMode==="all_observed" && displayRepresentation==="conventional_log2_contrast") {
+      try {
+        const manifest=await api.post<{measurement_revision:string}>(`/orders/${orderId}/vector-view/manifest`,{});
+        return {source:"columnar_pages",measurement_revision:manifest.measurement_revision,
+          vector_data:[],top_n_ptms:[],inferred_receptors:[],suggested_n:null,top_n_setting:undefined};
+      } catch(error) {
+        if(!String(error).includes("columnar_snapshot_unavailable")) throw error;
+      }
+    }
+    return api.get<{ condition_grid?: Array<{condition:string; time_minutes:number|null; source:string; curve_scope?:string; label_conflict?:boolean}>; conditions?:string[]; measurement_revision?:string; coverage?:{identified_features:number;source_rows:number}; vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: any[] }>(`/orders/${orderId}/vector-plot-data?classic=true&representation=${displayRepresentation}&axis=${metric==="relative"?"adjusted":metric}&mode=${displayMode}${displayMode==="all_observed"?"":`&n=${displayN}`}`);
   };
 
   const refreshReceptorInference = async () => {
@@ -1979,7 +1994,10 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
             init[key] = true;
           }
         });
-        setChecked(previous=>({...init,...previous}));
+        const sameRevision=Boolean(d.measurement_revision && d.measurement_revision===lastMeasurement.current);
+        lastMeasurement.current=d.measurement_revision;
+        setChecked(previous=>sameRevision?{...init,...previous}:init);
+        setFeaturePage(0);
       })
       .catch((error) => active && setData({ vector_data: [], top_n_ptms: [], source: "error", error: String(error?.message || error) }))
       .finally(() => {if(active)setLoading(false);});
@@ -1995,20 +2013,20 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
     );
   }
 
-  if (!data || data.top_n_ptms.length === 0) {
-    const failed = data && "error" in data && data.error;
+  if (data?.source==="columnar_pages" || !data || data.top_n_ptms.length === 0) {
+    const failed = data?.error;
     return (
-      <div className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
+      <div className="space-y-3 rounded-lg border p-3">
         <div className="flex flex-wrap gap-2">{(Object.keys(axisLabel) as QuantAxis[]).map(axis=><Button key={axis} aria-pressed={axis===metric} onClick={()=>setMetric(axis)}>{axisLabel[axis]}</Button>)}<Button onClick={()=>setRetry(v=>v+1)}>다시 조회</Button></div>
+        <label>선정 방식 <select value={displayMode} onChange={e=>setDisplayMode(e.target.value)}><option value="per_condition_top_n">조건별 Top-N 합집합</option><option value="global_top_n">전체 Top-N</option><option value="all_observed">전체 관측</option></select></label>
         <label>값 표현 <select value={displayRepresentation} onChange={e=>setDisplayRepresentation(e.target.value)}><option value="conventional_log2_contrast">Conventional log2 contrast</option><option value="lod_relative_log2">LOD-relative log2</option><option value="normalized_log2_intensity">Normalized log2 intensity</option></select></label>
+        {data?.source==="columnar_pages"?<FullTrajectoryBrowser key={orderId+String(data.measurement_revision)} orderId={orderId} axis={metric} revision={data.measurement_revision}/>:<>
         <TrendingUp className="h-12 w-12 text-muted-foreground/40 mb-3" />
         <p className="text-sm text-muted-foreground text-center">
           {failed
             ? `Time-series 조회 실패: ${String((data as { error?: string }).error)}`
-            : isUbi
-            ? "현재 표현에 적격한 관측이 없습니다."
             : "현재 표현에 적격한 관측이 없습니다."}
-        </p>
+        </p></>}
       </div>
     );
   }
@@ -2017,13 +2035,17 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
 
   // Deduplicate top_n_ptms by canonical feature identity
   const seenKeys = new Set<string>();
-  const uniquePtms = data.top_n_ptms.filter((p) => {
+  const selectedPtms = data.top_n_ptms.filter((p) => {
     const key = featureKey(p);
     if (seenKeys.has(key)) return false;
     seenKeys.add(key);
     return true;
   });
 
+  const term=searchTerm.trim().toLowerCase();
+  const matchingPtms=term?selectedPtms.filter(p=>[p.feature_id,p.gene,p.position,p.label,p.accession,p.precursor_id].some(value=>value?.toLowerCase().includes(term))):selectedPtms;
+  const pageSize=100;
+  const uniquePtms=matchingPtms.slice(featurePage*pageSize,(featurePage+1)*pageSize);
   const topNSet = new Set(uniquePtms.map((p) => featureKey(p)));
   const vectorByPtm = new Map<string, Array<{
     condition: string;
@@ -2063,7 +2085,10 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
 
   });
 
-  const grid = data.condition_grid ?? (data.conditions ?? [...new Set(data.vector_data.map(r=>r.condition))]).map(condition=>({condition,time_minutes:null,source:"unresolved",label_conflict:false}));
+  const fullGrid = data.condition_grid ?? (data.conditions ?? [...new Set(data.vector_data.map(r=>r.condition))]).map(condition=>({condition,time_minutes:null,source:"unresolved",curve_scope:"",label_conflict:false}));
+  const scopes=[...new Set(fullGrid.map(p=>p.curve_scope||""))];
+  const scope=scopes.includes(requestedScope)?requestedScope:scopes[0];
+  const grid=fullGrid.filter(p=>(p.curve_scope||"")===scope);
   const conditions = grid.map(point=>point.condition);
   const timed = grid.some(point=>point.time_minutes !== null);
   // Build P1 pattern lookup from top_n_ptms (p1_pattern field, when server provides it)
@@ -2211,15 +2236,20 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className={`px-2 py-0.5 rounded-full font-medium ${data.source === "enriched" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+        <span className="px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">
           전처리 TSV · 선택 축 적격성 적용 후 Top-N
         </span>
+        <label>{scopes.length>1&&<>비교 범위 <select value={scope} onChange={e=>setRequestedScope(e.target.value)}>{scopes.map(s=><option key={s} value={s}>{s||"범위 미기록"}</option>)}</select></>}</label>
         <span data-testid="top-n-setting" className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
           <label>선정 방식 <select value={displayMode} onChange={e=>setDisplayMode(e.target.value)}><option value="per_condition_top_n">조건별 Top-N 합집합</option><option value="global_top_n">전체 Top-N</option><option value="all_observed">전체 관측</option></select></label> {displayMode!=="all_observed"&&<label>N <input type="number" min={1} value={displayN} onChange={e=>setDisplayN(Math.max(1,Number(e.target.value)||1))}/></label>} · {data.top_n_setting??"All"} <label>값 표현 <select value={displayRepresentation} onChange={e=>setDisplayRepresentation(e.target.value)}><option value="conventional_log2_contrast">Conventional log2 contrast</option><option value="lod_relative_log2">LOD-relative log2 (별도 축)</option><option value="normalized_log2_intensity">Normalized log2 intensity (별도 축)</option></select></label>
         </span>
         <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
-          {isUbi ? "Unique Sites" : "Unique PTMs"}: {uniquePtms.length}
+          {isUbi ? "Unique Sites" : "Unique PTMs"}: {selectedPtms.length}
         </span>
+        <label>선정 기질 검색 <input type="search" value={searchTerm} onChange={e=>{setSearchTerm(e.target.value);setFeaturePage(0);}} placeholder="gene / site / accession / precursor"/></label>
+        {data.coverage&&<p>원본 {data.coverage.source_rows}행 · 전체 precursor {data.coverage.identified_features}개 · 현재 검색 {matchingPtms.length}개</p>}
+        <details className="min-w-0 break-all"><summary>측정 revision · 시간 출처</summary>{data.measurement_revision??"미기록"}{grid.map(p=><p key={p.condition}>{p.condition} · {p.time_minutes??"미기록"} min · {p.source}{p.label_conflict?" · 표시명과 기록 시간 불일치":""}</p>)}</details>
+        {matchingPtms.length>pageSize&&<nav aria-label="선정 기질 페이지"><Button disabled={featurePage===0} onClick={()=>setFeaturePage(p=>p-1)}>이전</Button> {featurePage+1}/{Math.ceil(matchingPtms.length/pageSize)} · 현재 {uniquePtms.length}개 <Button disabled={(featurePage+1)*pageSize>=matchingPtms.length} onClick={()=>setFeaturePage(p=>p+1)}>다음</Button></nav>}
         {data.suggested_n != null && (
           <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">
             Suggested N: {data.suggested_n} (|Log2FC| &gt; mean+2σ)
@@ -2229,7 +2259,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
 
       {/* Metric toggle + Trend filter */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant={metric === "relative" ? "default" : "outline"}
             size="sm"
@@ -2334,7 +2364,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
         </div>
       </div>
 
-      <div className={`grid gap-4 ${sidebarOpen ? "lg:grid-cols-[1fr_240px]" : ""}`}>
+      <div className={`grid gap-4 ${sidebarOpen ? "lg:grid-cols-[minmax(0,1fr)_240px]" : ""}`}>
         {/* Chart area — taller Y axis with zoom controls */}
         <div className="rounded-lg border bg-background p-4 relative" style={{ minHeight: `${chartHeight + 40}px` }}>
           {/* Y-axis zoom controls + manual min/max */}
@@ -2905,7 +2935,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
         />
       )}
 
-      <QuantitationEvidenceTable rows={data.vector_data.filter(row => checked[featureKey(row)])} />
+      <QuantitationEvidenceTable rows={data.vector_data.filter(row => topNSet.has(featureKey(row)) && checked[featureKey(row)])} />
 
       {/* ── Kinase / E3 Ligase Module Analysis Panel ── */}
       {conditions.length >= 3 && (
@@ -2950,7 +2980,13 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
 }
 
 export function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", orderStatus, initialN }: { orderId: number; singleTimePoint?: boolean; ptmType?: string; orderStatus?: string; initialN?: unknown }) {
+  const [fullOpen,setFullOpen]=useState(false);
   const [tab,setTab]=useState("scatter"),[selected,setSelected]=useState<PrecursorSelection|null>(null);
+  const [visited,setVisited]=useState<string[]>(["scatter"]);
+  function openTab(next:string) {
+    setVisited(current=>current.includes(next)?current:[...current,next]);
+    setTab(next);
+  }
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2979,7 +3015,7 @@ export function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphoryla
 
   return (
     <div className="space-y-6">
-      <Tabs value={tab} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={openTab}>
         <TabsList className="grid h-auto w-full max-w-2xl grid-cols-1 sm:grid-cols-3">
           <TabsTrigger value="scatter" className="gap-2">
             <ChartScatter className="h-3.5 w-3.5" /> 전체 반응 분포
@@ -2996,7 +3032,7 @@ export function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphoryla
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="scatter" className="mt-4">
+        {visited.includes("scatter")&&<TabsContent forceMount value="scatter" className="mt-4 data-[state=inactive]:hidden">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -3007,7 +3043,7 @@ export function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphoryla
               </p>
             </CardHeader>
             <CardContent>
-              <VectorScatterPlots orderId={orderId} onSelect={p=>{setSelected(p);setTab("timeseries")}}/>
+              <VectorScatterPlots orderId={orderId} onSelect={p=>{setSelected(p);openTab("timeseries")}}/>
               {files.length > 0 && (
                 <div className="mt-6 pt-4 border-t">
                   <p className="text-xs text-muted-foreground mb-2">Download static report (PNG)</p>
@@ -3026,9 +3062,9 @@ export function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphoryla
               )}
             </CardContent>
           </Card>
-        </TabsContent>
+        </TabsContent>}
 
-        <TabsContent value="timeseries" className="mt-4">
+        {visited.includes("timeseries")&&<TabsContent forceMount value="timeseries" className="mt-4 data-[state=inactive]:hidden">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -3041,15 +3077,15 @@ export function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphoryla
               </p>
             </CardHeader>
             <CardContent>
-              {selected&&<SelectedPrecursor key={selected.revision+selected.feature_id} orderId={orderId} selection={selected} onEvidence={()=>setTab("explorer")}/>}
+              {selected&&<SelectedPrecursor key={selected.revision+selected.feature_id} orderId={orderId} selection={selected} onEvidence={()=>openTab("explorer")}/>}
               <SubstrateSignalFlow orderId={orderId}/>
               <TopNTimeSeriesPlot key={orderId} orderId={orderId} ptmType={ptmType} initialN={initialN}/>
-              <details><summary>전체 Legacy precursor 궤적 (별도 identity)</summary><FullTrajectoryBrowser orderId={orderId} axis="relative"/></details>
+              <details onToggle={e=>setFullOpen(e.currentTarget.open)}><summary>전체 Legacy precursor 궤적 (별도 identity)</summary>{fullOpen&&<FullTrajectoryBrowser key={orderId} orderId={orderId} axis="relative"/>}</details>
             </CardContent>
           </Card>
-        </TabsContent>
+        </TabsContent>}
 
-        <TabsContent value="explorer" className="mt-4">
+        {visited.includes("explorer")&&<TabsContent forceMount value="explorer" className="mt-4 data-[state=inactive]:hidden">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -3063,7 +3099,7 @@ export function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphoryla
               <SignalingEvidenceExplorer selection={selected} key={orderId} orderId={orderId} initialN={initialN} />
             </CardContent>
           </Card>
-        </TabsContent>
+        </TabsContent>}
       </Tabs>
     </div>
   );

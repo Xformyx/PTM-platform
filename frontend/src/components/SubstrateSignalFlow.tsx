@@ -52,9 +52,11 @@ function FormDetail({orderId,row}:{orderId:number;row:Row}) {
   const candidates=usePage(orderId,'kinase_substrate_bundles',{form_id:row.form_id,effect_series_id:row.effect_series_id},cursor);
   const tracks=(detail.page?.items||[]).filter(r=>['U_joint','P_joint','A'].includes(r.track));
   const base:Row[]=parse(row.points_json);
+  const feature=parse(row.feature_json,null);
   const points=base.filter(p=>p.time_min!==null).map(p=>({...p,...Object.fromEntries(tracks.map(t=>[t.track,parse(t.points_json).find((q:Row)=>q.contrast_id===p.contrast_id)?.value??null]))}));
   return <section className="border rounded p-3 space-y-3" aria-label="Form 시간 반응 상세">
     <h4 className="font-semibold">{row.form_id} · U_joint / P_joint / A</h4>
+    <p>{feature ? `저장 패턴 ${row.pattern??'미기록'} · 반응 시작 구간 ${feature.onset_lower_min??'미기록'}–${feature.onset_upper_min??'미기록'}분 · 관측 최대 ${feature.observed_peak_time_min??'미기록'}분 · 회복 구간 ${feature.recovery_lower_min??'미기록'}–${feature.recovery_upper_min??'미기록'}분` : `시간 특징 · ${row.feature_status??'미기록'}`}</p>
     <p>기록된 실제 시간(분), log2 contrast. 결측·제외점은 연결하지 않습니다. 절대 occupancy나 kinase 농도가 아닙니다.</p>
     <ResponsiveContainer width="100%" height={280}><LineChart data={points}><CartesianGrid strokeDasharray="3 3"/><XAxis type="number" dataKey="time_min" domain={['dataMin','dataMax']} label={{value:'분',position:'insideBottomRight'}}/><YAxis/><Tooltip/><Legend/>{['U_joint','P_joint','A'].map((t,i)=><Line key={t} name={t} dataKey={t} stroke={['#2563eb','#a16207','#be123c'][i]} connectNulls={false} isAnimationActive={false}/>)}</LineChart></ResponsiveContainer>
     <table className="text-xs w-full"><thead><tr><th>시간</th><th>실제 Control</th><th>Control 시간</th><th>A / 상태</th></tr></thead><tbody>{base.map(p=><tr key={p.contrast_id}><td>{p.time_min??'미기록'}</td><td>{p.reference_condition_id}</td><td>{p.reference_time_min??'미기록'}</td><td>{p.value??'NA'} · {p.status}</td></tr>)}</tbody></table>

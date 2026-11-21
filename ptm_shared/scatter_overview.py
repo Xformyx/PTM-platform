@@ -19,6 +19,7 @@ from .de_novo_representation import CONTROL_LABELS, is_de_novo_representation, s
 from .feature_identity import canonical_feature_identity, feature_key
 from .quantitative_fields import axis_number
 from .tabular_import import validate_tabular_header
+from .vector_plot import scoped_condition
 
 CONTRACT_VERSION = "source_vector_scatter.v1"
 POINT_LIMIT = 2000
@@ -85,9 +86,7 @@ def _coordinate(row, axis):
     legacy_control = condition.lower() in CONTROL_LABELS or re.match(r"^control(?:\b|_)", condition, re.I)
     if role in {"control","reference"} or (not role and legacy_control):
         return condition, None, "control_reference_row"
-    scope = [(key, _text(row, key, key.title())) for key in
-             ("condition_id", "arm_id", "contrast_id", "reference_condition_id", "effect_series_id")]
-    condition += "".join(f" · {key}={value}" for key, value in scope if value)
+    condition = scoped_condition(condition, row)
     x = axis_number(row, "protein")
     if x is None:
         return condition, None, "protein_axis_unavailable"
