@@ -5096,6 +5096,7 @@ export default function OrderDetail() {
 
         <TabsContent value="primary-a" className="mt-4">
           <PrimaryAEvidence orderId={order.id} status={order.status} />
+          <SubstrateSignalFlow orderId={order.id}/>
         </TabsContent>
         <TabsContent value="analysis-statistics" className="mt-4">
           <AnalysisStatisticsTab orderId={order.id} />

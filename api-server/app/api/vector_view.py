@@ -29,10 +29,16 @@ async def substrate_signal(order_id:int, kind:str, body:dict, db=Depends(get_db)
         root=published_root(Path(get_settings().OUTPUT_DIR)/order.order_code)
         catalog,lock=_signal_session(str(root))
         with lock:
+            catalog._require()
+            expected = body.get("expected_catalog_id")
+            if expected is not None and expected != catalog.catalog["catalog_id"]:
+                raise ValueError("published_catalog_changed; reopen the signal view")
             return signal_page(catalog,kind,body.get('filters'),body.get('cursor'),body.get('limit',25))
     try:
         return await asyncio.to_thread(read)
     except FileNotFoundError:
+        if body.get("expected_catalog_id"):
+            raise HTTPException(409, "expected_published_catalog_unavailable")
         return {'status':'unavailable','reason':'published_astra_snapshot_unavailable','items':[],'total_count':0,'next_cursor':None}
     except (ValueError,KeyError) as exc:
         raise HTTPException(409,str(exc)) from exc
@@ -53,6 +59,23 @@ async def vector_scatter_data(order_id: int, axis: Literal["adjusted", "unadjust
         raise HTTPException(409, detail={"reason": "source_vector_changed_during_read", "action": "retry"}) from exc
     except (csv.Error, UnicodeError, ValueError) as exc:
         raise HTTPException(422, detail={"reason": "source_vector_parse_failed"}) from exc
+
+
+@router.get("/{order_id}/vector-scatter-source")
+async def scatter_source(order_id: int, sha256: str = Query(pattern=r"^[a-f0-9]{64}$"),
+                         db=Depends(get_db), user=Depends(get_current_user)):
+    from ptm_shared.scatter_overview import verified_source_stream, ScatterSourceChanged
+
+    order = await access(db, user, order_id)
+    suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+    try:
+        stream, chunks, size, name = await asyncio.to_thread(
+            verified_source_stream, Path(get_settings().OUTPUT_DIR)/order.order_code, suffix, sha256)
+    except (FileNotFoundError, ScatterSourceChanged) as exc:
+        raise HTTPException(409, "measurement_revision_changed") from exc
+    return StreamingResponse(chunks, media_type="text/tab-separated-values",
+                             headers={"Content-Length":str(size), "Content-Disposition":f'attachment; filename="{name}"'},
+                             background=BackgroundTask(stream.close))
 
 
 def query(directory, suffix, operation, revision, options):

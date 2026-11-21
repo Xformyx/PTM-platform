@@ -8,12 +8,14 @@ from __future__ import annotations
 import csv
 import hashlib
 import math
+import os
+import re
 from collections import Counter, OrderedDict
 from copy import deepcopy
 from pathlib import Path
 from threading import Lock
 
-from .de_novo_representation import is_control_condition, is_de_novo_representation, sort_conditions
+from .de_novo_representation import CONTROL_LABELS, is_de_novo_representation, sort_conditions
 from .feature_identity import canonical_feature_identity, feature_key
 from .quantitative_fields import axis_number
 from .tabular_import import validate_tabular_header
@@ -79,7 +81,9 @@ def _coordinate(row, axis):
     condition = _text(row, "Condition", "condition", "Comparison").strip()
     if condition.lower() in {"", "na", "n/a", "nan", "none", "null"}:
         return "", None, "condition_missing"
-    if is_control_condition(condition):
+    role = _text(row, "role", "Role", "Condition_Role", "Group").strip().lower()
+    legacy_control = condition.lower() in CONTROL_LABELS or re.match(r"^control(?:\b|_)", condition, re.I)
+    if role in {"control","reference"} or (not role and legacy_control):
         return condition, None, "control_reference_row"
     x = axis_number(row, "protein")
     if x is None:
@@ -193,3 +197,34 @@ def read_scatter_overview(directory, suffix, axis="adjusted"):
         while len(_CACHE) > 6:
             _CACHE.popitem(last=False)
     return result
+
+def verified_source_stream(directory, suffix, expected):
+    """Validate once, then deliver the verified chunks from the same descriptor."""
+    path = source_path(directory, suffix)
+    with_dir = Path(directory).resolve()
+    if path.resolve().parent != with_dir:
+        raise ScatterSourceChanged("unavailable_source")
+    stream = os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb")
+    chunk_size = 1024 * 1024
+    digest, hashes, size = hashlib.sha256(), [], 0
+    try:
+        while chunk := stream.read(chunk_size):
+            size += len(chunk)
+            digest.update(chunk)
+            hashes.append(hashlib.sha256(chunk).digest())
+        if digest.hexdigest() != expected:
+            raise ScatterSourceChanged("measurement_revision_changed")
+        stream.seek(0)
+    except BaseException:
+        stream.close()
+        raise
+
+    def chunks():
+        with stream:
+            for checksum in hashes:
+                data = stream.read(chunk_size)
+                if hashlib.sha256(data).digest() != checksum:
+                    raise ScatterSourceChanged("source_changed_during_transfer")
+                yield data
+
+    return stream, chunks(), size, path.name

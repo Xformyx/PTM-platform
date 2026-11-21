@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {createContext, useContext, useEffect, useState} from 'react';
 import {CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import {api} from '../lib/api';
 
@@ -6,11 +6,13 @@ type Row=Record<string,any>;
 type Page={status:string;reason?:string;items:Row[];total_count:number;next_cursor:string|null;catalog_id?:string};
 const parse=(value:string|null|undefined,fallback:any=[])=>value?JSON.parse(value):fallback;
 const relationLabels:Record<string,string>={bundle_member:'형태 묶음의 구성원',candidate_association:'후보–기질 연관',method_contribution:'방법 결과의 계산 기여',method_input_excluded:'방법 입력에서 제외',same_parent_mathematical_dependence:'같은 부모단백질의 수학적 의존성',observed_before:'관측 구간의 선후',curated_enzyme_substrate_prior:'기록된 효소–기질 방향 관계 (prior)'};
+const ExpectedCatalog=createContext<string|undefined>(undefined);
 function usePage(orderId:number,kind:string,filters:Row,cursor:string|null=null,limit=25) {
-  const key=JSON.stringify([orderId,kind,filters,cursor,limit]);
+  const expected_catalog_id=useContext(ExpectedCatalog);
+  const key=JSON.stringify([orderId,kind,filters,cursor,limit,expected_catalog_id]);
   const [state,setState]=useState<{key:string;page?:Page;error?:string}>({key:''});
   useEffect(()=>{let active=true;setState({key});
-    api.post<Page>(`/orders/${orderId}/substrate-signal/${kind}`,{filters,cursor,limit})
+    api.post<Page>(`/orders/${orderId}/substrate-signal/${kind}`,{filters,cursor,limit,expected_catalog_id})
       .then(page=>{if(active)setState({key,page});}).catch(e=>{if(active)setState({key,error:String(e.message||e)});});
     return()=>{active=false;};
   },[key]);
@@ -63,11 +65,21 @@ function FormDetail({orderId,row}:{orderId:number;row:Row}) {
   </section>;
 }
 export function SubstrateSignalFlow({orderId}:{orderId:number}) {
+  const [epoch,setEpoch]=useState(0);
+  return <SignalSession key={orderId+":"+epoch} orderId={orderId} reopen={()=>setEpoch(n=>n+1)}/>;
+}
+function SignalSession({orderId,reopen}:{orderId:number;reopen:()=>void}) {
+  const [catalog,setCatalog]=useState<string>();
+  return <ExpectedCatalog.Provider value={catalog}><SignalList orderId={orderId} bind={setCatalog} reopen={reopen}/></ExpectedCatalog.Provider>;
+}
+function SignalList({orderId,bind,reopen}:{orderId:number;bind:(id:string)=>void;reopen:()=>void}) {
   const [cursor,setCursor]=useState<string|null>(null),[limit,setLimit]=useState(15),[selected,setSelected]=useState<Row|null>(null),[pins,setPins]=useState<string[]>([]);
   const {page,error}=usePage(orderId,'substrate_trajectories',{track:'A'},cursor,limit);
+  useEffect(()=>{if(page?.catalog_id)bind(page.catalog_id);},[page?.catalog_id,bind]);
   return <section className="space-y-3 mb-6" aria-label="전체 기질 기반 신호 흐름">
     <h3 className="font-semibold">전체 기질 시간 반응 → kinase 근거 → 관계·가설</h3>
     <p>발행 snapshot의 전체 적격 관측과 계산 추적. 페이지와 pin은 분석 모집단·활성 판정을 바꾸지 않습니다.</p>
+    <button onClick={reopen}>최신 발행본 열기</button>
     {error&&<p role="alert">{error}</p>}
     {page?.status==='unavailable'?<p>{page.reason} — 저장 projection이 포함된 reader revision에서 제공됩니다.</p>:<>
       <label>페이지 크기 <select value={limit} onChange={e=>{setLimit(Number(e.target.value));setCursor(null);}}>{[5,15,50].map(n=><option key={n}>{n}</option>)}</select></label>

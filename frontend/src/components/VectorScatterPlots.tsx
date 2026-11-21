@@ -132,7 +132,7 @@ export function VectorScatterPlots({ orderId }: { orderId: number }) {
       <span className="text-xs text-muted-foreground">{zoom.toFixed(2)}×</span>
       {data && <Button size="sm" variant="outline" onClick={() => {
         setDownloadError("");
-        api.downloadFile(`/orders/${orderId}/files/${encodeURIComponent(data.source.filename)}`, data.source.filename)
+        api.downloadFile(`/orders/${orderId}/vector-scatter-source?sha256=${data.source.sha256}`, data.source.filename)
           .catch(error => setDownloadError(String(error.message || error)));
       }}><Download className="mr-1 h-4 w-4" />원본 TSV</Button>}
     </div>

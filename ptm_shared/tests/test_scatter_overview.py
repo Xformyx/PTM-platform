@@ -136,3 +136,20 @@ def test_constant_zero_density_preserves_every_row(tmp_path):
     data = scatter.read_scatter_overview(tmp_path, "_phospho")
     assert data["bounds"] == [0, 0, 0, 0]
     assert data["conditions"][0]["bins"] == [{"ix": 32, "iy": 32, "count": 2001}]
+
+
+def test_verified_transfer_rejects_in_place_edit_and_serves_open_version(tmp_path):
+    path = write_rows(tmp_path, [row()])
+    original = path.read_bytes()
+    expected = hashlib.sha256(original).hexdigest()
+    _, chunks, _, _ = scatter.verified_source_stream(tmp_path, "_phospho", expected)
+    path.rename(tmp_path / "previous")
+    path.write_bytes(b"next")
+    assert b"".join(chunks) == original
+    with pytest.raises(scatter.ScatterSourceChanged):
+        scatter.verified_source_stream(tmp_path, "_phospho", expected)
+    path.write_bytes(original)
+    _, chunks, _, _ = scatter.verified_source_stream(tmp_path, "_phospho", expected)
+    path.write_bytes(b"different")
+    with pytest.raises(scatter.ScatterSourceChanged):
+        list(chunks)

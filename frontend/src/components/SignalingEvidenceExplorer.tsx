@@ -109,7 +109,11 @@ export function SignalingEvidenceExplorer({orderId,initialN:savedN=50}:{orderId:
   const [cursor,setCursor]=useState(''),[featureId,setFeatureId]=useState(''),[track,setTrack]=useState('relative');
   const runs=useRead<{records:Row[]}>(`/orders/${orderId}/evidence-runs`,retry);
   useEffect(()=>{setBundleId('');setPathway('');setCursor('');setFeatureId('');setPathwayCursor('');setKinase('');setModuleId('');setN(initialN);},[orderId,initialN]);
-  const chosen = bundleId || runs.data?.records.find(r=>r.bundle_id)?.bundle_id || '';
+  useEffect(()=>{
+    const ready=runs.data?.records.find(r=>r.bundle_id && r.execution_status==='completed' && ['ready','ready_with_limits'].includes(r.explorer_status));
+    if(!bundleId && ready)setBundleId(ready.bundle_id);
+  },[bundleId,runs.data]);
+  const chosen=bundleId;
   const base=chosen?`/orders/${orderId}/evidence-runs/${encodeURIComponent(chosen)}`:null;
   const bundle=useRead<Row>(base,retry), pathways=useRead<Page>(base?`${base}/pathways?limit=100${pathwayCursor?`&cursor=${encodeURIComponent(pathwayCursor)}`:''}`:null,retry);
   const members=useRead<Page>(base?`${base}/features?limit=50&track=${track}&mode=${mode}${mode.endsWith('top_n')?`&n=${n}`:''}${pathway?`&pathway_key=${encodeURIComponent(pathway)}`:''}${kinase?`&kinase=${encodeURIComponent(kinase)}`:''}${moduleId?`&module_id=${encodeURIComponent(moduleId)}`:''}${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`:null,retry);
@@ -125,14 +129,14 @@ export function SignalingEvidenceExplorer({orderId,initialN:savedN=50}:{orderId:
   const suggestions=usePage(base?`${base}/experiment-suggestions`:null,retry);
   useEffect(()=>{setCursor('');setFeatureId('');},[track,mode,n,chosen,kinase,moduleId]);
   useEffect(()=>{setPathwayCursor('');setKinase('');setModuleId('');setModelId('');},[chosen]);
-  const error = runs.error||bundle.error||pathways.error||members.error;
+  const error = runs.error;
   if(error)return <Card><CardContent className="py-5"><p role="alert">결과 조회 실패: {error}</p><Button onClick={()=>setRetry(r=>r+1)}>다시 시도</Button></CardContent></Card>;
   return <div className="space-y-4 min-w-0" data-testid="signaling-explorer">
     <Card><CardHeader><CardTitle>Signaling Evidence Explorer</CardTitle><p className="text-sm text-muted-foreground">완료된 분석의 경로·PTM·kinase·근거를 함께 탐색합니다.</p></CardHeader><CardContent className="space-y-3">
-      {!runs.data?<p role="status">분석 run 조회 중…</p>:!chosen?<><p>상태: legacy_unbound · {runs.data.records.map(r=>r.execution_status).join(', ')||'연결된 분석 없음'}</p><LegacyObservationView key={orderId} orderId={orderId} initialN={initialN}/></>:<>
-        <label>분석 run <select aria-label="분석 run" className="max-w-full border rounded p-1" value={chosen} onChange={e=>{setBundleId(e.target.value);setPathway('');setCursor('');setFeatureId('');}}>{runs.data.records.filter(r=>r.bundle_id).map(r=><option value={r.bundle_id} key={r.bundle_id}>{r.created_at||r.run_id} · {r.explorer_status}</option>)}</select></label>
+      {!runs.data?<p role="status">분석 run 조회 중…</p>:!runs.data.records.some(r=>r.bundle_id)?<><p>상태: legacy_unbound · {runs.data.records.map(r=>r.execution_status).join(', ')||'연결된 분석 없음'}</p><LegacyObservationView key={orderId} orderId={orderId} initialN={initialN}/></>:<>
+        <label>분석 run <select aria-label="분석 run" className="max-w-full border rounded p-1" value={chosen} onChange={e=>{setBundleId(e.target.value);setPathway('');setCursor('');setFeatureId('');}}><option value="">완료 run 선택</option>{runs.data.records.filter(r=>r.bundle_id).map(r=><option value={r.bundle_id} key={r.bundle_id}>{r.created_at||r.run_id} · {r.explorer_status}</option>)}</select></label>
         {runs.data.records.some(r=>['queued','running'].includes(r.execution_status))&&<p>새 분석이 진행 중입니다. 현재 표시한 완료 run은 바뀌지 않습니다.</p>}
-        {bundle.data?<><p>상태: {bundle.data.explorer_status} · 입력 범위: {bundle.data.analysis_scope}</p>
+        {bundle.error?<p role="alert">{bundle.error} <Button onClick={()=>setRetry(r=>r+1)}>다시 조회</Button></p>:bundle.data?<><p>상태: {bundle.data.explorer_status} · 입력 범위: {bundle.data.analysis_scope}</p>
           <p className="text-sm">원본 행 {bundle.data.coverage.source_rows??'미집계'} · precursor {bundle.data.coverage.identified_features??'미집계'} · 모델 적격 {bundle.data.coverage.eligible_features??'미집계'} · 경로 매핑 {bundle.data.coverage.pathway_mapped_features??'미평가'}</p>
           <p className="text-xs break-all">Bundle {chosen}</p><p className="text-xs">수는 겹치는 집합입니다. pathway/kinase membership 수를 더해 전체 feature 수로 사용하지 않습니다.</p>
         </>:<p role="status">고정된 component 조회 중…</p>}
@@ -141,11 +145,11 @@ export function SignalingEvidenceExplorer({orderId,initialN:savedN=50}:{orderId:
     {base&&bundle.data&&<>
       <Card><CardHeader><CardTitle>경로 × 시간</CardTitle></CardHeader><CardContent>
         <p className="text-xs mb-3">구성원 contrast의 기술적 요약 · precursor 중앙값을 단백질별로 요약한 후 평균 · 활성/억제 검정이 아닙니다. 회색은 미평가, 흰색은 0입니다. 시간 열은 범주로 배치됩니다.</p>
-        {!pathways.data?<p role="status">경로 조회 중…</p>:pathways.data.records.length===0?<p>경로 결과 없음 · reference 상태: {bundle.data.pathway_source?.status}. 유효한 PTM과 kinase 결과는 아래에서 조회할 수 있습니다.</p>:<div className="overflow-x-auto max-h-96"><table className="text-xs w-full"><thead><tr><th>경로 / provider</th>{bundle.data!.conditions.map((c:string)=><th key={c}>{c}</th>)}</tr></thead><tbody>{pathways.data.records.map(p=><tr key={p.pathway_key}><td><button className="text-left underline p-2" aria-pressed={pathway===p.pathway_key} onClick={()=>{setPathway(p.pathway_key);setCursor('');setFeatureId('');}}>{p.name} · {p.provider} · {p.member_feature_count} features</button></td>{p.scores.map((s:Row)=><td key={s.condition} title={`${s.condition}: ${s.value??'미평가'}; hit/background ${s.hit_proteins}/${s.background_proteins}; ${s.evaluation_status}`} style={{background:s.value===null?'#ddd':s.value===0?'white':s.value>0?'#fecaca':'#bfdbfe'}} className="p-2">{s.value===null?'—':Number(s.value).toFixed(2)}</td>)}</tr>)}</tbody></table></div>}
+        {pathways.error?<p role="alert">{pathways.error} <Button onClick={()=>setRetry(r=>r+1)}>경로 다시 조회</Button></p>:!pathways.data?<p role="status">경로 조회 중…</p>:pathways.data.records.length===0?<p>경로 결과 없음 · reference 상태: {bundle.data.pathway_source?.status}. 유효한 PTM과 kinase 결과는 아래에서 조회할 수 있습니다.</p>:<div className="overflow-x-auto max-h-96"><table className="text-xs w-full"><thead><tr><th>경로 / provider</th>{bundle.data!.conditions.map((c:string)=><th key={c}>{c}</th>)}</tr></thead><tbody>{pathways.data.records.map(p=><tr key={p.pathway_key}><td><button className="text-left underline p-2" aria-pressed={pathway===p.pathway_key} onClick={()=>{setPathway(p.pathway_key);setCursor('');setFeatureId('');}}>{p.name} · {p.provider} · {p.member_feature_count} features</button></td>{p.scores.map((s:Row)=><td key={s.condition} title={`${s.condition}: ${s.value??'미평가'}; hit/background ${s.hit_proteins}/${s.background_proteins}; ${s.evaluation_status}`} style={{background:s.value===null?'#ddd':s.value===0?'white':s.value>0?'#fecaca':'#bfdbfe'}} className="p-2">{s.value===null?'—':Number(s.value).toFixed(2)}</td>)}</tr>)}</tbody></table></div>}
         <Button variant="outline" size="sm" disabled={!pathways.data?.next_cursor} onClick={()=>setPathwayCursor(pathways.data!.next_cursor!)}>다음 경로</Button> <Button variant="outline" size="sm" onClick={()=>setPathwayCursor('')}>처음 경로</Button> <Button variant="outline" size="sm" onClick={()=>{setPathway('');setCursor('');setFeatureId('');}}>전체 feature</Button>
       </CardContent></Card>
       <Card><CardHeader><CardTitle>PTM 관측과 곡선</CardTitle></CardHeader><CardContent className="space-y-3">
-        <p>조회 범위 {pathway?'선택 경로 전체':'전체 inventory'} · {members.data?.total_count??'…'} precursor · 페이지 {members.data?.records.length??0}</p>
+        {members.error&&<p role="alert">{members.error} <Button onClick={()=>setRetry(r=>r+1)}>관측 다시 조회</Button></p>}<p>조회 범위 {pathway?'선택 경로 전체':'전체 inventory'} · {members.data?.total_count??'…'} precursor · 페이지 {members.data?.records.length??0}</p>
         {(kinase||moduleId)&&<p>추가 표시 조건: {kinase||moduleId} <Button size="sm" variant="outline" onClick={()=>{setKinase('');setModuleId('');}}>표시 조건 해제</Button></p>}
         <label>PTM 곡선 표시 <select aria-label="PTM display selection" value={mode} onChange={e=>setMode(e.target.value)}><option value="inventory">범위 내 전체 inventory</option><option value="all_observed">유효 관측 전체</option><option value="global_top_n">전체 Top N</option><option value="per_condition_top_n">조건별 Top N 합집합</option></select></label>
         {mode.endsWith('top_n')&&<label>N <input aria-label="Display N" type="number" min="1" value={n} onChange={e=>{const value=Number(e.target.value);if(Number.isInteger(value)&&value>0)setN(value);}}/></label>}

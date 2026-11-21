@@ -37,6 +37,8 @@ def test_saved_snapshot_access_pagination_and_tamper(tmp_path, monkeypatch):
     second=client.post(path,json={'filters':{'form_id':'f'},'limit':1,'cursor':first['next_cursor']}).json()
     assert second['items'][0]['bundle_id']!=first['items'][0]['bundle_id']
     assert vector_view._signal_session.cache_info().hits>=1
+    assert client.post(path,json={'expected_catalog_id':first['catalog_id']}).status_code==200
+    assert client.post(path,json={'expected_catalog_id':'other-publication'}).status_code==409
     bundle=first['items'][0]
     links=client.post('/orders/1/substrate-signal/temporal_evidence_links',json={'filters':{'bundle_id':bundle['bundle_id']}}).json()
     assert any(r['to_id']==bundle['association_id'] for r in links['items'])
