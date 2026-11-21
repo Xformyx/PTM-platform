@@ -100,9 +100,9 @@ class VectorColumnar:
 
     def manifest_counts(self):
         row = self.db.execute("SELECT count(*), count(DISTINCT feature_id), count(*) FILTER (WHERE feature_id IS NULL), count(*) FILTER (WHERE malformed) FROM observations").fetchone()
-        from .plot_selection import ordered_conditions
-        conditions=ordered_conditions([{"condition":r[0],"time_minutes":r[1]} for r in self.db.execute("SELECT DISTINCT condition,time_minutes FROM observations WHERE condition IS NOT NULL").fetchall()])
-        return {"source_rows":row[0],"identified_features":row[1],"identity_unresolved_rows":row[2]-row[3],"malformed_source_rows":row[3],"measurement_revision":self.manifest["measurement_revision"],"conditions":conditions}
+        from .plot_selection import condition_grid
+        grid=condition_grid([{"condition":r[0],"time_minutes":r[1]} for r in self.db.execute("SELECT DISTINCT condition,time_minutes FROM observations WHERE condition IS NOT NULL").fetchall()])
+        return {"source_rows":row[0],"identified_features":row[1],"identity_unresolved_rows":row[2]-row[3],"malformed_source_rows":row[3],"measurement_revision":self.manifest["measurement_revision"],"conditions":[p["condition"] for p in grid], "condition_grid":grid}
 
     def selection_statistics(self, axis):
         col=AXIS_COLUMNS[axis]

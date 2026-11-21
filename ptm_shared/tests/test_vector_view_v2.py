@@ -157,3 +157,17 @@ def test_analysis_signatures_cover_late_candidate_members_weights_and_references
     assert manifest(reference_snapshots={'release':'other'})!=baseline
     assert manifest(sample_manifest={'biological_units':3})!=baseline
     assert manifest(config={'track':'other'})!=baseline
+
+
+def test_registered_grid_survives_top_one_and_time_conflict():
+    from ptm_shared.plot_selection import build_vector_view
+    rows = [dict(feature_id=f, condition=c, time_minutes=t, ptm_protein_adjusted_log2fc=v,
+                 gene=f, reader_feature_id=f, position='S1') for f,c,t,v in [
+        ('a','sample_A',180,9), ('a','sample_B',1,0), ('b','5min',5,1),
+        ('b','5min vehicle',5,None), ('b','30min',7,1), ('b','opaque',None,None)]]
+    result = build_vector_view(rows, measurement_revision='fixture', annotation_source={'status':'missing'},
+                               mode='global_top_n', n=1)
+    assert result['selection']['selected_feature_ids'] == ['a']
+    assert [p['time_minutes'] for p in result['condition_grid']] == [1,5,5,7,180,None]
+    assert result['condition_grid'][3]['label_conflict']
+    assert {r['condition'] for r in result['observations']} == {'sample_A','sample_B'}

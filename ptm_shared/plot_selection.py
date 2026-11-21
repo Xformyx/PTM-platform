@@ -34,7 +34,7 @@ def representation_value(row, axis="adjusted", representation="conventional_log2
     return float(value) if isinstance(value, (float, int)) and not isinstance(value, bool) and math.isfinite(value) else None
 
 
-def ordered_conditions(rows, declared_conditions=()):
+def condition_grid(rows, declared_conditions=()):
     times = defaultdict(set)
     for row in rows:
         condition = row.get("condition")
@@ -45,18 +45,24 @@ def ordered_conditions(rows, declared_conditions=()):
     declared = {str(c): i for i, c in enumerate(declared_conditions)}
     for c in declared:
         times[c]
-    def key(c):
-        if c in declared:
-            return (0, declared[c], c)
-        if len(times[c]) == 1:
-            return (1, next(iter(times[c])), c)
-        # Explicit units in a label are usable; arbitrary numbers are not times.
-        parsed = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(s|sec|min|m|h|hr)\s*", c, re.I)
-        if parsed and not times[c]:
-            scale = {"s": 1/60, "sec": 1/60, "min": 1, "m": 1, "h": 60, "hr": 60}[parsed[2].lower()]
-            return (1, float(parsed[1]) * scale, c)
-        return (2, 0, c)
-    return sorted(times, key=key)
+    grid = []
+    for condition, recorded in times.items():
+        match = re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*(s|sec|min|m|h|hr|d)\s*", condition, re.I)
+        label_time = None if not match else float(match[1]) * {
+            "s": 1/60, "sec": 1/60, "min": 1, "m": 1, "h": 60, "hr": 60, "d": 1440
+        }[match[2].lower()]
+        minute = next(iter(recorded)) if len(recorded) == 1 else None
+        source = "recorded" if minute is not None else "conflict" if recorded else "unresolved"
+        if not recorded and label_time is not None:
+            minute, source = label_time, "legacy_label"
+        grid.append({"condition": condition, "time_minutes": minute, "source": source,
+                     "label_conflict": bool(recorded and label_time is not None and recorded != {label_time})})
+    return sorted(grid, key=lambda p: (p["time_minutes"] is None, p["time_minutes"],
+                                       declared.get(p["condition"], math.inf), p["condition"]))
+
+
+def ordered_conditions(rows, declared_conditions=()):
+    return [p["condition"] for p in condition_grid(rows, declared_conditions)]
 
 
 def select_plot_features(rows, *, mode="per_condition_top_n", n=DEFAULT_VIEW_TOP_N,
@@ -159,10 +165,11 @@ def build_vector_view(rows, annotations=(), *, measurement_revision, annotation_
                   "axis": axis, "representation": representation, "threshold": threshold,
                   "feature_count": len({fid for fid, v in all_values if v is not None and threshold is not None and abs(v) >= threshold}),
                   "applied_to_selection": False}
+    grid = condition_grid(rows, declared_conditions)
     return {"contract_version": VIEW_CONTRACT_VERSION, "measurement_revision": measurement_revision,
             "selection": selection, "sources": {"measurements": {"kind": "preprocessing_vector", "revision": measurement_revision},
                                                 "annotations": annotation_source},
             "coverage": coverage, "features": features, "observations": observations,
-            "conditions": ordered_conditions(rows, declared_conditions), "suggestion": suggestion,
+            "condition_grid": grid, "conditions": [point["condition"] for point in grid], "suggestion": suggestion,
             "vector_data": observations, "top_n_ptms": features, "source": "preprocessing",
             "top_n_setting": selection["n"], "suggested_n": suggestion["feature_count"]}

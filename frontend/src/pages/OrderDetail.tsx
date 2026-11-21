@@ -1398,171 +1398,6 @@ function canonicalDivergenceToEntry(pair: any): SitePairEntry | null {
   };
 }
 
-function computeMultiSiteDivergence(
-  uniquePtms: Array<{ feature_id?: string; gene: string; position: string; label: string }>,
-  vectorByPtm: Map<string, VectorPlotPoint[]>,
-  conditions: string[],
-  ptmActivityClass: Map<string, "de_novo" | "regulated" | "minor">,
-  ptmPseudocountUsed: Map<string, boolean>,
-): SitePairEntry[] {
-  if (conditions.length < 3 || uniquePtms.length < 2) return [];
-
-  // Assign each PTM to a wave module (peak condition index)
-  const ptmPeak = new Map<string, { condIdx: number; peakCondition: string; peakFC: number }>();
-  uniquePtms.forEach((p) => {
-    const key = featureKey(p);
-    const arr = vectorByPtm.get(key);
-    if (!arr || conditions.some(c => !arr.some(r => r.condition === c && finite(r.value)))) return;
-    const values = conditions.map(cond => arr.find(r => r.condition === cond)?.value ?? null);
-    const bestIdx = sampledExtremumIndex(values);
-    if (bestIdx === null) return;
-    ptmPeak.set(key, { condIdx: bestIdx, peakCondition: conditions[bestIdx], peakFC: values[bestIdx]! });
-  });
-
-  // Group PTMs by gene
-  const byGene = new Map<string, typeof uniquePtms>();
-  uniquePtms.forEach((p) => {
-    if (!byGene.has(p.gene)) byGene.set(p.gene, []);
-    byGene.get(p.gene)!.push(p);
-  });
-
-  const results: SitePairEntry[] = [];
-  const seenPairs = new Set<string>();
-
-  byGene.forEach((sites, gene) => {
-    if (sites.length < 2) return;
-    for (let i = 0; i < sites.length; i++) {
-      for (let j = i + 1; j < sites.length; j++) {
-        const pA = sites[i];
-        const pB = sites[j];
-        const keyA = featureKey(pA);
-        const keyB = featureKey(pB);
-        const pairKey = [keyA, keyB].sort().join("|");
-        if (seenPairs.has(pairKey)) continue;
-        seenPairs.add(pairKey);
-
-        const peakA = ptmPeak.get(keyA);
-        const peakB = ptmPeak.get(keyB);
-        if (!peakA || !peakB) continue;
-
-        const acA = ptmActivityClass.get(keyA) ?? "minor";
-        const acB = ptmActivityClass.get(keyB) ?? "minor";
-        // Only include pairs where at least one site is regulated or de_novo
-        if (acA === "minor" && acB === "minor") continue;
-
-        const isDeNovoA = ptmPseudocountUsed.get(keyA) ?? false;
-        const isDeNovoB = ptmPseudocountUsed.get(keyB) ?? false;
-
-        // Order by peak time (early → late)
-        const [early, late] = peakA.condIdx <= peakB.condIdx ? [pA, pB] : [pB, pA];
-        const [earlyPeak, latePeak] = peakA.condIdx <= peakB.condIdx ? [peakA, peakB] : [peakB, peakA];
-        const [earlyAC, lateAC] = peakA.condIdx <= peakB.condIdx ? [acA, acB] : [acB, acA];
-        const [earlyDeNovo, lateDeNovo] = peakA.condIdx <= peakB.condIdx ? [isDeNovoA, isDeNovoB] : [isDeNovoB, isDeNovoA];
-
-        let pattern: DivergencePattern;
-        let description: string;
-
-        if (peakA.condIdx === peakB.condIdx) {
-          pattern = "multisite_coordination";
-          description = `${gene} ${early.position} + ${late.position}이 동일 timepoint (peak: ${earlyPeak.peakCondition})에서 peak를 보임 → same-peak site coordination 관찰`;
-        } else if (earlyPeak.peakFC > 0 && latePeak.peakFC < 0) {
-          pattern = "signal_attenuation";
-          description = `${gene} ${early.position}과 ${late.position}에서 시간적으로 분리된 반대 방향 response 관찰; feedback 또는 attenuation을 증명하지 않음`;
-        } else if (earlyPeak.peakFC < 0 && latePeak.peakFC > 0) {
-          pattern = "signal_attenuation";
-          description = `${gene} ${early.position}과 ${late.position}에서 시간적으로 분리된 반대 방향 response 관찰; inhibition-to-activation mechanism을 증명하지 않음`;
-        } else {
-          pattern = "sequential_regulation";
-          const dir = earlyPeak.peakFC > 0 && latePeak.peakFC > 0 ? "두 positive-response" : "두 negative-response";
-          description = `${gene} ${early.position} (trajectory peak: ${earlyPeak.peakCondition})와 ${late.position} (trajectory peak: ${latePeak.peakCondition})의 시간적으로 분리된 ${dir} site contrast 관찰`;
-        }
-
-        // v12.1 #3: Lag computation
-        const lagIdx = Math.abs(latePeak.condIdx - earlyPeak.condIdx);
-        const lagFraction = lagIdx / Math.max(conditions.length - 1, 1);
-        // Try to parse real time from condition names
-        let lagMinutes: number | null = null;
-        let isMeaningfulLag = lagIdx >= 1;
-        const parseTimeMin = (cond: string): number | null => {
-          const m = cond.match(/(\d+(?:\.\d+)?)\s*min/i);
-          if (m) return parseFloat(m[1]);
-          const h = cond.match(/(\d+(?:\.\d+)?)\s*(?:hr|hour|h)$/i);
-          if (h) return parseFloat(h[1]) * 60;
-          const s = cond.match(/(\d+(?:\.\d+)?)\s*sec/i);
-          if (s) return parseFloat(s[1]) / 60;
-          return null;
-        };
-        if (lagIdx > 0) {
-          const tEarly = parseTimeMin(earlyPeak.peakCondition);
-          const tLate = parseTimeMin(latePeak.peakCondition);
-          if (tEarly !== null && tLate !== null) {
-            lagMinutes = Math.round(Math.abs(tLate - tEarly) * 10) / 10;
-            isMeaningfulLag = lagMinutes >= 5.0;
-          }
-        }
-
-        // v12.1 #4: Confidence tier (MAD-based effect_size)
-        const allFCsForMAD = Array.from(ptmPeak.values()).map((p) => Math.abs(p.peakFC)).filter((v) => v > 0.01);
-        let madFC = 1.0;
-        if (allFCsForMAD.length > 0) {
-          const sorted = [...allFCsForMAD].sort((a, b) => a - b);
-          const medFC = sorted[Math.floor(sorted.length / 2)];
-          const deviations = allFCsForMAD.map((v) => Math.abs(v - medFC)).sort((a, b) => a - b);
-          madFC = Math.max(deviations[Math.floor(deviations.length / 2)], 0.1);
-        }
-        const effectSize = Math.abs(earlyPeak.peakFC - latePeak.peakFC) / madFC;
-        let confidenceTier: "High" | "Medium" | "Low" = "Low";
-        if (effectSize >= 2.0) confidenceTier = "High";
-        else if (effectSize >= 1.0) confidenceTier = "Medium";
-
-        // v12.1 #5: Resolution warning
-        const resolutionWarning = conditions.length <= 3 ? `LOW RESOLUTION: Only ${conditions.length} timepoints` : null;
-
-        // Timepoints and forms are not independent biological units. The
-        // browser reports descriptive separation, without a pooled-time p-value.
-        const pValue = null;
-        const isSignificant = null;
-
-        results.push({
-          gene,
-          siteA: { feature_id: early.feature_id, position: early.position, label: early.label, waveLabel: `Trajectory peak (${earlyPeak.peakCondition})`, peakCondition: earlyPeak.peakCondition, peakFC: earlyPeak.peakFC, isDeNovo: earlyDeNovo, activityClass: earlyAC },
-          siteB: { feature_id: late.feature_id, position: late.position, label: late.label, waveLabel: `Trajectory peak (${latePeak.peakCondition})`, peakCondition: latePeak.peakCondition, peakFC: latePeak.peakFC, isDeNovo: lateDeNovo, activityClass: lateAC },
-          pattern,
-          description,
-          confidenceTier,
-          pValue,
-          isSignificant,
-          lagMinutes,
-          lagFraction,
-          isMeaningfulLag,
-          effectSize: Math.round(effectSize * 1000) / 1000,
-          resolutionWarning,
-        });
-      }
-    }
-  });
-
-  const ORDER: Record<DivergencePattern, number> = {
-    signal_attenuation: 0,
-    sequential_regulation: 1,
-    multisite_coordination: 2,
-    temporally_separated_opposite_direction: 0,
-    temporally_separated_same_direction: 1,
-    same_peak_coordination: 2,
-  };
-  const TIER_ORDER: Record<string, number> = { High: 0, Medium: 1, Low: 2 };
-  results.sort((a, b) => {
-    const patDiff = ORDER[a.pattern] - ORDER[b.pattern];
-    if (patDiff !== 0) return patDiff;
-    // Within same pattern: High > Medium > Low confidence
-    const tierDiff = (TIER_ORDER[a.confidenceTier] ?? 3) - (TIER_ORDER[b.confidenceTier] ?? 3);
-    if (tierDiff !== 0) return tierDiff;
-    // Then by effect size descending
-    return b.effectSize - a.effectSize;
-  });
-  return results;
-}
-
 // ── Sparkline SVG (mini time-series for each site) ───────────────────────
 function SiteSpark({
   values,
@@ -1629,18 +1464,9 @@ function MultiSiteDivergencePanel({
   const [patternFilter, setPatternFilter] = useState<DivergencePattern | "all">("all");
   const [hoveredGene, setHoveredGene] = useState<string | null>(null);
 
-  const entries = useMemo(
-    () => {
-      const serverEntries = (canonicalPairs || []).map(canonicalDivergenceToEntry).filter((entry): entry is SitePairEntry => entry !== null);
-      return serverEntries.length > 0
-        ? serverEntries
-        : computeMultiSiteDivergence(uniquePtms, vectorByPtm, conditions, ptmActivityClass, ptmPseudocountUsed);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [uniquePtms.length, conditions.join(","), vectorByPtm.size, ptmActivityClass.size, ptmPseudocountUsed.size, canonicalPairs?.length]
-  );
-
-  if (entries.length === 0) return null;
+  const entries = useMemo(() => (canonicalPairs || []).map(canonicalDivergenceToEntry)
+    .filter((entry): entry is SitePairEntry => entry !== null), [canonicalPairs]);
+  if (!entries.length) return <p className="text-sm">저장된 다중 부위 비교가 없습니다.</p>;
 
   // Group entries by gene for swimlane display
   const byGene = new Map<string, SitePairEntry[]>();
@@ -2086,7 +1912,8 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
     conventional_log2fc_na?: boolean;
     shared_peptide?: boolean;
   };
-  const [data, setData] = useState<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; error?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
+  const [data, setData] = useState<{ condition_grid?: Array<{condition:string; time_minutes:number|null; source:string; label_conflict?:boolean}>; conditions?:string[]; measurement_revision?:string; vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; error?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
+  const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<QuantAxis>("relative");
@@ -2113,7 +1940,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
   }, [orderId]);
 
   const fetchVectorPlotData = () => {
-    return api.get<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: any[] }>(`/orders/${orderId}/vector-plot-data?classic=true&representation=${displayRepresentation}&axis=${metric==="relative"?"adjusted":metric}&mode=${displayMode}${displayMode==="all_observed"?"":`&n=${displayN}`}`);
+    return api.get<{ condition_grid?: Array<{condition:string; time_minutes:number|null; source:string; label_conflict?:boolean}>; conditions?:string[]; measurement_revision?:string; vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: any[] }>(`/orders/${orderId}/vector-plot-data?classic=true&representation=${displayRepresentation}&axis=${metric==="relative"?"adjusted":metric}&mode=${displayMode}${displayMode==="all_observed"?"":`&n=${displayN}`}`);
   };
 
   const refreshReceptorInference = async () => {
@@ -2130,6 +1957,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
       .then((d) => {
         if(!active)return;
         setData({
+          ...d,
           vector_data: (d.vector_data || []) as TopNVectorPlotRow[],
           top_n_ptms: d.top_n_ptms || [],
           suggested_n: d.suggested_n,
@@ -2151,7 +1979,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
       .catch((error) => active && setData({ vector_data: [], top_n_ptms: [], source: "error", error: String(error?.message || error) }))
       .finally(() => {if(active)setLoading(false);});
     return()=>{active=false;};
-  }, [orderId,displayMode,displayN,displayRepresentation,metric]);
+  }, [orderId,displayMode,displayN,displayRepresentation,metric,retry]);
 
   if (loading) {
     return (
@@ -2166,6 +1994,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
     const failed = data && "error" in data && data.error;
     return (
       <div className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
+        <div className="flex flex-wrap gap-2">{(Object.keys(axisLabel) as QuantAxis[]).map(axis=><Button key={axis} aria-pressed={axis===metric} onClick={()=>setMetric(axis)}>{axisLabel[axis]}</Button>)}<Button onClick={()=>setRetry(v=>v+1)}>다시 조회</Button></div>
         <label>값 표현 <select value={displayRepresentation} onChange={e=>setDisplayRepresentation(e.target.value)}><option value="conventional_log2_contrast">Conventional log2 contrast</option><option value="lod_relative_log2">LOD-relative log2</option><option value="normalized_log2_intensity">Normalized log2 intensity</option></select></label>
         <TrendingUp className="h-12 w-12 text-muted-foreground/40 mb-3" />
         <p className="text-sm text-muted-foreground text-center">
@@ -2229,10 +2058,9 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
 
   });
 
-  const conditions = Array.from(
-    new Set(data.vector_data.map((r) => r.condition).filter(Boolean))
-  ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
-
+  const grid = data.condition_grid ?? (data.conditions ?? [...new Set(data.vector_data.map(r=>r.condition))]).map(condition=>({condition,time_minutes:null,source:"unresolved",label_conflict:false}));
+  const conditions = grid.map(point=>point.condition);
+  const timed = grid.some(point=>point.time_minutes !== null);
   // Build P1 pattern lookup from top_n_ptms (p1_pattern field, when server provides it)
   const p1PatternMap = new Map<string, string>();
   data.top_n_ptms.forEach((p) => {
@@ -2281,8 +2109,8 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
     return trendOk && actOk;
   });
 
-  const chartData = conditions.map((cond) => {
-    const point: Record<string, string | number | null> = { condition: cond };
+  const chartData = grid.map(({condition:cond,time_minutes}) => {
+    const point: Record<string, string | number | null> = { condition: cond, time_minutes };
     filteredPtms.forEach((p) => {
       const key = featureKey(p);
       if (!checked[key]) return;
@@ -2555,10 +2383,11 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
               />
             </div>
           </div>
+          <details><summary>{timed?"시간 (분)":"조건 (등간격)"} · 원본 시간표</summary>{grid.map(g=><p key={g.condition}>{g.condition} · {g.time_minutes??"미기록"} · {g.source}{g.label_conflict?" · 표기와 기록 충돌":""}</p>)}</details>
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
+            <LineChart data={timed ? chartData.filter(p=>p.time_minutes!==null) : chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="condition" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <XAxis dataKey={timed?"time_minutes":"condition"} type={timed?"number":"category"} domain={["dataMin","dataMax"]} unit={timed?" min":undefined} stroke="hsl(var(--muted-foreground))" fontSize={12} />
               <YAxis
                 stroke="hsl(var(--muted-foreground))"
                 fontSize={12}
@@ -2593,7 +2422,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
                       {(() => {
                         const meta = uniquePtms.find((p) => p.label === target.name);
                         const key = meta ? featureKey(meta) : "";
-                        const row = key ? vectorByPtm.get(key)?.find((r) => r.condition === label) : undefined;
+                        const row = key ? vectorByPtm.get(key)?.find((r) => r.condition === target.payload?.condition) : undefined;
                         const isDenovo = key ? ptmActivityClass.get(key) === "de_novo" : false;
                         const conf = (meta as { denovo_confidence?: string } | undefined)?.denovo_confidence
                           || (isDenovo ? "moderate" : "");
@@ -2655,7 +2484,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
                     return (
                       <Line
                         key={label}
-                        type="monotone"
+                        type="linear"
                         isAnimationActive={false}
                         connectNulls={false}
                         dataKey={label}

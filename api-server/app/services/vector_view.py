@@ -85,6 +85,7 @@ def load_vector_view(output_dir, suffix, report_options=None, *, mode="per_condi
                              source_rows=snapshot["source_rows"], quarantine_count=len(snapshot["quarantine"]),
                              annotation_source=source, declared_conditions=declared_conditions, **options)
     if counts:
+        view.update(condition_grid=counts["condition_grid"], conditions=counts["conditions"])
         view["coverage"].update(identified_features=counts["identified_features"],
             identity_unresolved_rows=counts["identity_unresolved_rows"], quarantined_rows=counts["malformed_source_rows"])
         view["selection"]["axis_eligible_feature_count"] = statistics["axis_eligible_feature_count"]
