@@ -293,9 +293,13 @@ def build_explorer_index(directory, manifest, inputs, scores, sidecar, result, *
         {"feature_id": "VARCHAR", "track": "VARCHAR", "condition": "VARCHAR", "value": "DOUBLE"},
         spill=spill,
     )
+    from .plot_selection import condition_grid
+    grid = condition_grid((measurement["source"] for feature in inputs["features"].values()
+                           for measurement in feature.get("measurements", {}).values()
+                           if measurement.get("source")), manifest["conditions"])
     return {"schema_version": VERSION, "coverage": {**result["coverage"], **pathway["coverage"]},
             "inference_mode":manifest.get("config",{}).get("inference_mode","legacy_unrecorded"),
-            "pathway_source": source, "conditions": manifest["conditions"], "analysis_scope": manifest["analysis_scope"],
+            "condition_grid":grid, "pathway_source": source, "conditions": manifest["conditions"], "analysis_scope": manifest["analysis_scope"],
             "input_scope": manifest.get("input_scope", {}), "index_artifact": "explorer_records.parquet",
             "components": {"pathway": {"evaluation_status": pathway["coverage"]["mapping_evaluation_status"], "source_status": source["status"]},
                 "annotation": {"status": "not_requested", "reason": "annotation_snapshot_not_bound"},

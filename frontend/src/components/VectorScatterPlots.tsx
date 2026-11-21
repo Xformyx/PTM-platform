@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type {PrecursorSelection} from "./SelectedPrecursor";
+import type {ScatterPoint} from "../lib/scatterOverview";
 import { Download, Loader2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { api } from "../lib/api";
 import { Button } from "./ui/button";
@@ -9,7 +11,8 @@ import type { Bounds, ScatterAxis, ScatterCondition, ScatterOverview } from "../
 const MARGIN = { left: 48, right: 12, top: 15, bottom: 40 };
 const HEIGHT = 280;
 
-function ConditionChart({ condition, sourceBounds, viewport, resolution, color, axis }: {
+function ConditionChart({ condition, sourceBounds, viewport, resolution, color, axis, orderId, revision, onSelect }: {
+  orderId:number;revision:string;onSelect?:(p:PrecursorSelection)=>void;
   condition: ScatterCondition; sourceBounds: Bounds; viewport: Bounds; resolution: number; color: string; axis: ScatterAxis;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -22,6 +25,15 @@ function ConditionChart({ condition, sourceBounds, viewport, resolution, color, 
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+  const [bin,setBin]=useState<{ix:number;iy:number}|null>(null),[after,setAfter]=useState(0);
+  const [query,setQuery]=useState(''),[pointRows,setPointRows]=useState<ScatterPoint[]|null>(null);
+  const [page,setPage]=useState<{items:ScatterPoint[];next_after:number|null}>(),[error,setError]=useState('');
+  useEffect(()=>{if(!bin)return;let active=true;setPage(undefined);setError('');
+    const params=new URLSearchParams({revision,axis,condition:condition.condition,ix:String(bin.ix),iy:String(bin.iy),after:String(after)});
+    api.get<{items:ScatterPoint[];next_after:number|null}>(`/orders/${orderId}/vector-scatter-members?${params}`)
+      .then(r=>{if(active)setPage(r)}).catch(e=>{if(active)setError(String(e.message))});
+    return()=>{active=false};
+  },[bin,after,orderId,revision,axis,condition.condition]);
   const plotWidth = width - MARGIN.left - MARGIN.right;
   const plotHeight = HEIGHT - MARGIN.top - MARGIN.bottom;
   const sx = (x: number) => MARGIN.left + (x - viewport[0]) / (viewport[1] - viewport[0]) * plotWidth;
@@ -78,6 +90,11 @@ function ConditionChart({ condition, sourceBounds, viewport, resolution, color, 
       {condition.represented_rows === 0 ? <p className="p-4 text-sm text-muted-foreground">이 조건에 축 적격 관측이 없습니다.</p> : <>
         <canvas ref={canvas} aria-label={`${condition.condition} ${scatterAxes[axis].short} scatter`} role="img"
           className="block w-full" style={{ height: HEIGHT }} data-viewport={JSON.stringify(viewport)}
+          onClick={e=>{
+            const rect=e.currentTarget.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top;
+            if(condition.mode==="points")setPointRows(condition.points.filter(p=>Math.hypot(sx(p.x)-x,sy(p.y)-y)<=7));
+            else {const selected=condition.bins.find(b=>{const r=binBounds(b,sourceBounds,resolution);return x>=sx(r[0])&&x<=sx(r[0])+Math.max(2,sx(r[1])-sx(r[0]))&&y>=sy(r[3])&&y<=sy(r[3])+Math.max(2,sy(r[2])-sy(r[3]));});setAfter(0);setBin(selected??null);}
+          }}
           onPointerLeave={() => setHover("")} onPointerMove={event => {
             const rect = event.currentTarget.getBoundingClientRect();
             const px = event.clientX - rect.left, py = event.clientY - rect.top;
@@ -98,13 +115,20 @@ function ConditionChart({ condition, sourceBounds, viewport, resolution, color, 
               setHover(hit && b ? `구간 관측 ${hit.count}행 · P [${b[0].toPrecision(4)}, ${b[1].toPrecision(4)}] · ${scatterAxes[axis].short} [${b[2].toPrecision(4)}, ${b[3].toPrecision(4)}] · 개별 precursor 값은 원본 TSV에서 확인` : "");
             }
           }} />
+        {onSelect&&<details open={!!bin||pointRows!==null||undefined}><summary>원본 관측 선택</summary>
+          {condition.mode==='density'?<label>밀도 구간 <select value={bin?`${bin.ix},${bin.iy}`:''} onChange={e=>{const hit=condition.bins.find(b=>`${b.ix},${b.iy}`===e.target.value);setAfter(0);setBin(hit??null)}}><option value="">구간 선택</option>{condition.bins.map(b=><option key={`${b.ix},${b.iy}`}>{b.ix},{b.iy}</option>)}</select></label>:<label>Gene / site / accession / precursor <input value={query} onChange={e=>{setQuery(e.target.value);setPointRows(null);setAfter(0)}}/></label>}
+          {(()=>{const matches=(pointRows??condition.points).filter(p=>[p.gene,p.site,p.accession,p.precursor_id,p.feature_id].join(' ').toLowerCase().includes(query.toLowerCase()));
+            const rows=condition.mode==='density'?page?.items??[]:matches.slice(after,after+50);
+            return <><ul>{rows.map(p=><li key={p.source_row}><button disabled={!p.feature_id} onClick={()=>onSelect({feature_id:p.feature_id!,revision,label:p.gene+' '+p.site,source_row:p.source_row})}>{p.gene} {p.site} · {p.precursor_id} · 행 {p.source_row}</button></li>)}</ul>
+            <button disabled={!after} onClick={()=>setAfter(0)}>처음</button> <button disabled={condition.mode==='density'?!page?.next_after:after+50>=matches.length} onClick={()=>setAfter(condition.mode==='density'?page!.next_after!:after+50)}>다음 관측</button></>})()}
+          {error&&<p role="alert">{error}</p>}</details>}
         <p role="status" className="min-h-10 break-words px-2 text-xs text-muted-foreground" data-testid="scatter-hover">{hover || "점 또는 밀도 구간에 마우스를 올려 값을 확인하세요."}</p>
       </>}
     </CardContent>
   </Card>;
 }
 
-export function VectorScatterPlots({ orderId }: { orderId: number }) {
+export function VectorScatterPlots({ orderId,onSelect }: { orderId: number;onSelect?:(p:PrecursorSelection)=>void }) {
   const [axis, setAxis] = useState<ScatterAxis>("adjusted");
   const [zoom, setZoom] = useState(1), [retry, setRetry] = useState(0);
   const [state, setState] = useState<{ key: string; data?: ScatterOverview; error?: string }>({ key: "" });
@@ -143,12 +167,12 @@ export function VectorScatterPlots({ orderId }: { orderId: number }) {
       Scatter 조회 실패: {current.error}<Button className="ml-2" size="sm" variant="outline" onClick={() => setRetry(r => r + 1)}><RotateCcw className="mr-1 h-3 w-3" />다시 시도</Button>
     </div> : !data ? <p role="status" className="flex items-center gap-2 p-4 text-sm"><Loader2 className="h-4 w-4 animate-spin" />전체 관측 분포 불러오는 중…</p> : <>
       <p className="text-sm" data-testid="scatter-counts">원본 {data.coverage.source_rows.toLocaleString()}행 = 표시 가능 {data.coverage.represented_rows.toLocaleString()}행 + 제외 {data.coverage.excluded_rows.toLocaleString()}행 · 식별자 미해결 표시 {data.coverage.identity_unresolved_represented_rows.toLocaleString()}행 · 표본 제외 {data.coverage.sampled_out_rows}행</p>
-      <p className="text-xs text-muted-foreground">조건별 {data.point_limit_per_condition.toLocaleString()}행 이하는 모든 점, 초과하면 전체 관측의 {data.bin_resolution}×{data.bin_resolution} 밀도입니다. 확대는 표시 범위만 바꾸며 원본 수는 유지합니다. 밀도에서 개별 precursor 값은 원본 TSV로 확인하세요.</p>
+      <p className="text-xs text-muted-foreground">조건별 {data.point_limit_per_condition.toLocaleString()}행 이하는 모든 점, 초과하면 전체 관측의 {data.bin_resolution}×{data.bin_resolution} 조건 내 상대 밀도입니다. 확대는 표시 범위만 바꾸며 원본 수는 유지합니다. 밀도에서 개별 precursor 값은 원본 TSV로 확인하세요.</p>
       {data.coverage.excluded_rows > 0 && <details className="text-xs"><summary className="cursor-pointer">제외 사유</summary>
         <ul className="mt-2 space-y-1">{Object.entries(data.coverage.exclusion_reasons).map(([reason, count]) => <li key={reason}>{exclusionLabels[reason] || reason}: {count.toLocaleString()}행</li>)}</ul>
       </details>}
       {data.status === "empty_source" ? <p role="status">원본 TSV에 관측행이 없습니다.</p> : data.status === "no_eligible_observations" ? <p role="status">선택한 두 축에 적격한 관측이 없습니다. 제외 사유와 다른 축을 확인하세요.</p> : viewport && data.bounds && <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {conditions.map((condition, i) => <ConditionChart key={`${requestKey}:${condition.condition}`} condition={condition} axis={axis}
+        {conditions.map((condition, i) => <ConditionChart key={`${requestKey}:${condition.condition}`} condition={condition} axis={axis} revision={data.measurement_revision} orderId={orderId} onSelect={onSelect}
           sourceBounds={data.bounds!} viewport={viewport} resolution={data.bin_resolution} color={SCATTER_PALETTE[i % SCATTER_PALETTE.length]} />)}
       </div>}
       <details className="break-all text-xs text-muted-foreground"><summary className="cursor-pointer">측정 출처</summary>{data.source.filename} · {data.measurement_revision}</details>

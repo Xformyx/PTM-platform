@@ -95,3 +95,9 @@ export function savedViewSettings(orderId:number):Partial<{mode:ViewMode;n:numbe
    representation:['conventional_log2_contrast','lod_relative_log2','normalized_log2_intensity','occupancy_logit_delta'].includes(p.representation)?p.representation:undefined};
  }catch{return {};}
 }
+
+export function featureColor(id:string):string {
+  let hash=0;
+  for(const char of id)hash=(Math.imul(31,hash)+char.charCodeAt(0))>>>0;
+  return `hsl(${hash%360} 65% 42%)`;
+}

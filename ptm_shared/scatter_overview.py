@@ -85,6 +85,9 @@ def _coordinate(row, axis):
     legacy_control = condition.lower() in CONTROL_LABELS or re.match(r"^control(?:\b|_)", condition, re.I)
     if role in {"control","reference"} or (not role and legacy_control):
         return condition, None, "control_reference_row"
+    scope = [(key, _text(row, key, key.title())) for key in
+             ("condition_id", "arm_id", "contrast_id", "reference_condition_id", "effect_series_id")]
+    condition += "".join(f" · {key}={value}" for key, value in scope if value)
     x = axis_number(row, "protein")
     if x is None:
         return condition, None, "protein_axis_unavailable"
@@ -228,3 +231,29 @@ def verified_source_stream(directory, suffix, expected):
                 yield data
 
     return stream, chunks(), size, path.name
+
+
+def scatter_members(directory, suffix, axis, revision, condition, ix, iy, after=0, limit=50):
+    """Page original rows using the same eligibility and bin edges as the canvas."""
+    path = source_path(directory, suffix)
+    before = _fingerprint(path)
+    view = read_scatter_overview(directory, suffix, axis)
+    if view["measurement_revision"] != revision:
+        raise ScatterSourceChanged("measurement_revision_changed")
+    bounds = view["bounds"]
+    members = []
+    if bounds is not None:
+        for line, raw in _records(path):
+            if line <= after:
+                continue
+            key, xy, reason = _coordinate(raw, axis)
+            if reason or key != condition:
+                continue
+            if (_bin(xy[0], *bounds[:2]), _bin(xy[1], *bounds[2:])) == (ix, iy):
+                members.append(_point(raw, line, xy))
+                if len(members) > limit:
+                    break
+    if _fingerprint(path) != before or path != source_path(directory, suffix):
+        raise ScatterSourceChanged("measurement_revision_changed")
+    return {"items": members[:limit], "next_after": members[limit-1]["source_row"] if len(members)>limit else None,
+            "measurement_revision": revision}

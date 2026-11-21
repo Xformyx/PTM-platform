@@ -11,6 +11,7 @@ def load_vector_snapshot(output_dir, suffix):
         path = Path(output_dir) / name
         if not path.is_file():
             continue
+        before = path.stat()
         digest = hashlib.sha256()
         with path.open("rb") as handle:
             for block in iter(lambda: handle.read(1024*1024), b""):
@@ -29,6 +30,9 @@ def load_vector_snapshot(output_dir, suffix):
                 projected = project_plot_row(raw)
                 projected["source_record"] = raw
                 rows.append(projected)
+        after = path.stat()
+        if (before.st_ino, before.st_ctime_ns, before.st_size) != (after.st_ino, after.st_ctime_ns, after.st_size):
+            raise ValueError("measurement_revision_changed")
         return {"rows": normalize_plot_records(rows), "measurement_revision": revision,
                 "source_rows": count, "quarantine": quarantine}
     return {"rows": [], "measurement_revision": None, "source_rows": 0, "quarantine": []}

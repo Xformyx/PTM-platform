@@ -144,7 +144,15 @@ class VectorColumnar:
     def feature_page(self, *, axis="adjusted", after="", limit=200, search=""):
         if not 1 <= limit <= 1000: raise ValueError("page_limit_must_be_1_to_1000")
         col = AXIS_COLUMNS[axis]
-        ids = [r[0] for r in self.db.execute(f"SELECT DISTINCT feature_id FROM cells WHERE {col} IS NOT NULL AND feature_id > ? AND feature_id LIKE ? ORDER BY feature_id LIMIT ?", [after, f"%{search}%", limit+1]).fetchall()]
+        predicate = ""
+        params = [after]
+        if search:
+            predicate = """AND feature_id IN (
+                SELECT feature_id FROM observations WHERE contains(lower(concat_ws(' ',feature_id,
+                json_extract_string(record_json,'$.gene'),json_extract_string(record_json,'$.position'),
+                json_extract_string(record_json,'$.accession'),json_extract_string(record_json,'$.precursor_id'))),lower(?)))"""
+            params.append(search)
+        ids = [r[0] for r in self.db.execute(f"SELECT DISTINCT feature_id FROM cells WHERE {col} IS NOT NULL AND feature_id > ? {predicate} ORDER BY feature_id LIMIT ?", [*params, limit+1]).fetchall()]
         return {"feature_ids":ids[:limit], "next_cursor":ids[limit-1] if len(ids)>limit else None, "measurement_revision":self.manifest["measurement_revision"]}
 
     def trajectories(self, feature_ids):

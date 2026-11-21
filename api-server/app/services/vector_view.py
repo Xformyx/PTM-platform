@@ -156,3 +156,25 @@ def jsonable_classic_payload(value):
     if isinstance(value, tuple):
         return [jsonable_classic_payload(item) for item in value]
     return value
+
+
+def saved_multisite_pairs(cache, view):
+    """Resolve stored pair labels that contain the original precursor identifier."""
+    if not cache.get("measurement_revision") or cache["measurement_revision"] != view.get("measurement_revision"):
+        return []
+    features = {p["label"]: p for p in view["features"]}
+    result = []
+    for pair in cache.get("divergence_pairs") or []:
+        left, right = (features.get(pair.get(k)) for k in ("siteA","siteB"))
+        if not left or not right or not left.get("feature_id") or not right.get("feature_id"):
+            continue
+        parent = ("fasta_taxonomy_id", "accession", "isoform", "protein_group")
+        if not left.get("accession") or not left.get("fasta_taxonomy_id") or any(left.get(k)!=right.get(k) for k in parent):
+            continue
+        import re
+        a,b = (str(p.get("position") or "").upper() for p in (left,right))
+        if a == b or not all(re.fullmatch(r"[A-Z][1-9][0-9]*",site) for site in (a,b)):
+            continue
+        result.append({**pair,"feature_id_a":left["feature_id"],"feature_id_b":right["feature_id"],
+                       "position_a":a,"position_b":b,"protein":left["gene"]})
+    return result

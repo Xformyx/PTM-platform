@@ -1,3 +1,5 @@
+import {featureColor} from "../lib/vectorView";
+import {SelectedPrecursor,type PrecursorSelection} from "../components/SelectedPrecursor";
 import {SubstrateSignalFlow} from '../components/SubstrateSignalFlow';
 import {FullTrajectoryBrowser} from '../components/FullTrajectoryBrowser';
 import { studyFieldLabel } from "@/lib/analysisContext";
@@ -1368,7 +1370,8 @@ function canonicalDivergenceToEntry(pair: any): SitePairEntry | null {
   return {
     gene: String(pair.protein),
     siteA: {
-      position: a.position,
+      feature_id: pair.feature_id_a,
+      position: pair.position_a??a.position,
       label: a.label,
       waveLabel: String(pair.directionality_tier || "D0_unresolved"),
       peakCondition: String(pair.peak_condA || ""),
@@ -1377,7 +1380,8 @@ function canonicalDivergenceToEntry(pair: any): SitePairEntry | null {
       activityClass: pair.is_denovoA ? "de_novo" : "regulated",
     },
     siteB: {
-      position: b.position,
+      feature_id: pair.feature_id_b,
+      position: pair.position_b??b.position,
       label: b.label,
       waveLabel: String(pair.directionality_tier || "D0_unresolved"),
       peakCondition: String(pair.peak_condB || ""),
@@ -1901,6 +1905,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
     gene: string;
     position: string;
     label: string;
+    annotation_match?: {status:string;assertions:Array<{annotation_id:string;match_scope:string;source:Record<string,any>}>};
     protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string };
     denovo_confidence?: string;
     detection_control?: string;
@@ -1974,7 +1979,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
             init[key] = true;
           }
         });
-        setChecked(init);
+        setChecked(previous=>({...init,...previous}));
       })
       .catch((error) => active && setData({ vector_data: [], top_n_ptms: [], source: "error", error: String(error?.message || error) }))
       .finally(() => {if(active)setLoading(false);});
@@ -2124,11 +2129,6 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
   const visibleLabels = filteredPtms.filter((p) => checked[featureKey(p)]).map((p) => p.label);
 
   // v9.28: Activity class-based color palettes
-  const AC_PALETTES: Record<string, string[]> = {
-    de_novo: ["#E65100", "#F57C00", "#FF9800", "#FFB74D", "#D84315", "#BF360C", "#EF6C00", "#FFA726", "#FB8C00", "#E55100"],
-    regulated: ["#1565C0", "#1E88E5", "#42A5F5", "#64B5F6", "#0D47A1", "#1976D2", "#2196F3", "#90CAF9", "#0277BD", "#039BE5"],
-    minor: ["#4CAF50", "#66BB6A", "#81C784", "#A5D6A7", "#2E7D32", "#388E3C", "#43A047", "#56985A", "#6DAF71", "#7BC67F"],
-  };
   const AC_LINE_STYLE: Record<string, { strokeWidth: number; strokeDasharray?: string; opacity: number }> = {
     de_novo: { strokeWidth: 2.5, opacity: 1 },
     regulated: { strokeWidth: 2.2, opacity: 0.95 },
@@ -2137,14 +2137,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
 
   // Fixed color map: each PTM gets color based on its activity class
   const colorMap = new Map<string, string>();
-  const _acIdx: Record<string, number> = { de_novo: 0, regulated: 0, minor: 0 };
-  uniquePtms.forEach((p) => {
-    const key = featureKey(p);
-    const ac = ptmActivityClass.get(key) || "minor";
-    const palette = AC_PALETTES[ac] || AC_PALETTES.minor;
-    colorMap.set(p.label, palette[_acIdx[ac] % palette.length]);
-    _acIdx[ac]++;
-  });
+  uniquePtms.forEach(p=>colorMap.set(p.label,featureColor(featureKey(p))));
 
   // Map label to activity class for line style lookup
   const labelToAC = new Map<string, string>();
@@ -2219,7 +2212,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className={`px-2 py-0.5 rounded-full font-medium ${data.source === "enriched" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-          {data.source === "enriched" ? "Source: Enriched (RAG)" : "Source: Preprocessing (TSV)"}
+          전처리 TSV · 선택 축 적격성 적용 후 Top-N
         </span>
         <span data-testid="top-n-setting" className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
           <label>선정 방식 <select value={displayMode} onChange={e=>setDisplayMode(e.target.value)}><option value="per_condition_top_n">조건별 Top-N 합집합</option><option value="global_top_n">전체 Top-N</option><option value="all_observed">전체 관측</option></select></label> {displayMode!=="all_observed"&&<label>N <input type="number" min={1} value={displayN} onChange={e=>setDisplayN(Math.max(1,Number(e.target.value)||1))}/></label>} · {data.top_n_setting??"All"} <label>값 표현 <select value={displayRepresentation} onChange={e=>setDisplayRepresentation(e.target.value)}><option value="conventional_log2_contrast">Conventional log2 contrast</option><option value="lod_relative_log2">LOD-relative log2 (별도 축)</option><option value="normalized_log2_intensity">Normalized log2 intensity (별도 축)</option></select></label>
@@ -2621,7 +2614,9 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
               const key = featureKey(p);
               const trend = ptmTrends.get(key) || "other";
               const actCls = ptmActivityClass.get(key) || "minor";
-              const pc = p.protein_class;
+              const assertions=p.annotation_match?.assertions||[];
+              const roles=assertions.filter(a=>a.source?.protein_class?.role);
+              const pc = p.protein_class ?? (p.annotation_match?.status==="matched" && roles.length===1 ? roles[0].source.protein_class : undefined);
               // P1: server-side canonical pattern label (from substrate_temporal_dynamics.v1)
               const p1Pat = p1PatternMap.get(key);
               const dotTitle = p1Pat
@@ -2954,7 +2949,8 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
   );
 }
 
-function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", orderStatus, initialN }: { orderId: number; singleTimePoint?: boolean; ptmType?: string; orderStatus?: string; initialN?: unknown }) {
+export function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", orderStatus, initialN }: { orderId: number; singleTimePoint?: boolean; ptmType?: string; orderStatus?: string; initialN?: unknown }) {
+  const [tab,setTab]=useState("scatter"),[selected,setSelected]=useState<PrecursorSelection|null>(null);
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2983,21 +2979,20 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="scatter">
-        <TabsList className="grid w-full max-w-2xl grid-cols-3">
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="grid h-auto w-full max-w-2xl grid-cols-1 sm:grid-cols-3">
           <TabsTrigger value="scatter" className="gap-2">
-            <ChartScatter className="h-3.5 w-3.5" /> Scatter Plots
+            <ChartScatter className="h-3.5 w-3.5" /> 전체 반응 분포
           </TabsTrigger>
           <TabsTrigger
             value="timeseries"
             className="gap-2"
-            disabled={singleTimePoint}
-            title={singleTimePoint ? "Single time point — time-series not available" : undefined}
+            title="저장된 precursor 관측"
           >
-            <TrendingUp className="h-3.5 w-3.5" /> {isUbi ? "Top N Ubi Site Time-series" : "Top N PTM Time-series"}
+            <TrendingUp className="h-3.5 w-3.5" /> 기질 시간 반응
           </TabsTrigger>
           <TabsTrigger value="explorer" className="gap-2">
-            <Network className="h-3.5 w-3.5" /> Signaling Explorer
+            <Network className="h-3.5 w-3.5" /> Kinase·경로 근거
           </TabsTrigger>
         </TabsList>
 
@@ -3012,7 +3007,7 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
               </p>
             </CardHeader>
             <CardContent>
-              <ScatterPlotsInteractive orderId={orderId} orderStatus={orderStatus} />
+              <VectorScatterPlots orderId={orderId} onSelect={p=>{setSelected(p);setTab("timeseries")}}/>
               {files.length > 0 && (
                 <div className="mt-6 pt-4 border-t">
                   <p className="text-xs text-muted-foreground mb-2">Download static report (PNG)</p>
@@ -3046,6 +3041,7 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
               </p>
             </CardHeader>
             <CardContent>
+              {selected&&<SelectedPrecursor key={selected.revision+selected.feature_id} orderId={orderId} selection={selected} onEvidence={()=>setTab("explorer")}/>}
               <SubstrateSignalFlow orderId={orderId}/>
               <TopNTimeSeriesPlot key={orderId} orderId={orderId} ptmType={ptmType} initialN={initialN}/>
               <details><summary>전체 Legacy precursor 궤적 (별도 identity)</summary><FullTrajectoryBrowser orderId={orderId} axis="relative"/></details>
@@ -3064,7 +3060,7 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
               </p>
             </CardHeader>
             <CardContent>
-              <SignalingEvidenceExplorer key={orderId} orderId={orderId} initialN={initialN} />
+              <SignalingEvidenceExplorer selection={selected} key={orderId} orderId={orderId} initialN={initialN} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -5096,7 +5092,7 @@ export default function OrderDetail() {
 
         <TabsContent value="primary-a" className="mt-4">
           <PrimaryAEvidence orderId={order.id} status={order.status} />
-          <SubstrateSignalFlow orderId={order.id}/>
+
         </TabsContent>
         <TabsContent value="analysis-statistics" className="mt-4">
           <AnalysisStatisticsTab orderId={order.id} />
@@ -5105,7 +5101,7 @@ export default function OrderDetail() {
         <TabsContent value="vector-plot" className="mt-4">
           <div className="flex gap-4">
             <div className={chatOpen ? "flex-1 min-w-0" : "w-full"}>
-              <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} orderStatus={order.status} initialN={order.report_options?.top_n_ptms} />
+              <VectorPlotTab key={order.id} orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} orderStatus={order.status} initialN={order.report_options?.top_n_ptms} />
             </div>
 
             <div className={`${chatOpen ? "w-[420px]" : "w-10"} flex-shrink-0 h-[calc(100vh-200px)] sticky top-4 rounded-xl border border-border shadow-lg overflow-hidden`}>

@@ -3,6 +3,7 @@ import asyncio
 from pathlib import Path
 from typing import Literal
 import csv
+import json
 from functools import lru_cache
 from threading import RLock
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -27,17 +28,20 @@ async def substrate_signal(order_id:int, kind:str, body:dict, db=Depends(get_db)
     from ptm_shared.substrate_signal_view import published_root, signal_page
     def read():
         root=published_root(Path(get_settings().OUTPUT_DIR)/order.order_code)
+        run_id = json.loads((root/"provenance.json").read_text())["run_id"]
+        if body.get("expected_run_id") is not None and body["expected_run_id"] != run_id:
+            raise ValueError("published_run_changed")
         catalog,lock=_signal_session(str(root))
         with lock:
             catalog._require()
             expected = body.get("expected_catalog_id")
             if expected is not None and expected != catalog.catalog["catalog_id"]:
                 raise ValueError("published_catalog_changed; reopen the signal view")
-            return signal_page(catalog,kind,body.get('filters'),body.get('cursor'),body.get('limit',25))
+            return {**signal_page(catalog,kind,body.get('filters'),body.get('cursor'),body.get('limit',25)), 'run_id':run_id}
     try:
         return await asyncio.to_thread(read)
     except FileNotFoundError:
-        if body.get("expected_catalog_id"):
+        if body.get("expected_catalog_id") or body.get("expected_run_id"):
             raise HTTPException(409, "expected_published_catalog_unavailable")
         return {'status':'unavailable','reason':'published_astra_snapshot_unavailable','items':[],'total_count':0,'next_cursor':None}
     except (ValueError,KeyError) as exc:
@@ -61,6 +65,20 @@ async def vector_scatter_data(order_id: int, axis: Literal["adjusted", "unadjust
         raise HTTPException(422, detail={"reason": "source_vector_parse_failed"}) from exc
 
 
+@router.get("/{order_id}/vector-scatter-members")
+async def scatter_bin(order_id:int, axis:Literal["adjusted","unadjusted","occupancy"], revision:str, condition:str,
+                      ix:int=Query(ge=0,lt=64), iy:int=Query(ge=0,lt=64), after:int=Query(0,ge=0),
+                      db=Depends(get_db), user=Depends(get_current_user)):
+    from ptm_shared.scatter_overview import scatter_members, ScatterSourceChanged
+    order = await access(db, user, order_id)
+    suffix = "_phospho" if order.ptm_type == "phosphorylation" else "_ubi"
+    try:
+        return await asyncio.to_thread(scatter_members, Path(get_settings().OUTPUT_DIR)/order.order_code,
+                                       suffix, axis, revision, condition, ix, iy, after)
+    except (ScatterSourceChanged, FileNotFoundError) as exc:
+        raise HTTPException(409, "measurement_revision_changed") from exc
+
+
 @router.get("/{order_id}/vector-scatter-source")
 async def scatter_source(order_id: int, sha256: str = Query(pattern=r"^[a-f0-9]{64}$"),
                          db=Depends(get_db), user=Depends(get_current_user)):
@@ -79,6 +97,37 @@ async def scatter_source(order_id: int, sha256: str = Query(pattern=r"^[a-f0-9]{
 
 
 def query(directory, suffix, operation, revision, options):
+    if operation == "feature-detail":
+        from app.services.vector_view import load_annotations
+        from ptm_shared.vector_plot import plot_feature_metadata
+        from ptm_shared.vector_snapshot import load_vector_snapshot
+        from ptm_shared.plot_selection import condition_grid
+        feature_id = options.get("feature_id")
+        if not revision or not isinstance(feature_id, str) or not feature_id:
+            raise HTTPException(422, "feature_and_revision_required")
+        try:
+            store = VectorColumnar(directory, suffix)
+        except FileNotFoundError:
+            snapshot = load_vector_snapshot(directory, suffix)
+            if revision != snapshot["measurement_revision"]:
+                raise HTTPException(409, "measurement_revision_changed")
+            grid = condition_grid(snapshot["rows"])
+            rows = [r for r in snapshot["rows"] if r.get("feature_id") == feature_id]
+        else:
+            try:
+                if store.manifest["measurement_revision"] != revision:
+                    raise HTTPException(409, "measurement_revision_changed")
+                rows = store.trajectories([feature_id])
+                grid = store.manifest_counts()["condition_grid"]
+            finally:
+                store.close()
+        annotations, source = load_annotations(directory, suffix)
+        features = plot_feature_metadata(rows, annotations)
+        if not features:
+            raise HTTPException(404, "precursor_unavailable")
+        return {"measurement_revision":revision, "condition_grid":grid, "feature":features[0],
+                "observations":[{k:v for k,v in r.items() if k != "source_record"} for r in rows],
+                "annotation_source":source}
     try:
         store = VectorColumnar(directory, suffix)
     except FileNotFoundError as exc:
