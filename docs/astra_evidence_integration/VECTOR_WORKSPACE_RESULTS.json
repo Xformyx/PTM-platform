@@ -1,0 +1,160 @@
+{
+  "baseline": "3311050c7af020057bd622b8ab8225671e0be821",
+  "branch": "codex/vector-workspace",
+  "commits": {
+    "V01": "6c0d3e42de98d098ef41cd4ac9fa830a7c909ef9",
+    "V02": "237d45cd90389fd1a6b8bbd1ee63117bf91c6713",
+    "V03": "b8b68c12a0f59893aa29590bbf82accb41179d3e",
+    "V04": "6196734dff9a4b29cbce466012667280037904cd"
+  },
+  "implementation_files": [
+    "api-server/app/api/orders.py",
+    "api-server/app/api/signaling_explorer.py",
+    "api-server/app/api/vector_view.py",
+    "api-server/app/services/vector_view.py",
+    "api-server/tests/test_classic_top_n_plot.py",
+    "api-server/tests/test_scatter_overview_api.py",
+    "api-server/tests/test_substrate_signal_http.py",
+    "docs/astra_evidence_integration/VECTOR_WORKSPACE_V01_KO.md",
+    "docs/astra_evidence_integration/VECTOR_WORKSPACE_V02_KO.md",
+    "docs/astra_evidence_integration/VECTOR_WORKSPACE_V03_KO.md",
+    "docs/astra_evidence_integration/VECTOR_WORKSPACE_V04_KO.md",
+    "frontend/src/components/FullTrajectoryBrowser.tsx",
+    "frontend/src/components/KinaseModuleAnalysis.tsx",
+    "frontend/src/components/PrimaryAEvidence.tsx",
+    "frontend/src/components/SelectedPrecursor.tsx",
+    "frontend/src/components/SignalingEvidenceExplorer.tsx",
+    "frontend/src/components/SubstrateSignalFlow.tsx",
+    "frontend/src/components/VectorScatterPlots.tsx",
+    "frontend/src/lib/vectorView.ts",
+    "frontend/src/pages/OrderDetail.tsx",
+    "frontend/tests/vectorWorkspace.browser.html",
+    "frontend/tests/vectorWorkspace.browser.tsx",
+    "ptm_shared/plot_selection.py",
+    "ptm_shared/scatter_overview.py",
+    "ptm_shared/signaling_evidence_index.py",
+    "ptm_shared/tests/test_scatter_overview.py",
+    "ptm_shared/tests/test_vector_columnar.py",
+    "ptm_shared/tests/test_vector_view_v2.py",
+    "ptm_shared/vector_columnar.py",
+    "ptm_shared/vector_plot.py",
+    "ptm_shared/vector_snapshot.py",
+    "scripts/build_explorer_fixture.py",
+    "scripts/validate_explorer_browser.mjs",
+    "scripts/validate_scatter_browser.mjs",
+    "scripts/validate_vector_workspace.py"
+  ],
+  "verification": {
+    "pytest_distinct": 60,
+    "node_distinct": 12,
+    "production_build": "passed",
+    "build_warnings": [
+      "Browserslist data age",
+      "main chunk above 500 kB"
+    ],
+    "scatter_browser": {
+      "synthetic_only": true,
+      "full_login_order_e2e": false,
+      "browser": "157.0.8103.79",
+      "scenarios": [
+        "legacy TSV / six condition cards / nonempty Canvas",
+        "precursor/raw label hover including real zero",
+        "real viewport zoom in/out",
+        "independent U / quality-gated paired occupancy",
+        "late previous axis response discarded",
+        "late previous order response discarded",
+        "390px mobile without horizontal overflow",
+        "authorized source download without write requests",
+        "read error / no blank canvas / retry",
+        "120,000 whole-row bins / density range hover",
+        "constant zero density / all 2,001 source rows accessible on hover",
+        "empty source distinguished from axis-ineligible source without blank Canvas",
+        "zero browser errors / zero worker or write requests"
+      ],
+      "errors": [],
+      "scenario_count": 13,
+      "request_count": 16,
+      "write_requests": 0
+    },
+    "explorer_browser": {
+      "status": "passed",
+      "scenarios": [
+        "actual shared chart: points, precursor identities, full inventory",
+        "light/dark heatmap contrast and identity-bound selection",
+        "pathway membership includes full population independent of display Top N",
+        "hover tooltip and explicit zoom/restoration",
+        "track changes preserve unavailable occupancy and expose auxiliary U",
+        "Top N and inventory modes change only read projection",
+        "sealed source spans, correct citation identity and complete paginated evidence/claim access",
+        "late evidence response and cursors cannot cross selected features",
+        "evidence-only failure remains visible and retries without hiding observations",
+        "versioned comparison results are browsable without recomputing primary scores",
+        "late pathway A response cannot replace pathway B",
+        "390px mobile layout without document overflow",
+        "parent analysis and report descendant keep separate immutable component bindings",
+        "stale 409 selector recovery and optional pathway 503",
+        "legacy TSV observations without bundle, correct U label, points and mobile layout",
+        "source error and explicit retry"
+      ],
+      "errors": []
+    },
+    "workspace_browser": {
+      "widths": [
+        1440,
+        1280,
+        990,
+        390
+      ],
+      "feature_id": "FEATURE-295A9EC85C34CCFE3FFA",
+      "revision": "vector-sha256:c408770e31b502d4037dd9102332a5795ba306abdf226fb15f33b505b29f70f2",
+      "empty_A_to_U": true,
+      "canonical_run_binding": true,
+      "canonical_pin_source_refs": true,
+      "svg_time_spacing_and_gap": true,
+      "console_exceptions": [],
+      "unexpected_posts": []
+    },
+    "browser_source": "production React components with synthetic API responses and saved signal_page records",
+    "python_repeat_accounting": "45 tests in initial six-suite run; all 45 included in final 60. Earlier stage and debugging reruns excluded from distinct totals."
+  },
+  "saved_archive_read_only": {
+    "run": "g0-adfcea86b3504959b75986baf994ade4",
+    "path": "codex-inputs/substrate-signal-20261114/final-reader-revision-v3/astra_analysis_package_g0-adfcea86b3504959b75986baf994ade4.zip",
+    "sha256": "ea3a905d2c5d60ea9735a0f62714f8d6338f38fcc5d6f5ad98964b32a2924926",
+    "pointer_sha256": "dfb9a367a467f3bc913aaca3fffe1c72c83664642f20cc07dfbfd7b4dc646ae8",
+    "zip_table_and_extracted_hashes": {
+      "signal_flow/substrate_trajectories.csv": "04448f291745ed2792457dd05b88885b35d65eb54ddcf206f1b4a244516c5c0f",
+      "signal_flow/kinase_substrate_bundles.csv": "ecad4549aad413e109425f234ee91899469502bfc7db3c474b1144662351ccb6",
+      "kinase/method_scores.csv": "bac9ec3ce979ced99aee840471afef057cefda197f5c9a8076e3c71045359ccd",
+      "quant/comparisons.csv": "0936a28fab025b60255290ce4652a1f7274279740a536824b7802dadfa3b3875",
+      "reproducibility/data_dictionary.json": "0a6bb825696c801a0868e32d4e640323473ed1c5d3795c84f4dcc4607a22b4aa"
+    },
+    "form": "form_ba2993ff20c8f5f3",
+    "effect_series": "series_8bcf2a244a036b564b4c",
+    "source_contrasts_checked": 6,
+    "times": [
+      1.0,
+      5.0,
+      15.0,
+      30.0,
+      60.0,
+      180.0
+    ],
+    "actual_shared_control": true
+  },
+  "not_verified": [
+    "authenticated production login / order / live queue",
+    "time-matched production archive",
+    "archive-wide per-value comparison and full replay",
+    "model-generated report or biological performance"
+  ],
+  "new_real_science_runs": 0,
+  "new_external_rag_or_model_requests": 0,
+  "task_listener_5191_after_shutdown": false,
+  "existing_caffeinate_pids": [
+    2450,
+    5292
+  ],
+  "disk_free_KiB": 4045020,
+  "remote_push_merge_deploy_flag_changes": false
+}
