@@ -18,7 +18,7 @@ const browser=await chromium.launch({headless:true,executablePath:options.browse
 const context=await browser.newContext({viewport:{width:1440,height:1000}});
 await context.tracing.start({screenshots:true,snapshots:true});
 const page=await context.newPage(),errors=[],requests=[],scenarios=[];
-let fail=false,holdA=false,legacy=false,holdEvidence=false,failEvidence=false,pending=[];
+let fail=false,failPathway=false,holdA=false,legacy=false,holdEvidence=false,failEvidence=false,pending=[];
 page.on('pageerror',e=>errors.push(String(e)));
 const base='/orders/1/evidence-runs/'+fixture.bundle_id;
 const pathways=fixture.responses[base+'/pathways'].records;
@@ -26,6 +26,8 @@ const keyA=pathways.find(p=>p.name.endsWith(' A')).pathway_key;
 await page.route('**/api/orders/**',async route=>{
  const request=route.request(),url=new URL(request.url());requests.push({method:request.method(),path:url.pathname});
  assert.equal(request.method(),'GET','Explorer browsing must not enqueue analysis/search');
+ if(failPathway&&url.pathname.endsWith('/pathways'))return route.fulfill({status:503,json:{detail:'pathway unavailable'}});
+ if(url.pathname.includes('/broken'))return route.fulfill({status:409,json:{detail:'component_integrity_failed'}});
  if(fail)return route.fulfill({status:503,json:{detail:'synthetic read failure'}});
  if(failEvidence&&url.pathname.endsWith('/evidence'))return route.fulfill({status:503,json:{detail:'synthetic evidence failure'}});
  if(legacy&&url.pathname==='/api/orders/1/evidence-runs')return route.fulfill({json:{records:[],status:'legacy_unbound'}});
@@ -34,6 +36,7 @@ await page.route('**/api/orders/**',async route=>{
  const payload=fixture.responses[key];assert.ok(payload,'No real API fixture for '+key);
  if(holdA&&params.get('pathway_key')===keyA){pending.push({route,payload});return;}
  if(holdEvidence&&url.pathname.endsWith('/evidence')&&params.get('feature_id')===fixture.evidence_feature_id){pending.push({route,payload});return;}
+ if(key==='/orders/1/evidence-runs')return route.fulfill({json:{...payload,records:[{bundle_id:'broken',execution_status:'completed',explorer_status:'stale_or_incompatible'},...payload.records]}});
  await route.fulfill({json:payload});
 });
 async function done(name){scenarios.push(name);const line=JSON.stringify({scenario:name,status:'passed'});console.log(line);await fs.appendFile(path.join(options.output,'stdout.log'),line+'\n');await fs.writeFile(path.join(options.output,'progress.json'),JSON.stringify(scenarios));}
@@ -43,6 +46,29 @@ try {
  await page.waitForFunction(()=>document.querySelectorAll('.recharts-line-dots circle').length>0);
  assert.ok((await page.locator('.recharts-line-dots circle').count())>0);
  await done('actual shared chart: points, precursor identities, full inventory');
+ const checks=page.getByTestId('explorer-curves').getByRole('checkbox');
+ const firstLabel=(await checks.first().locator('..').innerText()).trim();
+ await checks.first().uncheck();
+ await page.getByLabel('PTM display selection').selectOption('global_top_n');
+ await page.getByLabel('PTM display selection').selectOption('inventory');
+ await page.getByText('조회 범위 전체 inventory · 5 precursor · 페이지 5').waitFor();
+ const sameCheck=page.getByTestId('explorer-curves').getByRole('checkbox',{name:firstLabel,exact:true});
+ assert.equal(await sameCheck.isChecked(),false);
+ await sameCheck.check();
+ for(const dark of [false,true]) {
+   await page.evaluate(d=>document.documentElement.classList.toggle('dark',d),dark);
+   const ratios=await page.locator('td[style*="background"]').evaluateAll(cells=>cells.map(cell=>{
+     const luminance=color=>color.match(/[0-9.]+/g).slice(0,3).map(Number)
+       .map(v=>v/255).map(v=>v<=0.04045?v/12.92:((v+0.055)/1.055)**2.4)
+       .reduce((sum,v,i)=>sum+v*[0.2126,0.7152,0.0722][i],0);
+     const style=getComputedStyle(cell),a=luminance(style.color),b=luminance(style.backgroundColor);
+     return (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);
+   }));
+   assert.ok(ratios.length && Math.min(...ratios)>=4.5);
+ }
+ await page.evaluate(()=>document.documentElement.classList.remove('dark'));
+ await done('light/dark heatmap contrast and identity-bound selection');
+
  await page.getByRole('button',{name:/Fixture pathway A/}).click();
  await page.getByText('조회 범위 선택 경로 전체 · 5 precursor · 페이지 5').waitFor();
  await done('pathway membership includes full population independent of display Top N');
@@ -109,7 +135,7 @@ try {
  await page.getByText('조회 범위 선택 경로 전체 · 1 precursor · 페이지 1').waitFor();
  await done('late pathway A response cannot replace pathway B');
  await page.setViewportSize({width:390,height:844});
- assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.waitForFunction(()=>document.documentElement.scrollWidth<=innerWidth,null,{timeout:3000});
  await page.screenshot({path:path.join(options.output,'explorer-mobile.png'),fullPage:true});
  await done('390px mobile layout without document overflow');
  await page.getByLabel('분석 run').selectOption(fixture.parent_bundle_id);
@@ -117,7 +143,14 @@ try {
  await page.getByLabel('분석 run').selectOption(fixture.bundle_id);
  await page.getByText('보고서: completed · 문헌: available').waitFor();
  await done('parent analysis and report descendant keep separate immutable component bindings');
- legacy=true;await page.reload();
+ await page.getByLabel('분석 run').selectOption('broken');
+ await page.getByRole('alert').filter({hasText:'component_integrity_failed'}).waitFor();
+ failPathway=true;await page.getByLabel('분석 run').selectOption(fixture.parent_bundle_id);
+ await page.getByRole('alert').filter({hasText:'pathway unavailable'}).waitFor();
+ await page.locator('button[data-feature-id]').first().waitFor();
+ await page.getByTestId('page-Kinase').waitFor();
+ await done('stale 409 selector recovery and optional pathway 503');
+ failPathway=false;legacy=true;await page.reload();
  await page.getByLabel('Legacy axis').waitFor();
  await page.waitForFunction(()=>document.querySelectorAll('.recharts-line-dots circle').length>0);
  await page.getByLabel('Legacy axis').selectOption('unadjusted');
@@ -125,7 +158,7 @@ try {
  assert.equal(await page.getByText('A: protein-adjusted log2 contrast',{exact:false}).count(),0);
  await page.waitForFunction(()=>document.querySelectorAll('.recharts-line-dots circle').length>0);
  await page.screenshot({path:path.join(options.output,'explorer-legacy-unadjusted.png'),fullPage:true});
- assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.waitForFunction(()=>document.documentElement.scrollWidth<=innerWidth,null,{timeout:3000});
  await done('legacy TSV observations without bundle, correct U label, points and mobile layout');
  legacy=false;
  fail=true;await page.reload();await page.getByRole('alert').waitFor();fail=false;

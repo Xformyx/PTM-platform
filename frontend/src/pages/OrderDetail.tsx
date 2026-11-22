@@ -1,3 +1,5 @@
+import {featureColor} from "../lib/vectorView";
+import {SelectedPrecursor,type PrecursorSelection} from "../components/SelectedPrecursor";
 import {SubstrateSignalFlow} from '../components/SubstrateSignalFlow';
 import {FullTrajectoryBrowser} from '../components/FullTrajectoryBrowser';
 import { studyFieldLabel } from "@/lib/analysisContext";
@@ -1368,7 +1370,8 @@ function canonicalDivergenceToEntry(pair: any): SitePairEntry | null {
   return {
     gene: String(pair.protein),
     siteA: {
-      position: a.position,
+      feature_id: pair.feature_id_a,
+      position: pair.position_a??a.position,
       label: a.label,
       waveLabel: String(pair.directionality_tier || "D0_unresolved"),
       peakCondition: String(pair.peak_condA || ""),
@@ -1377,7 +1380,8 @@ function canonicalDivergenceToEntry(pair: any): SitePairEntry | null {
       activityClass: pair.is_denovoA ? "de_novo" : "regulated",
     },
     siteB: {
-      position: b.position,
+      feature_id: pair.feature_id_b,
+      position: pair.position_b??b.position,
       label: b.label,
       waveLabel: String(pair.directionality_tier || "D0_unresolved"),
       peakCondition: String(pair.peak_condB || ""),
@@ -1396,171 +1400,6 @@ function canonicalDivergenceToEntry(pair: any): SitePairEntry | null {
     effectSize: Number(pair.effect_size || 0),
     resolutionWarning: pair.resolution_warning || null,
   };
-}
-
-function computeMultiSiteDivergence(
-  uniquePtms: Array<{ feature_id?: string; gene: string; position: string; label: string }>,
-  vectorByPtm: Map<string, VectorPlotPoint[]>,
-  conditions: string[],
-  ptmActivityClass: Map<string, "de_novo" | "regulated" | "minor">,
-  ptmPseudocountUsed: Map<string, boolean>,
-): SitePairEntry[] {
-  if (conditions.length < 3 || uniquePtms.length < 2) return [];
-
-  // Assign each PTM to a wave module (peak condition index)
-  const ptmPeak = new Map<string, { condIdx: number; peakCondition: string; peakFC: number }>();
-  uniquePtms.forEach((p) => {
-    const key = featureKey(p);
-    const arr = vectorByPtm.get(key);
-    if (!arr || conditions.some(c => !arr.some(r => r.condition === c && finite(r.value)))) return;
-    const values = conditions.map(cond => arr.find(r => r.condition === cond)?.value ?? null);
-    const bestIdx = sampledExtremumIndex(values);
-    if (bestIdx === null) return;
-    ptmPeak.set(key, { condIdx: bestIdx, peakCondition: conditions[bestIdx], peakFC: values[bestIdx]! });
-  });
-
-  // Group PTMs by gene
-  const byGene = new Map<string, typeof uniquePtms>();
-  uniquePtms.forEach((p) => {
-    if (!byGene.has(p.gene)) byGene.set(p.gene, []);
-    byGene.get(p.gene)!.push(p);
-  });
-
-  const results: SitePairEntry[] = [];
-  const seenPairs = new Set<string>();
-
-  byGene.forEach((sites, gene) => {
-    if (sites.length < 2) return;
-    for (let i = 0; i < sites.length; i++) {
-      for (let j = i + 1; j < sites.length; j++) {
-        const pA = sites[i];
-        const pB = sites[j];
-        const keyA = featureKey(pA);
-        const keyB = featureKey(pB);
-        const pairKey = [keyA, keyB].sort().join("|");
-        if (seenPairs.has(pairKey)) continue;
-        seenPairs.add(pairKey);
-
-        const peakA = ptmPeak.get(keyA);
-        const peakB = ptmPeak.get(keyB);
-        if (!peakA || !peakB) continue;
-
-        const acA = ptmActivityClass.get(keyA) ?? "minor";
-        const acB = ptmActivityClass.get(keyB) ?? "minor";
-        // Only include pairs where at least one site is regulated or de_novo
-        if (acA === "minor" && acB === "minor") continue;
-
-        const isDeNovoA = ptmPseudocountUsed.get(keyA) ?? false;
-        const isDeNovoB = ptmPseudocountUsed.get(keyB) ?? false;
-
-        // Order by peak time (early → late)
-        const [early, late] = peakA.condIdx <= peakB.condIdx ? [pA, pB] : [pB, pA];
-        const [earlyPeak, latePeak] = peakA.condIdx <= peakB.condIdx ? [peakA, peakB] : [peakB, peakA];
-        const [earlyAC, lateAC] = peakA.condIdx <= peakB.condIdx ? [acA, acB] : [acB, acA];
-        const [earlyDeNovo, lateDeNovo] = peakA.condIdx <= peakB.condIdx ? [isDeNovoA, isDeNovoB] : [isDeNovoB, isDeNovoA];
-
-        let pattern: DivergencePattern;
-        let description: string;
-
-        if (peakA.condIdx === peakB.condIdx) {
-          pattern = "multisite_coordination";
-          description = `${gene} ${early.position} + ${late.position}이 동일 timepoint (peak: ${earlyPeak.peakCondition})에서 peak를 보임 → same-peak site coordination 관찰`;
-        } else if (earlyPeak.peakFC > 0 && latePeak.peakFC < 0) {
-          pattern = "signal_attenuation";
-          description = `${gene} ${early.position}과 ${late.position}에서 시간적으로 분리된 반대 방향 response 관찰; feedback 또는 attenuation을 증명하지 않음`;
-        } else if (earlyPeak.peakFC < 0 && latePeak.peakFC > 0) {
-          pattern = "signal_attenuation";
-          description = `${gene} ${early.position}과 ${late.position}에서 시간적으로 분리된 반대 방향 response 관찰; inhibition-to-activation mechanism을 증명하지 않음`;
-        } else {
-          pattern = "sequential_regulation";
-          const dir = earlyPeak.peakFC > 0 && latePeak.peakFC > 0 ? "두 positive-response" : "두 negative-response";
-          description = `${gene} ${early.position} (trajectory peak: ${earlyPeak.peakCondition})와 ${late.position} (trajectory peak: ${latePeak.peakCondition})의 시간적으로 분리된 ${dir} site contrast 관찰`;
-        }
-
-        // v12.1 #3: Lag computation
-        const lagIdx = Math.abs(latePeak.condIdx - earlyPeak.condIdx);
-        const lagFraction = lagIdx / Math.max(conditions.length - 1, 1);
-        // Try to parse real time from condition names
-        let lagMinutes: number | null = null;
-        let isMeaningfulLag = lagIdx >= 1;
-        const parseTimeMin = (cond: string): number | null => {
-          const m = cond.match(/(\d+(?:\.\d+)?)\s*min/i);
-          if (m) return parseFloat(m[1]);
-          const h = cond.match(/(\d+(?:\.\d+)?)\s*(?:hr|hour|h)$/i);
-          if (h) return parseFloat(h[1]) * 60;
-          const s = cond.match(/(\d+(?:\.\d+)?)\s*sec/i);
-          if (s) return parseFloat(s[1]) / 60;
-          return null;
-        };
-        if (lagIdx > 0) {
-          const tEarly = parseTimeMin(earlyPeak.peakCondition);
-          const tLate = parseTimeMin(latePeak.peakCondition);
-          if (tEarly !== null && tLate !== null) {
-            lagMinutes = Math.round(Math.abs(tLate - tEarly) * 10) / 10;
-            isMeaningfulLag = lagMinutes >= 5.0;
-          }
-        }
-
-        // v12.1 #4: Confidence tier (MAD-based effect_size)
-        const allFCsForMAD = Array.from(ptmPeak.values()).map((p) => Math.abs(p.peakFC)).filter((v) => v > 0.01);
-        let madFC = 1.0;
-        if (allFCsForMAD.length > 0) {
-          const sorted = [...allFCsForMAD].sort((a, b) => a - b);
-          const medFC = sorted[Math.floor(sorted.length / 2)];
-          const deviations = allFCsForMAD.map((v) => Math.abs(v - medFC)).sort((a, b) => a - b);
-          madFC = Math.max(deviations[Math.floor(deviations.length / 2)], 0.1);
-        }
-        const effectSize = Math.abs(earlyPeak.peakFC - latePeak.peakFC) / madFC;
-        let confidenceTier: "High" | "Medium" | "Low" = "Low";
-        if (effectSize >= 2.0) confidenceTier = "High";
-        else if (effectSize >= 1.0) confidenceTier = "Medium";
-
-        // v12.1 #5: Resolution warning
-        const resolutionWarning = conditions.length <= 3 ? `LOW RESOLUTION: Only ${conditions.length} timepoints` : null;
-
-        // Timepoints and forms are not independent biological units. The
-        // browser reports descriptive separation, without a pooled-time p-value.
-        const pValue = null;
-        const isSignificant = null;
-
-        results.push({
-          gene,
-          siteA: { feature_id: early.feature_id, position: early.position, label: early.label, waveLabel: `Trajectory peak (${earlyPeak.peakCondition})`, peakCondition: earlyPeak.peakCondition, peakFC: earlyPeak.peakFC, isDeNovo: earlyDeNovo, activityClass: earlyAC },
-          siteB: { feature_id: late.feature_id, position: late.position, label: late.label, waveLabel: `Trajectory peak (${latePeak.peakCondition})`, peakCondition: latePeak.peakCondition, peakFC: latePeak.peakFC, isDeNovo: lateDeNovo, activityClass: lateAC },
-          pattern,
-          description,
-          confidenceTier,
-          pValue,
-          isSignificant,
-          lagMinutes,
-          lagFraction,
-          isMeaningfulLag,
-          effectSize: Math.round(effectSize * 1000) / 1000,
-          resolutionWarning,
-        });
-      }
-    }
-  });
-
-  const ORDER: Record<DivergencePattern, number> = {
-    signal_attenuation: 0,
-    sequential_regulation: 1,
-    multisite_coordination: 2,
-    temporally_separated_opposite_direction: 0,
-    temporally_separated_same_direction: 1,
-    same_peak_coordination: 2,
-  };
-  const TIER_ORDER: Record<string, number> = { High: 0, Medium: 1, Low: 2 };
-  results.sort((a, b) => {
-    const patDiff = ORDER[a.pattern] - ORDER[b.pattern];
-    if (patDiff !== 0) return patDiff;
-    // Within same pattern: High > Medium > Low confidence
-    const tierDiff = (TIER_ORDER[a.confidenceTier] ?? 3) - (TIER_ORDER[b.confidenceTier] ?? 3);
-    if (tierDiff !== 0) return tierDiff;
-    // Then by effect size descending
-    return b.effectSize - a.effectSize;
-  });
-  return results;
 }
 
 // ── Sparkline SVG (mini time-series for each site) ───────────────────────
@@ -1629,18 +1468,9 @@ function MultiSiteDivergencePanel({
   const [patternFilter, setPatternFilter] = useState<DivergencePattern | "all">("all");
   const [hoveredGene, setHoveredGene] = useState<string | null>(null);
 
-  const entries = useMemo(
-    () => {
-      const serverEntries = (canonicalPairs || []).map(canonicalDivergenceToEntry).filter((entry): entry is SitePairEntry => entry !== null);
-      return serverEntries.length > 0
-        ? serverEntries
-        : computeMultiSiteDivergence(uniquePtms, vectorByPtm, conditions, ptmActivityClass, ptmPseudocountUsed);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [uniquePtms.length, conditions.join(","), vectorByPtm.size, ptmActivityClass.size, ptmPseudocountUsed.size, canonicalPairs?.length]
-  );
-
-  if (entries.length === 0) return null;
+  const entries = useMemo(() => (canonicalPairs || []).map(canonicalDivergenceToEntry)
+    .filter((entry): entry is SitePairEntry => entry !== null), [canonicalPairs]);
+  if (!entries.length) return <p className="text-sm">저장된 다중 부위 비교가 없습니다.</p>;
 
   // Group entries by gene for swimlane display
   const byGene = new Map<string, SitePairEntry[]>();
@@ -2072,9 +1902,12 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   type TopNPtmMeta = {
     feature_id?: string;
+    accession?: string;
+    precursor_id?: string;
     gene: string;
     position: string;
     label: string;
+    annotation_match?: {status:string;assertions:Array<{annotation_id:string;match_scope:string;source:Record<string,any>}>};
     protein_class?: { role: string; confidence: string; tags: string[]; ubi_context?: string };
     denovo_confidence?: string;
     detection_control?: string;
@@ -2086,7 +1919,12 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
     conventional_log2fc_na?: boolean;
     shared_peptide?: boolean;
   };
-  const [data, setData] = useState<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; error?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
+  const [data, setData] = useState<{ condition_grid?: Array<{condition:string; time_minutes:number|null; source:string; curve_scope?:string; label_conflict?:boolean}>; conditions?:string[]; measurement_revision?:string; coverage?:{identified_features:number;source_rows:number}; vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; error?: string; inferred_receptors?: Array<{ name: string; receptor_class: string; downstream_ptm_count: number; downstream_ptms: string[]; via_kinases?: string[]; pathway?: string; signaling_pathway?: string; source?: string }>; divergence_pairs?: any[] } | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [searchTerm,setSearchTerm]=useState("");
+  const [requestedScope,setRequestedScope]=useState("");
+  const [featurePage,setFeaturePage]=useState(0);
+  const lastMeasurement=useRef<string>();
   const [loading, setLoading] = useState(true);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [metric, setMetric] = useState<QuantAxis>("relative");
@@ -2112,8 +1950,17 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
       .catch(() => setIpOverlayData(null));
   }, [orderId]);
 
-  const fetchVectorPlotData = () => {
-    return api.get<{ vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: any[] }>(`/orders/${orderId}/vector-plot-data?classic=true&representation=${displayRepresentation}&axis=${metric==="relative"?"adjusted":metric}&mode=${displayMode}${displayMode==="all_observed"?"":`&n=${displayN}`}`);
+  const fetchVectorPlotData = async () => {
+    if(displayMode==="all_observed" && displayRepresentation==="conventional_log2_contrast") {
+      try {
+        const manifest=await api.post<{measurement_revision:string}>(`/orders/${orderId}/vector-view/manifest`,{});
+        return {source:"columnar_pages",measurement_revision:manifest.measurement_revision,
+          vector_data:[],top_n_ptms:[],inferred_receptors:[],suggested_n:null,top_n_setting:undefined};
+      } catch(error) {
+        if(!String(error).includes("columnar_snapshot_unavailable")) throw error;
+      }
+    }
+    return api.get<{ condition_grid?: Array<{condition:string; time_minutes:number|null; source:string; curve_scope?:string; label_conflict?:boolean}>; conditions?:string[]; measurement_revision?:string; coverage?:{identified_features:number;source_rows:number}; vector_data: TopNVectorPlotRow[]; top_n_ptms: TopNPtmMeta[]; suggested_n?: number | null; top_n_setting?: number; source?: string; inferred_receptors?: any[] }>(`/orders/${orderId}/vector-plot-data?classic=true&representation=${displayRepresentation}&axis=${metric==="relative"?"adjusted":metric}&mode=${displayMode}${displayMode==="all_observed"?"":`&n=${displayN}`}`);
   };
 
   const refreshReceptorInference = async () => {
@@ -2130,6 +1977,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
       .then((d) => {
         if(!active)return;
         setData({
+          ...d,
           vector_data: (d.vector_data || []) as TopNVectorPlotRow[],
           top_n_ptms: d.top_n_ptms || [],
           suggested_n: d.suggested_n,
@@ -2146,12 +1994,15 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
             init[key] = true;
           }
         });
-        setChecked(init);
+        const sameRevision=Boolean(d.measurement_revision && d.measurement_revision===lastMeasurement.current);
+        lastMeasurement.current=d.measurement_revision;
+        setChecked(previous=>sameRevision?{...init,...previous}:init);
+        setFeaturePage(0);
       })
       .catch((error) => active && setData({ vector_data: [], top_n_ptms: [], source: "error", error: String(error?.message || error) }))
       .finally(() => {if(active)setLoading(false);});
     return()=>{active=false;};
-  }, [orderId,displayMode,displayN,displayRepresentation,metric]);
+  }, [orderId,displayMode,displayN,displayRepresentation,metric,retry]);
 
   if (loading) {
     return (
@@ -2162,19 +2013,20 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
     );
   }
 
-  if (!data || data.top_n_ptms.length === 0) {
-    const failed = data && "error" in data && data.error;
+  if (data?.source==="columnar_pages" || !data || data.top_n_ptms.length === 0) {
+    const failed = data?.error;
     return (
-      <div className="flex flex-col items-center justify-center py-12 rounded-lg border bg-muted/20">
+      <div className="space-y-3 rounded-lg border p-3">
+        <div className="flex flex-wrap gap-2">{(Object.keys(axisLabel) as QuantAxis[]).map(axis=><Button key={axis} aria-pressed={axis===metric} onClick={()=>setMetric(axis)}>{axisLabel[axis]}</Button>)}<Button onClick={()=>setRetry(v=>v+1)}>다시 조회</Button></div>
+        <label>선정 방식 <select value={displayMode} onChange={e=>setDisplayMode(e.target.value)}><option value="per_condition_top_n">조건별 Top-N 합집합</option><option value="global_top_n">전체 Top-N</option><option value="all_observed">전체 관측</option></select></label>
         <label>값 표현 <select value={displayRepresentation} onChange={e=>setDisplayRepresentation(e.target.value)}><option value="conventional_log2_contrast">Conventional log2 contrast</option><option value="lod_relative_log2">LOD-relative log2</option><option value="normalized_log2_intensity">Normalized log2 intensity</option></select></label>
+        {data?.source==="columnar_pages"?<FullTrajectoryBrowser key={orderId+String(data.measurement_revision)} orderId={orderId} axis={metric} revision={data.measurement_revision}/>:<>
         <TrendingUp className="h-12 w-12 text-muted-foreground/40 mb-3" />
         <p className="text-sm text-muted-foreground text-center">
           {failed
             ? `Time-series 조회 실패: ${String((data as { error?: string }).error)}`
-            : isUbi
-            ? "현재 표현에 적격한 관측이 없습니다."
             : "현재 표현에 적격한 관측이 없습니다."}
-        </p>
+        </p></>}
       </div>
     );
   }
@@ -2183,13 +2035,17 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
 
   // Deduplicate top_n_ptms by canonical feature identity
   const seenKeys = new Set<string>();
-  const uniquePtms = data.top_n_ptms.filter((p) => {
+  const selectedPtms = data.top_n_ptms.filter((p) => {
     const key = featureKey(p);
     if (seenKeys.has(key)) return false;
     seenKeys.add(key);
     return true;
   });
 
+  const term=searchTerm.trim().toLowerCase();
+  const matchingPtms=term?selectedPtms.filter(p=>[p.feature_id,p.gene,p.position,p.label,p.accession,p.precursor_id].some(value=>value?.toLowerCase().includes(term))):selectedPtms;
+  const pageSize=100;
+  const uniquePtms=matchingPtms.slice(featurePage*pageSize,(featurePage+1)*pageSize);
   const topNSet = new Set(uniquePtms.map((p) => featureKey(p)));
   const vectorByPtm = new Map<string, Array<{
     condition: string;
@@ -2229,10 +2085,12 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
 
   });
 
-  const conditions = Array.from(
-    new Set(data.vector_data.map((r) => r.condition).filter(Boolean))
-  ).sort((a, b) => parseTimeOrder(a) - parseTimeOrder(b));
-
+  const fullGrid = data.condition_grid ?? (data.conditions ?? [...new Set(data.vector_data.map(r=>r.condition))]).map(condition=>({condition,time_minutes:null,source:"unresolved",curve_scope:"",label_conflict:false}));
+  const scopes=[...new Set(fullGrid.map(p=>p.curve_scope||""))];
+  const scope=scopes.includes(requestedScope)?requestedScope:scopes[0];
+  const grid=fullGrid.filter(p=>(p.curve_scope||"")===scope);
+  const conditions = grid.map(point=>point.condition);
+  const timed = grid.some(point=>point.time_minutes !== null);
   // Build P1 pattern lookup from top_n_ptms (p1_pattern field, when server provides it)
   const p1PatternMap = new Map<string, string>();
   data.top_n_ptms.forEach((p) => {
@@ -2281,8 +2139,8 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
     return trendOk && actOk;
   });
 
-  const chartData = conditions.map((cond) => {
-    const point: Record<string, string | number | null> = { condition: cond };
+  const chartData = grid.map(({condition:cond,time_minutes}) => {
+    const point: Record<string, string | number | null> = { condition: cond, time_minutes };
     filteredPtms.forEach((p) => {
       const key = featureKey(p);
       if (!checked[key]) return;
@@ -2296,11 +2154,6 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
   const visibleLabels = filteredPtms.filter((p) => checked[featureKey(p)]).map((p) => p.label);
 
   // v9.28: Activity class-based color palettes
-  const AC_PALETTES: Record<string, string[]> = {
-    de_novo: ["#E65100", "#F57C00", "#FF9800", "#FFB74D", "#D84315", "#BF360C", "#EF6C00", "#FFA726", "#FB8C00", "#E55100"],
-    regulated: ["#1565C0", "#1E88E5", "#42A5F5", "#64B5F6", "#0D47A1", "#1976D2", "#2196F3", "#90CAF9", "#0277BD", "#039BE5"],
-    minor: ["#4CAF50", "#66BB6A", "#81C784", "#A5D6A7", "#2E7D32", "#388E3C", "#43A047", "#56985A", "#6DAF71", "#7BC67F"],
-  };
   const AC_LINE_STYLE: Record<string, { strokeWidth: number; strokeDasharray?: string; opacity: number }> = {
     de_novo: { strokeWidth: 2.5, opacity: 1 },
     regulated: { strokeWidth: 2.2, opacity: 0.95 },
@@ -2309,14 +2162,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
 
   // Fixed color map: each PTM gets color based on its activity class
   const colorMap = new Map<string, string>();
-  const _acIdx: Record<string, number> = { de_novo: 0, regulated: 0, minor: 0 };
-  uniquePtms.forEach((p) => {
-    const key = featureKey(p);
-    const ac = ptmActivityClass.get(key) || "minor";
-    const palette = AC_PALETTES[ac] || AC_PALETTES.minor;
-    colorMap.set(p.label, palette[_acIdx[ac] % palette.length]);
-    _acIdx[ac]++;
-  });
+  uniquePtms.forEach(p=>colorMap.set(p.label,featureColor(featureKey(p))));
 
   // Map label to activity class for line style lookup
   const labelToAC = new Map<string, string>();
@@ -2390,15 +2236,20 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className={`px-2 py-0.5 rounded-full font-medium ${data.source === "enriched" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-          {data.source === "enriched" ? "Source: Enriched (RAG)" : "Source: Preprocessing (TSV)"}
+        <span className="px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">
+          전처리 TSV · 선택 축 적격성 적용 후 Top-N
         </span>
+        <label>{scopes.length>1&&<>비교 범위 <select value={scope} onChange={e=>setRequestedScope(e.target.value)}>{scopes.map(s=><option key={s} value={s}>{s||"범위 미기록"}</option>)}</select></>}</label>
         <span data-testid="top-n-setting" className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
           <label>선정 방식 <select value={displayMode} onChange={e=>setDisplayMode(e.target.value)}><option value="per_condition_top_n">조건별 Top-N 합집합</option><option value="global_top_n">전체 Top-N</option><option value="all_observed">전체 관측</option></select></label> {displayMode!=="all_observed"&&<label>N <input type="number" min={1} value={displayN} onChange={e=>setDisplayN(Math.max(1,Number(e.target.value)||1))}/></label>} · {data.top_n_setting??"All"} <label>값 표현 <select value={displayRepresentation} onChange={e=>setDisplayRepresentation(e.target.value)}><option value="conventional_log2_contrast">Conventional log2 contrast</option><option value="lod_relative_log2">LOD-relative log2 (별도 축)</option><option value="normalized_log2_intensity">Normalized log2 intensity (별도 축)</option></select></label>
         </span>
         <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
-          {isUbi ? "Unique Sites" : "Unique PTMs"}: {uniquePtms.length}
+          {isUbi ? "Unique Sites" : "Unique PTMs"}: {selectedPtms.length}
         </span>
+        <label>선정 기질 검색 <input type="search" value={searchTerm} onChange={e=>{setSearchTerm(e.target.value);setFeaturePage(0);}} placeholder="gene / site / accession / precursor"/></label>
+        {data.coverage&&<p>원본 {data.coverage.source_rows}행 · 전체 precursor {data.coverage.identified_features}개 · 현재 검색 {matchingPtms.length}개</p>}
+        <details className="min-w-0 break-all"><summary>측정 revision · 시간 출처</summary>{data.measurement_revision??"미기록"}{grid.map(p=><p key={p.condition}>{p.condition} · {p.time_minutes??"미기록"} min · {p.source}{p.label_conflict?" · 표시명과 기록 시간 불일치":""}</p>)}</details>
+        {matchingPtms.length>pageSize&&<nav aria-label="선정 기질 페이지"><Button disabled={featurePage===0} onClick={()=>setFeaturePage(p=>p-1)}>이전</Button> {featurePage+1}/{Math.ceil(matchingPtms.length/pageSize)} · 현재 {uniquePtms.length}개 <Button disabled={(featurePage+1)*pageSize>=matchingPtms.length} onClick={()=>setFeaturePage(p=>p+1)}>다음</Button></nav>}
         {data.suggested_n != null && (
           <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-medium">
             Suggested N: {data.suggested_n} (|Log2FC| &gt; mean+2σ)
@@ -2408,7 +2259,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
 
       {/* Metric toggle + Trend filter */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant={metric === "relative" ? "default" : "outline"}
             size="sm"
@@ -2513,7 +2364,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
         </div>
       </div>
 
-      <div className={`grid gap-4 ${sidebarOpen ? "lg:grid-cols-[1fr_240px]" : ""}`}>
+      <div className={`grid gap-4 ${sidebarOpen ? "lg:grid-cols-[minmax(0,1fr)_240px]" : ""}`}>
         {/* Chart area — taller Y axis with zoom controls */}
         <div className="rounded-lg border bg-background p-4 relative" style={{ minHeight: `${chartHeight + 40}px` }}>
           {/* Y-axis zoom controls + manual min/max */}
@@ -2555,10 +2406,11 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
               />
             </div>
           </div>
+          <details><summary>{timed?"시간 (분)":"조건 (등간격)"} · 원본 시간표</summary>{grid.map(g=><p key={g.condition}>{g.condition} · {g.time_minutes??"미기록"} · {g.source}{g.label_conflict?" · 표기와 기록 충돌":""}</p>)}</details>
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
+            <LineChart data={timed ? chartData.filter(p=>p.time_minutes!==null) : chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="condition" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <XAxis dataKey={timed?"time_minutes":"condition"} type={timed?"number":"category"} domain={["dataMin","dataMax"]} unit={timed?" min":undefined} stroke="hsl(var(--muted-foreground))" fontSize={12} />
               <YAxis
                 stroke="hsl(var(--muted-foreground))"
                 fontSize={12}
@@ -2593,7 +2445,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
                       {(() => {
                         const meta = uniquePtms.find((p) => p.label === target.name);
                         const key = meta ? featureKey(meta) : "";
-                        const row = key ? vectorByPtm.get(key)?.find((r) => r.condition === label) : undefined;
+                        const row = key ? vectorByPtm.get(key)?.find((r) => r.condition === target.payload?.condition) : undefined;
                         const isDenovo = key ? ptmActivityClass.get(key) === "de_novo" : false;
                         const conf = (meta as { denovo_confidence?: string } | undefined)?.denovo_confidence
                           || (isDenovo ? "moderate" : "");
@@ -2655,7 +2507,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
                     return (
                       <Line
                         key={label}
-                        type="monotone"
+                        type="linear"
                         isAnimationActive={false}
                         connectNulls={false}
                         dataKey={label}
@@ -2792,7 +2644,9 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
               const key = featureKey(p);
               const trend = ptmTrends.get(key) || "other";
               const actCls = ptmActivityClass.get(key) || "minor";
-              const pc = p.protein_class;
+              const assertions=p.annotation_match?.assertions||[];
+              const roles=assertions.filter(a=>a.source?.protein_class?.role);
+              const pc = p.protein_class ?? (p.annotation_match?.status==="matched" && roles.length===1 ? roles[0].source.protein_class : undefined);
               // P1: server-side canonical pattern label (from substrate_temporal_dynamics.v1)
               const p1Pat = p1PatternMap.get(key);
               const dotTitle = p1Pat
@@ -3081,7 +2935,7 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
         />
       )}
 
-      <QuantitationEvidenceTable rows={data.vector_data.filter(row => checked[featureKey(row)])} />
+      <QuantitationEvidenceTable rows={data.vector_data.filter(row => topNSet.has(featureKey(row)) && checked[featureKey(row)])} />
 
       {/* ── Kinase / E3 Ligase Module Analysis Panel ── */}
       {conditions.length >= 3 && (
@@ -3125,7 +2979,14 @@ export function TopNTimeSeriesPlot({ orderId, ptmType = "phosphorylation", initi
   );
 }
 
-function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", orderStatus, initialN }: { orderId: number; singleTimePoint?: boolean; ptmType?: string; orderStatus?: string; initialN?: unknown }) {
+export function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", orderStatus, initialN }: { orderId: number; singleTimePoint?: boolean; ptmType?: string; orderStatus?: string; initialN?: unknown }) {
+  const [fullOpen,setFullOpen]=useState(false);
+  const [tab,setTab]=useState("scatter"),[selected,setSelected]=useState<PrecursorSelection|null>(null);
+  const [visited,setVisited]=useState<string[]>(["scatter"]);
+  function openTab(next:string) {
+    setVisited(current=>current.includes(next)?current:[...current,next]);
+    setTab(next);
+  }
   const isUbi = ptmType.toLowerCase().includes("ubiquityl") || ptmType.toLowerCase().includes("ubiquitin");
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3154,25 +3015,24 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="scatter">
-        <TabsList className="grid w-full max-w-2xl grid-cols-3">
+      <Tabs value={tab} onValueChange={openTab}>
+        <TabsList className="grid h-auto w-full max-w-2xl grid-cols-1 sm:grid-cols-3">
           <TabsTrigger value="scatter" className="gap-2">
-            <ChartScatter className="h-3.5 w-3.5" /> Scatter Plots
+            <ChartScatter className="h-3.5 w-3.5" /> 전체 반응 분포
           </TabsTrigger>
           <TabsTrigger
             value="timeseries"
             className="gap-2"
-            disabled={singleTimePoint}
-            title={singleTimePoint ? "Single time point — time-series not available" : undefined}
+            title="저장된 precursor 관측"
           >
-            <TrendingUp className="h-3.5 w-3.5" /> {isUbi ? "Top N Ubi Site Time-series" : "Top N PTM Time-series"}
+            <TrendingUp className="h-3.5 w-3.5" /> 기질 시간 반응
           </TabsTrigger>
           <TabsTrigger value="explorer" className="gap-2">
-            <Network className="h-3.5 w-3.5" /> Signaling Explorer
+            <Network className="h-3.5 w-3.5" /> Kinase·경로 근거
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="scatter" className="mt-4">
+        {visited.includes("scatter")&&<TabsContent forceMount value="scatter" className="mt-4 data-[state=inactive]:hidden">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -3183,7 +3043,7 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
               </p>
             </CardHeader>
             <CardContent>
-              <ScatterPlotsInteractive orderId={orderId} orderStatus={orderStatus} />
+              <VectorScatterPlots orderId={orderId} onSelect={p=>{setSelected(p);openTab("timeseries")}}/>
               {files.length > 0 && (
                 <div className="mt-6 pt-4 border-t">
                   <p className="text-xs text-muted-foreground mb-2">Download static report (PNG)</p>
@@ -3202,9 +3062,9 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
               )}
             </CardContent>
           </Card>
-        </TabsContent>
+        </TabsContent>}
 
-        <TabsContent value="timeseries" className="mt-4">
+        {visited.includes("timeseries")&&<TabsContent forceMount value="timeseries" className="mt-4 data-[state=inactive]:hidden">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -3217,14 +3077,15 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
               </p>
             </CardHeader>
             <CardContent>
+              {selected&&<SelectedPrecursor key={selected.revision+selected.feature_id} orderId={orderId} selection={selected} onEvidence={()=>openTab("explorer")}/>}
               <SubstrateSignalFlow orderId={orderId}/>
               <TopNTimeSeriesPlot key={orderId} orderId={orderId} ptmType={ptmType} initialN={initialN}/>
-              <details><summary>전체 Legacy precursor 궤적 (별도 identity)</summary><FullTrajectoryBrowser orderId={orderId} axis="relative"/></details>
+              <details onToggle={e=>setFullOpen(e.currentTarget.open)}><summary>전체 Legacy precursor 궤적 (별도 identity)</summary>{fullOpen&&<FullTrajectoryBrowser key={orderId} orderId={orderId} axis="relative"/>}</details>
             </CardContent>
           </Card>
-        </TabsContent>
+        </TabsContent>}
 
-        <TabsContent value="explorer" className="mt-4">
+        {visited.includes("explorer")&&<TabsContent forceMount value="explorer" className="mt-4 data-[state=inactive]:hidden">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -3235,10 +3096,10 @@ function VectorPlotTab({ orderId, singleTimePoint, ptmType = "phosphorylation", 
               </p>
             </CardHeader>
             <CardContent>
-              <SignalingEvidenceExplorer key={orderId} orderId={orderId} initialN={initialN} />
+              <SignalingEvidenceExplorer selection={selected} key={orderId} orderId={orderId} initialN={initialN} />
             </CardContent>
           </Card>
-        </TabsContent>
+        </TabsContent>}
       </Tabs>
     </div>
   );
@@ -5267,6 +5128,7 @@ export default function OrderDetail() {
 
         <TabsContent value="primary-a" className="mt-4">
           <PrimaryAEvidence orderId={order.id} status={order.status} />
+
         </TabsContent>
         <TabsContent value="analysis-statistics" className="mt-4">
           <AnalysisStatisticsTab orderId={order.id} />
@@ -5275,7 +5137,7 @@ export default function OrderDetail() {
         <TabsContent value="vector-plot" className="mt-4">
           <div className="flex gap-4">
             <div className={chatOpen ? "flex-1 min-w-0" : "w-full"}>
-              <VectorPlotTab orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} orderStatus={order.status} initialN={order.report_options?.top_n_ptms} />
+              <VectorPlotTab key={order.id} orderId={order.id} singleTimePoint={(order.sample_config as any)?.single_time_point} ptmType={order.ptm_type} orderStatus={order.status} initialN={order.report_options?.top_n_ptms} />
             </div>
 
             <div className={`${chatOpen ? "w-[420px]" : "w-10"} flex-shrink-0 h-[calc(100vh-200px)] sticky top-4 rounded-xl border border-border shadow-lg overflow-hidden`}>

@@ -73,7 +73,7 @@ def load_vector_view(output_dir, suffix, report_options=None, *, mode="per_condi
         finally:
             store.close()
     else:
-        snapshot = load_vector_snapshot(output_dir, suffix)
+        snapshot = load_vector_snapshot(output_dir, suffix, display_scope=True)
     annotations, source = load_annotations(output_dir, suffix)
     for row in snapshot["rows"]:
         for current_axis, prefix in (("unadjusted", "ptm_unadjusted"), ("protein", "protein"), ("adjusted", "ptm_protein_adjusted")):
@@ -85,6 +85,7 @@ def load_vector_view(output_dir, suffix, report_options=None, *, mode="per_condi
                              source_rows=snapshot["source_rows"], quarantine_count=len(snapshot["quarantine"]),
                              annotation_source=source, declared_conditions=declared_conditions, **options)
     if counts:
+        view.update(condition_grid=counts["condition_grid"], conditions=counts["conditions"])
         view["coverage"].update(identified_features=counts["identified_features"],
             identity_unresolved_rows=counts["identity_unresolved_rows"], quarantined_rows=counts["malformed_source_rows"])
         view["selection"]["axis_eligible_feature_count"] = statistics["axis_eligible_feature_count"]
@@ -155,3 +156,25 @@ def jsonable_classic_payload(value):
     if isinstance(value, tuple):
         return [jsonable_classic_payload(item) for item in value]
     return value
+
+
+def saved_multisite_pairs(cache, view):
+    """Resolve stored pair labels that contain the original precursor identifier."""
+    if not cache.get("measurement_revision") or cache["measurement_revision"] != view.get("measurement_revision"):
+        return []
+    features = {p["label"]: p for p in view["features"]}
+    result = []
+    for pair in cache.get("divergence_pairs") or []:
+        left, right = (features.get(pair.get(k)) for k in ("siteA","siteB"))
+        if not left or not right or not left.get("feature_id") or not right.get("feature_id"):
+            continue
+        parent = ("fasta_taxonomy_id", "accession", "isoform", "protein_group")
+        if not left.get("accession") or not left.get("fasta_taxonomy_id") or any(left.get(k)!=right.get(k) for k in parent):
+            continue
+        import re
+        a,b = (str(p.get("position") or "").upper() for p in (left,right))
+        if a == b or not all(re.fullmatch(r"[A-Z][1-9][0-9]*",site) for site in (a,b)):
+            continue
+        result.append({**pair,"feature_id_a":left["feature_id"],"feature_id_b":right["feature_id"],
+                       "position_a":a,"position_b":b,"protein":left["gene"]})
+    return result

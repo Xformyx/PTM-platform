@@ -34,6 +34,36 @@ def representation_value(row, axis="adjusted", representation="conventional_log2
     return float(value) if isinstance(value, (float, int)) and not isinstance(value, bool) and math.isfinite(value) else None
 
 
+def condition_grid(rows, declared_conditions=()):
+    scopes, labels = {}, {}
+    times = defaultdict(set)
+    for row in rows:
+        condition = row.get("condition")
+        if condition:
+            scopes[condition] = row.get("curve_scope") or ""
+            labels[condition] = row.get("source_condition") or condition
+            times[condition]
+            if isinstance(row.get("time_minutes"), (int, float)) and math.isfinite(row["time_minutes"]):
+                times[condition].add(float(row["time_minutes"]))
+    declared = {str(c): i for i, c in enumerate(declared_conditions)}
+    for c in declared:
+        times[c]
+    grid = []
+    for condition, recorded in times.items():
+        match = re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*(s|sec|min|m|h|hr|d)\s*", labels.get(condition, condition), re.I)
+        label_time = None if not match else float(match[1]) * {
+            "s": 1/60, "sec": 1/60, "min": 1, "m": 1, "h": 60, "hr": 60, "d": 1440
+        }[match[2].lower()]
+        minute = next(iter(recorded)) if len(recorded) == 1 else None
+        source = "recorded" if minute is not None else "conflict" if recorded else "unresolved"
+        if not recorded and label_time is not None:
+            minute, source = label_time, "legacy_label"
+        grid.append({"condition": condition, "time_minutes": minute, "source": source, "curve_scope":scopes.get(condition,""),
+                     "label_conflict": bool(recorded and label_time is not None and recorded != {label_time})})
+    return sorted(grid, key=lambda p: (p["time_minutes"] is None, p["time_minutes"],
+                                       declared.get(p["condition"], math.inf), p["condition"]))
+
+
 def ordered_conditions(rows, declared_conditions=()):
     times = defaultdict(set)
     for row in rows:
@@ -159,10 +189,11 @@ def build_vector_view(rows, annotations=(), *, measurement_revision, annotation_
                   "axis": axis, "representation": representation, "threshold": threshold,
                   "feature_count": len({fid for fid, v in all_values if v is not None and threshold is not None and abs(v) >= threshold}),
                   "applied_to_selection": False}
+    grid = condition_grid(rows, declared_conditions)
     return {"contract_version": VIEW_CONTRACT_VERSION, "measurement_revision": measurement_revision,
             "selection": selection, "sources": {"measurements": {"kind": "preprocessing_vector", "revision": measurement_revision},
                                                 "annotations": annotation_source},
             "coverage": coverage, "features": features, "observations": observations,
-            "conditions": ordered_conditions(rows, declared_conditions), "suggestion": suggestion,
+            "condition_grid": grid, "conditions": [point["condition"] for point in grid], "suggestion": suggestion,
             "vector_data": observations, "top_n_ptms": features, "source": "preprocessing",
             "top_n_setting": selection["n"], "suggested_n": suggestion["feature_count"]}

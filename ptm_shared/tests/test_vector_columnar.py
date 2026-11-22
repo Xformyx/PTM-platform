@@ -48,3 +48,24 @@ def test_unresolved_and_malformed_rows_have_a_full_cursor_without_fake_ids(tmp_p
         assert tail['records'][0]['feature_id'] is None
         assert store.diagnostics(kind='malformed_source_row')['count']==1
     finally:store.close()
+
+
+def test_display_scope_keeps_distinct_contrasts_for_one_precursor(tmp_path):
+    from ptm_shared.vector_snapshot import load_vector_snapshot
+    from ptm_shared.plot_selection import condition_grid
+    source=tmp_path/'ptm_vector_data_normalized_phospho.tsv'
+    source.write_text('Precursor.Id\tCondition\tEffect_Series_ID\tContrast_ID\tPTM_ProteinAdjusted_Log2FC\n'
+                      'p1\t5min\tdrugA\tc1\t0\np1\t5min\tdrugB\tc2\t1\n')
+    rows=load_vector_snapshot(tmp_path,'_phospho',display_scope=True)['rows']
+    expected=condition_grid(rows)
+    assert [r['time_minutes'] for r in expected]==[5,5]
+    assert len({r['curve_scope'] for r in expected})==2
+    publish_vector_columnar(tmp_path,'_phospho')
+    store=VectorColumnar(tmp_path,'_phospho')
+    try:
+        assert store.manifest_counts()['condition_grid']==expected
+        projected=store.trajectories([rows[0]['feature_id']])
+        assert [(r['condition'],r['ptm_protein_adjusted_log2fc']) for r in projected]==[
+            (r['condition'],r['ptm_protein_adjusted_log2fc']) for r in rows]
+    finally:
+        store.close()

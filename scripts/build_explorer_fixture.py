@@ -64,6 +64,7 @@ def build(output):
         source=root/'ptm_vector_data_normalized_phospho.tsv'
         rows=list(csv.DictReader(source.open(),delimiter='\t'))
         for row in rows:
+            row['Protein_Log2FC']='0'  # Explicit synthetic protein axis for the Scatter → precursor route.
             if row['Precursor.Id']=='p0' and row['Condition']=='5min':row['PTM_ProteinAdjusted_Log2FC']=''
             if row['Precursor.Id']=='p0' and row['Condition']=='1min':row['PTM_ProteinAdjusted_Log2FC']='0'
         rows.extend([{**r,'Precursor.Id':'p0-z3','Precursor.Charge':'3'} for r in rows if r['Precursor.Id']=='p0'])
@@ -130,6 +131,15 @@ def build(output):
         client.app.include_router(orders.router)
         for axis in ('adjusted','unadjusted'):
             get(f'/orders/1/vector-plot-data?mode=per_condition_top_n&n=50&axis={axis}')
+        from app.api import vector_view
+        patch.setattr(vector_view,'get_settings',lambda:SimpleNamespace(OUTPUT_DIR=str(temporary)))
+        client.app.include_router(vector_view.router)
+        scatter=get('/orders/1/vector-scatter-data?axis=adjusted')
+        for fid in {p['feature_id'] for panel in scatter['conditions'] for p in panel['points'] if p['feature_id']}:
+            detail=client.post('/orders/1/vector-view/feature-detail',json={'measurement_revision':scatter['measurement_revision'],'options':{'feature_id':fid}})
+            assert detail.status_code==200,detail.text
+            responses['detail/'+fid]=detail.json()
+            get(base+'/features/'+fid)
         export=client.get(base+'/inventory-export')
         assert export.status_code==200 and 'PRIVATE' not in export.text
         (output/'inventory-export.jsonl').write_bytes(export.content)

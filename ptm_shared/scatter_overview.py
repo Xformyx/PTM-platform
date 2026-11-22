@@ -8,15 +8,18 @@ from __future__ import annotations
 import csv
 import hashlib
 import math
+import os
+import re
 from collections import Counter, OrderedDict
 from copy import deepcopy
 from pathlib import Path
 from threading import Lock
 
-from .de_novo_representation import is_control_condition, is_de_novo_representation, sort_conditions
+from .de_novo_representation import CONTROL_LABELS, is_de_novo_representation, sort_conditions
 from .feature_identity import canonical_feature_identity, feature_key
 from .quantitative_fields import axis_number
 from .tabular_import import validate_tabular_header
+from .vector_plot import scoped_condition
 
 CONTRACT_VERSION = "source_vector_scatter.v1"
 POINT_LIMIT = 2000
@@ -79,8 +82,11 @@ def _coordinate(row, axis):
     condition = _text(row, "Condition", "condition", "Comparison").strip()
     if condition.lower() in {"", "na", "n/a", "nan", "none", "null"}:
         return "", None, "condition_missing"
-    if is_control_condition(condition):
+    role = _text(row, "role", "Role", "Condition_Role", "Group").strip().lower()
+    legacy_control = condition.lower() in CONTROL_LABELS or re.match(r"^control(?:\b|_)", condition, re.I)
+    if role in {"control","reference"} or (not role and legacy_control):
         return condition, None, "control_reference_row"
+    condition = scoped_condition(condition, row)
     x = axis_number(row, "protein")
     if x is None:
         return condition, None, "protein_axis_unavailable"
@@ -193,3 +199,60 @@ def read_scatter_overview(directory, suffix, axis="adjusted"):
         while len(_CACHE) > 6:
             _CACHE.popitem(last=False)
     return result
+
+def verified_source_stream(directory, suffix, expected):
+    """Validate once, then deliver the verified chunks from the same descriptor."""
+    path = source_path(directory, suffix)
+    with_dir = Path(directory).resolve()
+    if path.resolve().parent != with_dir:
+        raise ScatterSourceChanged("unavailable_source")
+    stream = os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb")
+    chunk_size = 1024 * 1024
+    digest, hashes, size = hashlib.sha256(), [], 0
+    try:
+        while chunk := stream.read(chunk_size):
+            size += len(chunk)
+            digest.update(chunk)
+            hashes.append(hashlib.sha256(chunk).digest())
+        if digest.hexdigest() != expected:
+            raise ScatterSourceChanged("measurement_revision_changed")
+        stream.seek(0)
+    except BaseException:
+        stream.close()
+        raise
+
+    def chunks():
+        with stream:
+            for checksum in hashes:
+                data = stream.read(chunk_size)
+                if hashlib.sha256(data).digest() != checksum:
+                    raise ScatterSourceChanged("source_changed_during_transfer")
+                yield data
+
+    return stream, chunks(), size, path.name
+
+
+def scatter_members(directory, suffix, axis, revision, condition, ix, iy, after=0, limit=50):
+    """Page original rows using the same eligibility and bin edges as the canvas."""
+    path = source_path(directory, suffix)
+    before = _fingerprint(path)
+    view = read_scatter_overview(directory, suffix, axis)
+    if view["measurement_revision"] != revision:
+        raise ScatterSourceChanged("measurement_revision_changed")
+    bounds = view["bounds"]
+    members = []
+    if bounds is not None:
+        for line, raw in _records(path):
+            if line <= after:
+                continue
+            key, xy, reason = _coordinate(raw, axis)
+            if reason or key != condition:
+                continue
+            if (_bin(xy[0], *bounds[:2]), _bin(xy[1], *bounds[2:])) == (ix, iy):
+                members.append(_point(raw, line, xy))
+                if len(members) > limit:
+                    break
+    if _fingerprint(path) != before or path != source_path(directory, suffix):
+        raise ScatterSourceChanged("measurement_revision_changed")
+    return {"items": members[:limit], "next_after": members[limit-1]["source_row"] if len(members)>limit else None,
+            "measurement_revision": revision}

@@ -1,3 +1,4 @@
+import {SubstrateSignalFlow} from "./SubstrateSignalFlow";
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -33,7 +34,7 @@ export default function PrimaryAEvidence({orderId,status}:{orderId:number;status
   },[orderId,status]);
   const download = async (artifact:string,name:string) => {
     try {
-      const url = await api.fetchBlobUrl(`/orders/${orderId}/enrichment-free-evidence?artifact=${artifact}`);
+      const url = await api.fetchBlobUrl(`/orders/${orderId}/enrichment-free-evidence?artifact=${artifact}&expected_run_id=${encodeURIComponent(data!.run_id)}`);
       const anchor=document.createElement('a'); anchor.href=url; anchor.download=name; anchor.click();
       setTimeout(()=>URL.revokeObjectURL(url),10000);
     } catch(e) {setError(String(e));}
@@ -77,5 +78,6 @@ export default function PrimaryAEvidence({orderId,status}:{orderId:number;status
         <tbody>{profiles.filter(p=>p.entity===entity).map(p=><tr key={p.contrast_id??p.time_min} className="border-t"><td className="py-2">{p.target_label?`${p.target_label} / ${p.reference_label} ${p.time_min==null?'':`(${p.time_min} min)`}`:p.time_min}</td><td>{p.gene_balanced_mean?.toFixed(4) ?? 'Unavailable'}</td><td>{p.n_sites_or_units} / {p.n_substrate_genes}</td><td>{p.descriptive_pattern}</td></tr>)}</tbody></table></div></>}
       <p className="text-xs text-muted-foreground">Consult the recorded annotation/source sensitivities. Alternative parent default: {data.provenance.estimator_versions.strict_parent_default}. Displayed provenance belongs to this completed run, even if order settings were subsequently edited.</p>
     </>}
+    {data&&<SubstrateSignalFlow orderId={orderId} runId={data.run_id}/>}
   </section>;
 }

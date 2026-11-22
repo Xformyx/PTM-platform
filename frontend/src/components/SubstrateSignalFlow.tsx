@@ -1,16 +1,20 @@
-import {useEffect, useState} from 'react';
+import {createContext, useContext, useEffect, useState} from 'react';
 import {CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import {api} from '../lib/api';
 
 type Row=Record<string,any>;
-type Page={status:string;reason?:string;items:Row[];total_count:number;next_cursor:string|null;catalog_id?:string};
+type Page={status:string;run_id?:string;reason?:string;items:Row[];total_count:number;next_cursor:string|null;catalog_id?:string};
 const parse=(value:string|null|undefined,fallback:any=[])=>value?JSON.parse(value):fallback;
 const relationLabels:Record<string,string>={bundle_member:'형태 묶음의 구성원',candidate_association:'후보–기질 연관',method_contribution:'방법 결과의 계산 기여',method_input_excluded:'방법 입력에서 제외',same_parent_mathematical_dependence:'같은 부모단백질의 수학적 의존성',observed_before:'관측 구간의 선후',curated_enzyme_substrate_prior:'기록된 효소–기질 방향 관계 (prior)'};
+const ExpectedRun=createContext<string|undefined>(undefined);
+const ExpectedCatalog=createContext<string|undefined>(undefined);
 function usePage(orderId:number,kind:string,filters:Row,cursor:string|null=null,limit=25) {
-  const key=JSON.stringify([orderId,kind,filters,cursor,limit]);
+  const expected_run_id=useContext(ExpectedRun);
+  const expected_catalog_id=useContext(ExpectedCatalog);
+  const key=JSON.stringify([orderId,kind,filters,cursor,limit,expected_catalog_id,expected_run_id]);
   const [state,setState]=useState<{key:string;page?:Page;error?:string}>({key:''});
   useEffect(()=>{let active=true;setState({key});
-    api.post<Page>(`/orders/${orderId}/substrate-signal/${kind}`,{filters,cursor,limit})
+    api.post<Page>(`/orders/${orderId}/substrate-signal/${kind}`,{filters,cursor,limit,expected_catalog_id,expected_run_id})
       .then(page=>{if(active)setState({key,page});}).catch(e=>{if(active)setState({key,error:String(e.message||e)});});
     return()=>{active=false;};
   },[key]);
@@ -48,9 +52,11 @@ function FormDetail({orderId,row}:{orderId:number;row:Row}) {
   const candidates=usePage(orderId,'kinase_substrate_bundles',{form_id:row.form_id,effect_series_id:row.effect_series_id},cursor);
   const tracks=(detail.page?.items||[]).filter(r=>['U_joint','P_joint','A'].includes(r.track));
   const base:Row[]=parse(row.points_json);
+  const feature=parse(row.feature_json,null);
   const points=base.filter(p=>p.time_min!==null).map(p=>({...p,...Object.fromEntries(tracks.map(t=>[t.track,parse(t.points_json).find((q:Row)=>q.contrast_id===p.contrast_id)?.value??null]))}));
   return <section className="border rounded p-3 space-y-3" aria-label="Form 시간 반응 상세">
     <h4 className="font-semibold">{row.form_id} · U_joint / P_joint / A</h4>
+    <p>{feature ? `저장 패턴 ${row.pattern??'미기록'} · 반응 시작 구간 ${feature.onset_lower_min??'미기록'}–${feature.onset_upper_min??'미기록'}분 · 관측 최대 ${feature.observed_peak_time_min??'미기록'}분 · 회복 구간 ${feature.recovery_lower_min??'미기록'}–${feature.recovery_upper_min??'미기록'}분` : `시간 특징 · ${row.feature_status??'미기록'}`}</p>
     <p>기록된 실제 시간(분), log2 contrast. 결측·제외점은 연결하지 않습니다. 절대 occupancy나 kinase 농도가 아닙니다.</p>
     <ResponsiveContainer width="100%" height={280}><LineChart data={points}><CartesianGrid strokeDasharray="3 3"/><XAxis type="number" dataKey="time_min" domain={['dataMin','dataMax']} label={{value:'분',position:'insideBottomRight'}}/><YAxis/><Tooltip/><Legend/>{['U_joint','P_joint','A'].map((t,i)=><Line key={t} name={t} dataKey={t} stroke={['#2563eb','#a16207','#be123c'][i]} connectNulls={false} isAnimationActive={false}/>)}</LineChart></ResponsiveContainer>
     <table className="text-xs w-full"><thead><tr><th>시간</th><th>실제 Control</th><th>Control 시간</th><th>A / 상태</th></tr></thead><tbody>{base.map(p=><tr key={p.contrast_id}><td>{p.time_min??'미기록'}</td><td>{p.reference_condition_id}</td><td>{p.reference_time_min??'미기록'}</td><td>{p.value??'NA'} · {p.status}</td></tr>)}</tbody></table>
@@ -62,17 +68,33 @@ function FormDetail({orderId,row}:{orderId:number;row:Row}) {
     {detail.error||candidates.error?<p role="alert">{detail.error||candidates.error}</p>:null}
   </section>;
 }
-export function SubstrateSignalFlow({orderId}:{orderId:number}) {
-  const [cursor,setCursor]=useState<string|null>(null),[limit,setLimit]=useState(15),[selected,setSelected]=useState<Row|null>(null),[pins,setPins]=useState<string[]>([]);
+export function SubstrateSignalFlow({orderId,runId}:{orderId:number;runId?:string}) {
+  const [epoch,setEpoch]=useState(0);
+  return <SignalSession key={orderId+":"+epoch+":"+runId} orderId={orderId} runId={runId} reopen={()=>setEpoch(n=>n+1)}/>;
+}
+function SignalSession({orderId,reopen,runId}:{orderId:number;runId?:string;reopen:()=>void}) {
+  const [catalog,setCatalog]=useState<string>(),[run,setRun]=useState(runId);
+  return <ExpectedRun.Provider value={run}><ExpectedCatalog.Provider value={catalog}><SignalList orderId={orderId} bind={setCatalog} bindRun={setRun} reopen={reopen}/></ExpectedCatalog.Provider></ExpectedRun.Provider>;
+}
+function SignalList({orderId,bind,bindRun,reopen}:{orderId:number;bindRun:(run:string)=>void;bind:(id:string)=>void;reopen:()=>void}) {
+  const [cursor,setCursor]=useState<string|null>(null),[limit,setLimit]=useState(15),[selected,setSelected]=useState<Row|null>(null),[pins,setPins]=useState<Row[]>([]);
+  const catalogId=useContext(ExpectedCatalog),runId=useContext(ExpectedRun);
+  function exportPins(){
+    const packet={run_id:runId,catalog_id:catalogId,scope:'review_selection',trajectories:pins.map(r=>({form_id:r.form_id,trajectory_id:r.trajectory_id,effect_series_id:r.effect_series_id,track:r.track,points:parse(r.points_json)}))};
+    const url=URL.createObjectURL(new Blob([JSON.stringify(packet,null,2)],{type:'application/json'}));
+    const a=document.createElement('a');a.href=url;a.download='substrate-review-selection.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),0);
+  }
   const {page,error}=usePage(orderId,'substrate_trajectories',{track:'A'},cursor,limit);
+  useEffect(()=>{if(page?.catalog_id)bind(page.catalog_id);if(page?.run_id)bindRun(page.run_id);},[page?.catalog_id,page?.run_id,bind,bindRun]);
   return <section className="space-y-3 mb-6" aria-label="전체 기질 기반 신호 흐름">
     <h3 className="font-semibold">전체 기질 시간 반응 → kinase 근거 → 관계·가설</h3>
     <p>발행 snapshot의 전체 적격 관측과 계산 추적. 페이지와 pin은 분석 모집단·활성 판정을 바꾸지 않습니다.</p>
+    <button onClick={reopen}>최신 발행본 열기</button>
     {error&&<p role="alert">{error}</p>}
     {page?.status==='unavailable'?<p>{page.reason} — 저장 projection이 포함된 reader revision에서 제공됩니다.</p>:<>
       <label>페이지 크기 <select value={limit} onChange={e=>{setLimit(Number(e.target.value));setCursor(null);}}>{[5,15,50].map(n=><option key={n}>{n}</option>)}</select></label>
-      <span> 전체 form/scope {page?.total_count??'…'} · 검토 pin {pins.length}</span>
-      <ul>{page?.items.map(r=><li key={r.trajectory_id}><button className="text-primary underline" onClick={()=>setSelected(r)}>{parse(r.identity_json,{}).display_label||r.form_id}</button> · 유효점 {r.eligible_points}/{r.registered_points} · {r.pattern||'pattern 미기록'} <button aria-label={`검토 pin ${r.form_id}`} onClick={()=>setPins(p=>p.includes(r.trajectory_id)?p.filter(x=>x!==r.trajectory_id):[...p,r.trajectory_id])}>{pins.includes(r.trajectory_id)?'Unpin':'Pin'}</button></li>)}</ul>
+      <button disabled={!pins.length||!catalogId} onClick={exportPins}>검토 pin과 원본 참조 내보내기</button> <span> 전체 form/scope {page?.total_count??'…'} · 검토 pin {pins.length}</span>
+      <ul>{page?.items.map(r=><li key={r.trajectory_id}><button className="text-primary underline" onClick={()=>setSelected(r)}>{parse(r.identity_json,{}).display_label||r.form_id}</button> · 유효점 {r.eligible_points}/{r.registered_points} · {r.pattern||'pattern 미기록'} <button aria-label={`검토 pin ${r.form_id}`} onClick={()=>setPins(p=>p.some(x=>x.trajectory_id===r.trajectory_id)?p.filter(x=>x.trajectory_id!==r.trajectory_id):[...p,r])}>{pins.some(x=>x.trajectory_id===r.trajectory_id)?'Unpin':'Pin'}</button></li>)}</ul>
       <button disabled={!cursor} onClick={()=>setCursor(null)}>처음</button> <button disabled={!page?.next_cursor} onClick={()=>setCursor(page!.next_cursor)}>다음 페이지</button>
       {selected&&<FormDetail key={selected.trajectory_id} orderId={orderId} row={selected}/>}
     </>}

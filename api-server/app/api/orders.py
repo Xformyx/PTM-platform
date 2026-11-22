@@ -533,7 +533,7 @@ async def resolve_order_design(body:dict=Body(...),user=Depends(get_current_user
 
 @router.get("/{order_id}/enrichment-free-evidence")
 async def get_enrichment_free_evidence(order_id:int, artifact:Optional[str]=None,
-    db:AsyncSession=Depends(get_db), user=Depends(get_current_user)):
+    db:AsyncSession=Depends(get_db), user=Depends(get_current_user), expected_run_id:Optional[str]=None):
     from ptm_shared.enrichment_free_workflow import recorded_run
     import asyncio
     result = await db.execute(select(Order).where(Order.id==order_id))
@@ -548,6 +548,8 @@ async def get_enrichment_free_evidence(order_id:int, artifact:Optional[str]=None
         raise HTTPException(status_code=404,detail='No completed primary A evidence run')
     except (ValueError,KeyError,OSError) as error:
         raise HTTPException(status_code=409,detail=str(error)) from error
+    if expected_run_id is not None and expected_run_id != record["run_id"]:
+        raise HTTPException(status_code=409, detail="published_run_changed")
     if artifact:
         if artifact not in record['artifacts']:
             raise HTTPException(status_code=404,detail='Unknown evidence artifact')
@@ -2920,7 +2922,7 @@ async def get_vector_plot_data(
     """Select measured precursors, then attach independent annotation context."""
     import asyncio
     from app.config import get_settings
-    from app.services.vector_view import load_classic_top_n_plot, load_vector_view
+    from app.services.vector_view import load_classic_top_n_plot, load_vector_view, saved_multisite_pairs
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
     if not order:
@@ -2939,7 +2941,7 @@ async def get_vector_plot_data(
         payload.update(
             inferred_receptors=cached.get("receptors", []),
             cowave_analysis=None,
-            divergence_pairs=[],
+            divergence_pairs=saved_multisite_pairs(cached, payload),
             receptor_inference_status="legacy_context" if cached else "not_requested",
         )
         return JSONResponse(payload)
@@ -2987,15 +2989,22 @@ async def refresh_vector_receptor_inference(
 
     # Load ptm_vector_data TSV
     vector_data = []
+    measured_revision = None
     for name in (f"ptm_vector_data_normalized{file_suffix}.tsv", f"ptm_vector_data_with_motifs{file_suffix}.tsv"):
         p = output_dir / name
         if p.exists():
+            from ptm_shared.report_revision import file_sha256
+            before = p.stat()
+            measured_revision = "vector-sha256:" + file_sha256(p)
             import csv
             with open(p, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f, delimiter="\t")
                 for row in reader:
                     from ptm_shared.vector_plot import project_plot_row
                     vector_data.append(project_plot_row(row))
+            after = p.stat()
+            if (before.st_ino,before.st_ctime_ns) != (after.st_ino,after.st_ctime_ns):
+                raise HTTPException(409, "measurement_revision_changed")
             break
 
     from ptm_shared.vector_plot import normalize_plot_records
@@ -4438,6 +4447,7 @@ async def refresh_vector_receptor_inference(
                 "locked": lock_receptor,
                 "cowave_analysis": _cowave_analysis,
                 "quantitative_input_sha256": quantitative_cache_key(vector_data),
+                "measurement_revision": measured_revision,
                 "divergence_pairs": _divergence_pairs[:50],  # v12.0: limit storage
                 "saved_at": __import__('datetime').datetime.utcnow().isoformat(),
             }

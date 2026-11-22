@@ -136,3 +136,33 @@ def test_constant_zero_density_preserves_every_row(tmp_path):
     data = scatter.read_scatter_overview(tmp_path, "_phospho")
     assert data["bounds"] == [0, 0, 0, 0]
     assert data["conditions"][0]["bins"] == [{"ix": 32, "iy": 32, "count": 2001}]
+
+
+def test_verified_transfer_rejects_in_place_edit_and_serves_open_version(tmp_path):
+    path = write_rows(tmp_path, [row()])
+    original = path.read_bytes()
+    expected = hashlib.sha256(original).hexdigest()
+    _, chunks, _, _ = scatter.verified_source_stream(tmp_path, "_phospho", expected)
+    path.rename(tmp_path / "previous")
+    path.write_bytes(b"next")
+    assert b"".join(chunks) == original
+    with pytest.raises(scatter.ScatterSourceChanged):
+        scatter.verified_source_stream(tmp_path, "_phospho", expected)
+    path.write_bytes(original)
+    _, chunks, _, _ = scatter.verified_source_stream(tmp_path, "_phospho", expected)
+    path.write_bytes(b"different")
+    with pytest.raises(scatter.ScatterSourceChanged):
+        list(chunks)
+
+
+def test_density_members_keep_source_row_count_and_scoped_panels(tmp_path):
+    write_rows(tmp_path,[row(arm_id="a")]*2001+[row(arm_id="b")])
+    view=scatter.read_scatter_overview(tmp_path,"_phospho")
+    assert len(view["conditions"])==2
+    dense=next(g for g in view["conditions"] if g["mode"]=="density")
+    bin=dense["bins"][0]
+    args=(tmp_path,"_phospho","adjusted",view["measurement_revision"],dense["condition"],bin["ix"],bin["iy"])
+    first=scatter.scatter_members(*args)
+    second=scatter.scatter_members(*args,after=first["next_after"])
+    assert len(first["items"])==len(second["items"])==50
+    assert first["items"][-1]["source_row"] < second["items"][0]["source_row"]

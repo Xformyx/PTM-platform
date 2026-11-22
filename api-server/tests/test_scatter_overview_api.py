@@ -57,3 +57,23 @@ def test_permission_missing_source_and_corrupt_tsv_are_not_empty_success(tmp_pat
     monkeypatch.setattr(orders, "_get_share_access", AsyncMock(return_value="read_only"))
     (root / "ptm_vector_data_with_motifs_phospho.tsv").write_text('Condition\tProtein_Log2FC\n"unterminated')
     assert client.get(url).status_code == 422
+
+
+def test_scatter_to_exact_curve_and_download_revision(tmp_path, monkeypatch):
+    client, root, write = client_for_viewer(tmp_path, monkeypatch)
+    source = root / "ptm_vector_data_normalized_phospho.tsv"
+    source.write_text("Condition\tTime_Minutes\tPrecursor.Id\tProtein_Log2FC\tPTM_ProteinAdjusted_Log2FC\tPTM_Unadjusted_Log2FC\n"
+                      "ControllerDrug\t30\tpep1\t0\t1\t2\nother\t5\tpep2\t0\t2\t2\n")
+    view=client.get("/orders/1/vector-scatter-data").json()
+    point=next(c for c in view["conditions"] if c["condition"]=="ControllerDrug")["points"][0]
+    url="/orders/1/vector-view/feature-detail"
+    request={"measurement_revision":view["measurement_revision"],"options":{"feature_id":point["feature_id"]}}
+    detail=client.post(url,json=request).json()
+    assert detail["feature"]["feature_id"]==point["feature_id"]
+    assert [c["time_minutes"] for c in detail["condition_grid"]]==[5,30]
+    assert detail["observations"][0]["ptm_protein_adjusted_log2fc"]==point["y"]
+    download="/orders/1/vector-scatter-source?sha256="+view["source"]["sha256"]
+    assert client.get(download).content==source.read_bytes()
+    source.write_text(source.read_text().replace("pep1","pep3"))
+    assert client.get(download).status_code==client.post(url,json=request).status_code==409
+    assert not write.await_count

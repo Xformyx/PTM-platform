@@ -103,3 +103,16 @@ def test_all_and_explicit_modes_keep_distinct_features(tmp_path):
     one=load_classic_top_n_plot(tmp_path,"_phospho",{"top_n_ptms":9999},mode="global_top_n",n=1)
     assert len(one["top_n_ptms"])==1
     assert one["selection"]["mode"]=="global_top_n"
+
+
+def test_multisite_uses_saved_pair_and_matching_parent_and_revision():
+    from app.services.vector_view import saved_multisite_pairs
+    a=dict(gene="K",label="K S1 · p1",position="S1",feature_id="p1",accession="P1",isoform="P1-1",fasta_taxonomy_id="9606")
+    b={**a,"label":"K T2 · p2","position":"T2","feature_id":"p2"}
+    cache={"measurement_revision":"r","divergence_pairs":[{"siteA":a["label"],"siteB":b["label"]}]}
+    def read(other,revision="r"):
+        return saved_multisite_pairs(cache,{"features":[a,other],"measurement_revision":revision})
+    assert read(b)[0]["feature_id_b"]=="p2"
+    for field,value in (("accession","P2"),("isoform","P1-2"),("fasta_taxonomy_id","10090"),("position","S1")):
+        assert not read({**b,field:value})
+    assert not read(b,"changed")

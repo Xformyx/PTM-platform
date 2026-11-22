@@ -88,7 +88,12 @@ async def runs(order_id: int, db=Depends(get_db), user=Depends(get_current_user)
 
 @router.get("/{order_id}/evidence-runs/{bundle_id}")
 async def manifest(order_id: int, bundle_id: str, db=Depends(get_db), user=Depends(get_current_user)):
-    _, bundle = await bound(db, user, order_id, bundle_id)
+    directory, bundle = await bound(db, user, order_id, bundle_id)
+    # bound() has verified the immutable artifact against the run manifest.
+    artifact = bundle["artifacts"].get("candidates")
+    if artifact:
+        manifest = json.loads((directory/artifact["filename"]).read_text()).get("manifest", {})
+        return {**bundle, "vector_measurement_revision": manifest.get("measurement_revision")}
     return bundle
 
 
