@@ -25,6 +25,18 @@ class AnalysisInterrupted(RuntimeError):
     pass
 
 
+def _admitted_runtime_matches(cfg):
+    """이 worker의 코드·의존성·참조 번들이 작업을 접수한 프로세스와 같은지 본다.
+
+    구현 대상: docs/implementation_log.md [2026-11-21] TMM worker pandas 불일치
+    사전등록: 결과 열람 후. Order 33 Re-run이 20ms 안에 superseded가 된 뒤. 탐색적.
+    primary 승격 금지.
+    해석 한계: 불일치는 계산 거절이다. 이전 revision의 kinase 결과를 바꾸지 않는다.
+    주장 금지: 이 검사로 kinase 활성, 비활성, 또는 점수 변화를 말하지 않는다.
+    """
+    return cfg["runtime"] == runtime_signature() and cfg["references"] == reference_signature()
+
+
 async def execute_production_tmm(job_id, *, session_factory=AsyncSessionLocal):
     async with session_factory() as db:
         job = await db.get(AnalysisJob, job_id)
@@ -123,8 +135,8 @@ async def execute_production_tmm(job_id, *, session_factory=AsyncSessionLocal):
         artifacts = []
         try:
             await check()
-            if cfg["runtime"] != runtime_signature() or cfg["references"] != reference_signature():
-                raise AnalysisInterrupted("superseded")
+            if not _admitted_runtime_matches(cfg):
+                raise AnalysisInterrupted("runtime_signature_mismatch")
             source = input_directory(root, job.input_revision)
             frozen = await stage("input_validation", verify_input, source)
             def candidates():

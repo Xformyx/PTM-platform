@@ -3629,4 +3629,15 @@
 - **해석 한계:** 이 문장은 후보가 비활성이라는 뜻이 아니다. 비교가 없다는 관찰이다.
 - **결정성:** 새 seed·solver·dtype 없음. 회귀 검사는 `python -m pytest workers/tests/test_companion_evidence.py`. Universe_AF는 다시 실행하지 않았다.
 
+### [2026-11-21] TMM worker pandas 불일치
+
+- **분류:** 정정
+- **대상:** `api-server/app/services/production_tmm_executor.py` `_admitted_runtime_matches`
+- **구현 대상 설계:** 신규 — 선언 먼저. 작업을 접수한 API와 실행 worker의 runtime signature가 다르면 계산하지 않는다. 그 거절 사유는 `runtime_signature_mismatch`다. 새 점수 임계 없음.
+- **사전등록 상태:** 결과 열람 후 (탐색적, primary 승격 금지). Order 33 `Korea_timecouse_drugrepositioning`의 Re-run Full Analysis가 접수 직후 `superseded`로 끝난 것을 본 뒤.
+- **내용:** 코드·참조 번들은 같았고 pandas만 API 3.1.0, worker 3.0.6이었다. 세대 교체와 의존성 불일치를 같은 `superseded`로 적지 않는다. 점수 계산식은 바꾸지 않는다.
+- **논문에서의 용도:** limitation (실행 환경). kinase 귀속 결과에는 쓰지 않는다.
+- **해석 한계:** 거절은 이전 성공 revision이 틀리다는 뜻이 아니다. 그 실행을 하지 않았다는 뜻이다.
+- **결정성:** 새 seed·solver 없음. worker pandas를 API와 같은 3.1.0으로 맞춘다. 주문 33은 다시 실행하지 않았다.
+
 

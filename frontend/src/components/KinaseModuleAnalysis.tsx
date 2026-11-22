@@ -19,7 +19,7 @@ import { featureKey, finite } from "../lib/quantitation";
  * Receives time-series data + selected PTMs from the parent TopNTimeSeriesPlot.
  */
 
-import { useState, useMemo, useCallback, useEffect, useRef, Fragment } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, Fragment, Component, type ReactNode } from "react";
 import {
   Loader2,
   Search,
@@ -256,6 +256,7 @@ interface TemporalCascadeKinase {
   ptm_count: number;
   confirmed: number;
   inferred: number;
+  selected_activity?: number | null;
 }
 
 interface TemporalCascadeTimepoint {
@@ -265,6 +266,7 @@ interface TemporalCascadeTimepoint {
   cowave_ids: number[];
   cowave_labels: string[];
   kinases: TemporalCascadeKinase[];
+  count_label?: "ptms" | "families";
 }
 
 interface KinaseActivityEntry {
@@ -1341,6 +1343,9 @@ export default function KinaseModuleAnalysis({
 
         {/* ── Tab: Cascade View / Ubi Cascade ────────────────────────────────────── */}
         {activeTab === "cascade" && (
+          <div className="space-y-4">
+          <StoredCascadeList cascade={globalKinaseResult?.temporal_cascade as Record<string, any> | undefined} />
+          <CascadePaneBoundary>
           <CascadeView
             modules={coWaveModules}
             motifAnnotations={motifAnnotations}
@@ -1355,6 +1360,8 @@ export default function KinaseModuleAnalysis({
             highlightedKinase={effectiveHighlightedKinase}
             kinaseToReceptors={kinaseToReceptors}
           />
+          </CascadePaneBoundary>
+          </div>
         )}
 
         {/* ── Tab: Signal Flow ────────────────────────────────────────────────────── */}
@@ -1886,6 +1893,123 @@ function collectAllKinases(annotation: MotifAnnotationResponse | undefined): { k
   return result;
 }
 
+function normalizeTemporalCascade(raw: TemporalCascade | Record<string, any> | null | undefined): TemporalCascade | null {
+  const source = (raw || {}) as Record<string, any>;
+  const timepoints = Array.isArray(source.timepoints) ? source.timepoints : [];
+  if (!timepoints.length) return null;
+  return {
+    timepoints: timepoints.map((tp: any) => {
+      const rows = Array.isArray(tp.kinases) ? tp.kinases : Array.isArray(tp.active_kinases) ? tp.active_kinases : [];
+      return {
+        condition: String(tp.condition || tp.timepoint || "unlabeled"),
+        minutes: Number(tp.minutes || 0),
+        ptm_count: typeof tp.ptm_count === "number" ? tp.ptm_count : rows.length,
+        count_label: typeof tp.ptm_count === "number" ? "ptms" : "families",
+        cowave_ids: Array.isArray(tp.cowave_ids) ? tp.cowave_ids : [],
+        cowave_labels: Array.isArray(tp.cowave_labels) ? tp.cowave_labels : [],
+        kinases: rows.map((k: any) => ({
+          kinase: String(k.kinase || k.canonical || "candidate"),
+          canonical: String(k.canonical || k.kinase || "candidate"),
+          sources: Array.isArray(k.sources) ? k.sources : [],
+          ptm_count: typeof k.ptm_count === "number" ? k.ptm_count : 0,
+          confirmed: typeof k.confirmed === "number" ? k.confirmed : 0,
+          inferred: typeof k.inferred === "number" ? k.inferred : 0,
+          selected_activity: typeof k.selected_activity === "number" ? k.selected_activity : null,
+        })),
+      };
+    }),
+    kinase_activity: Array.isArray(source.kinase_activity) ? source.kinase_activity : [],
+    cascade_flow: (Array.isArray(source.cascade_flow) ? source.cascade_flow : []).map((flow: any) => ({
+      from: String(flow.from || flow.from_timepoint || ""),
+      to: String(flow.to || flow.to_timepoint || ""),
+      shared_kinases: flow.shared_kinases || flow.persistent_kinases || [],
+      new_kinases: flow.new_kinases || [],
+      lost_kinases: flow.lost_kinases || [],
+    })),
+  };
+}
+
+function StoredCascadeList({ cascade }: { cascade: Record<string, any> | null | undefined }) {
+  const timepoints = Array.isArray(cascade?.timepoints) ? cascade.timepoints : [];
+  if (!timepoints.length) {
+    return (
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertTitle>No sampled-condition cascade is stored</AlertTitle>
+        <AlertDescription className="text-xs">
+          The current analysis revision has no temporal cascade timepoints. Cluster detection on the chart does not create that record.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  const flow = Array.isArray(cascade?.cascade_flow) ? cascade.cascade_flow : [];
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Contribution-weighted substrate footprint by sampled condition. The number is the stored weighted sum. It is not a PTM count and it does not establish catalytic activity.
+      </p>
+      <div className="grid gap-2 md:grid-cols-3">
+        {timepoints.map((tp: any, index: number) => {
+          const label = String(tp?.condition || tp?.timepoint || `condition ${index + 1}`);
+          const rows = Array.isArray(tp?.kinases) ? tp.kinases : Array.isArray(tp?.active_kinases) ? tp.active_kinases : [];
+          return (
+            <div key={`${label}-${index}`} className="rounded-lg border bg-card p-3 space-y-2">
+              <div className="text-sm font-semibold">{label}</div>
+              <div className="text-[10px] text-muted-foreground">{rows.length} candidate families</div>
+              <div className="flex flex-wrap gap-1">
+                {rows.map((row: any, rowIndex: number) => {
+                  const name = String(row?.kinase || row?.canonical || "candidate");
+                  const weight = typeof row?.selected_activity === "number" ? row.selected_activity.toFixed(2) : null;
+                  return (
+                    <span key={`${name}-${rowIndex}`} className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+                      {name}{weight ? ` ${weight}` : ""}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {flow.length > 0 && (
+        <div className="text-[11px] space-y-1">
+          {flow.map((step: any, index: number) => {
+            const persistent = step?.shared_kinases || step?.persistent_kinases || [];
+            const added = step?.new_kinases || [];
+            const lost = step?.lost_kinases || [];
+            const from = step?.from || step?.from_timepoint || "";
+            const to = step?.to || step?.to_timepoint || "";
+            return (
+              <div key={`${from}-${to}-${index}`}>
+                <span className="font-medium">{from} → {to}.</span>{" "}
+                Persistent {Array.isArray(persistent) ? persistent.length : 0}, new {Array.isArray(added) ? added.length : 0}, lost {Array.isArray(lost) ? lost.length : 0}.
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+class CascadePaneBoundary extends Component<{ children: ReactNode }, { message: string | null }> {
+  state = { message: null as string | null };
+  static getDerivedStateFromError(error: Error) {
+    return { message: error?.message || "Temporal context failed to render" };
+  }
+  render() {
+    if (this.state.message) {
+      return (
+        <Alert variant="destructive">
+          <AlertTitle>Temporal context could not be drawn</AlertTitle>
+          <AlertDescription className="text-xs">{this.state.message}</AlertDescription>
+        </Alert>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function CascadeView({
   modules,
   motifAnnotations,
@@ -1916,18 +2040,8 @@ function CascadeView({
   const [expandedTimepoint, setExpandedTimepoint] = useState<string | null>(null);
   const [showSwimlane, setShowSwimlane] = useState(true);
 
-  if (modules.length === 0) {
-    return (
-      <div className="text-center py-6 text-sm text-muted-foreground">
-        <BarChart3 className="h-8 w-8 mx-auto mb-2 opacity-40" />
-        Run {isUbi ? "temporal module" : "temporal phosphosite cluster"} detection first (enable PTMs in the chart above).
-        {isUbi ? "Temporal context view summarizes E3-ligase module and ubiquitylation patterns." : "Temporal context view summarizes kinase-footprint patterns across sampled conditions."}
-      </div>
-    );
-  }
-
-  const tc = globalKinaseResult?.temporal_cascade;
-  const hasTemporalData = tc && tc.timepoints && tc.timepoints.length > 0;
+  const tc = normalizeTemporalCascade(globalKinaseResult?.temporal_cascade);
+  const hasTemporalData = Boolean(tc);
 
   // Fallback: build basic temporal info from co-wave modules if no global kinase result
   const sortedModules = [...modules].sort(
@@ -2055,10 +2169,10 @@ function CascadeView({
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-1">
                               <Badge variant="outline" className="text-[9px]">
-                                {tp.ptm_count} PTMs
+                                {tp.count_label === "families" ? `${tp.kinases.length} families` : `${tp.ptm_count} PTMs`}
                               </Badge>
                               <Badge variant="outline" className="text-[9px] text-blue-600 dark:text-blue-400 border-blue-300">
-                                {tp.kinases.length} kinases
+                                {tp.kinases.length} candidates
                               </Badge>
                             </div>
                             {isExpanded ? <ChevronUp className="h-3 w-3 text-muted-foreground" /> : <ChevronDown className="h-3 w-3 text-muted-foreground" />}
@@ -2089,12 +2203,14 @@ function CascadeView({
                                         ? "bg-blue-100 dark:bg-blue-800/30 text-blue-700 dark:text-blue-300 border border-blue-400"
                                         : SWIMLANE_COLORS[colorIdx].light
                                   }`}
-                                  title={`${k.kinase}: ${k.ptm_count} PTMs (${k.confirmed} confirmed, ${k.inferred} inferred)\nSources: ${k.sources.join(", ")}${isPersistent ? "\nPersistent across timepoints" : ""}${receptorSources.length ? "\nUpstream receptors: " + receptorSources.join(", ") : ""}`}
+                                  title={k.selected_activity != null
+                                    ? `${k.kinase}: weighted substrate-footprint sum ${k.selected_activity.toFixed(2)}. This is not catalytic activity.`
+                                    : `${k.kinase}: ${k.ptm_count} PTMs (${k.confirmed} confirmed, ${k.inferred} inferred)\nSources: ${k.sources.join(", ")}${isPersistent ? "\nPersistent across timepoints" : ""}${receptorSources.length ? "\nUpstream receptors: " + receptorSources.join(", ") : ""}`}
                                 >
                                   {isPersistent && <Layers className="h-2.5 w-2.5" />}
                                   {isHighlighted && <Activity className="h-2.5 w-2.5 text-yellow-600 dark:text-yellow-300" />}
                                   {k.kinase}
-                                  <span className="opacity-60">({k.ptm_count})</span>
+                                  <span className="opacity-60">({k.selected_activity != null ? k.selected_activity.toFixed(2) : k.ptm_count})</span>
                                   {receptorSources.length > 0 && (
                                     <span
                                       className="ml-0.5 text-[8px] bg-sky-200 dark:bg-sky-800/50 text-sky-700 dark:text-sky-300 px-0.5 rounded"
@@ -2311,7 +2427,7 @@ function CascadeView({
           <div className={`bg-gradient-to-br ${isUbi ? "from-orange-50/50 to-amber-50/50 dark:from-orange-950/20 dark:to-amber-950/20" : "from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20"} rounded-lg p-3 space-y-3`}>
             <div className="flex items-center gap-2 text-xs font-medium">
               <GitBranch className={`h-3.5 w-3.5 ${isUbi ? "text-orange-500" : "text-indigo-500"}`} />
-              {isUbi ? "Ubiquitylation Cascade Flow Summary" : "Signaling Cascade Flow Summary"}
+              {isUbi ? "Ubiquitylation Cascade Flow Summary" : "Sampled-condition footprint transitions"}
             </div>
 
             {/* Flow text */}
